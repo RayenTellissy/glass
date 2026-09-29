@@ -95,7 +95,7 @@ Size target: installers around 30 MB, not counting asset packs and models, which
   - [ ] `proto-gpu` on a GTX 1660 class GPU (needs-human: no NVIDIA hardware available locally)
 - [x] Prototype `proto-decode`: FFmpeg hardware decode of 4K H.264 to a `wgpu` texture on macOS. Done when: 60 fps sustained with under 5% CPU per stream
 - [ ] Same prototype on Windows via D3D11VA. Done when: same budget (needs-human: no Windows PC available locally; port proto-decode to D3D11VA on one)
-- [ ] Write `docs/ARCHITECTURE.md`: threading model, data flow diagram, crate layout, cache design, the defaults table above
+- [~] Write `docs/ARCHITECTURE.md`: threading model, data flow diagram, crate layout, cache design, the defaults table above
 - [ ] Write `docs/DECISIONS.md` (Decision Log) with the entries created so far
 - [ ] Delete the prototypes or move them to `experiments/`
 
