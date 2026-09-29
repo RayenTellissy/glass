@@ -54,10 +54,13 @@ json_or_null() {
     if [ "$1" = "null" ]; then echo "null"; else echo "\"$1\""; fi
 }
 
-# add_entry file kind codec width height frame_rate duration pix_fmt vfr frames audio_codec audio_rate audio_channels
+# add_entry file kind codec width height frame_rate duration pix_fmt vfr frames audio_codec audio_rate audio_channels [rotation [timecode]]
+# rotation is the display matrix's counter-clockwise angle in degrees (default 0), timecode
+# the first frame's SMPTE timecode tag (default none).
 add_entry() {
     local file=$1 kind=$2 codec=$3 width=$4 height=$5 rate=$6 duration=$7 pix_fmt=$8 vfr=$9
     local frames=${10} a_codec=${11} a_rate=${12} a_channels=${13}
+    local rotation=${14:-0} timecode=${15:-null}
     local audio="null"
     if [ "$a_codec" != "null" ]; then
         audio="{ \"codec\": \"$a_codec\", \"sample_rate\": $a_rate, \"channels\": $a_channels }"
@@ -73,9 +76,11 @@ add_entry() {
       \"pix_fmt\": $(json_or_null "$pix_fmt"),
       \"vfr\": $vfr,
       \"frames\": $frames,
-      \"audio\": $audio
+      \"audio\": $audio,
+      \"rotation\": $rotation,
+      \"timecode\": $(json_or_null "$timecode")
     }")
-    VERIFY_JOBS+=("$file|$kind|$codec|$width|$height|$rate|$duration|$pix_fmt|$vfr|$frames|$a_codec|$a_rate|$a_channels")
+    VERIFY_JOBS+=("$file|$kind|$codec|$width|$height|$rate|$duration|$pix_fmt|$vfr|$frames|$a_codec|$a_rate|$a_channels|$rotation|$timecode")
 }
 
 # make file -- ffmpeg output arguments (inputs included). Writes to a temporary name
@@ -164,6 +169,28 @@ make still_1080p.jpg \
     -f lavfi -i "testsrc2=size=1920x1080" -frames:v 1 -pix_fmt yuvj420p -q:v 3
 add_entry still_1080p.jpg image mjpeg 1920 1080 null null yuvj420p false 1 null null null
 
+# Rotation and timecode: a portrait phone clip stores landscape pixels plus a display
+# matrix, and camera files carry a start timecode (here a QuickTime tmcd track). Written
+# in two passes because -display_rotation applies to an input and is kept by stream copy.
+ROT_FILE="rotated_timecode_h264_640x360_25.mov"
+if [ -e "$OUT/$ROT_FILE" ] && [ "$FORCE" -eq 0 ]; then
+    SKIPPED=$((SKIPPED + 1))
+    printf "  skip  %s\n" "$ROT_FILE"
+else
+    ROT_TMP="$OUT/.partial-unrotated-$ROT_FILE"
+    "$FFMPEG" -hide_banner -loglevel error -nostdin -y \
+        -f lavfi -i "testsrc2=size=640x360:rate=25:duration=1" \
+        -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 25 -f mov "$ROT_TMP"
+    "$FFMPEG" -hide_banner -loglevel error -nostdin -y \
+        -display_rotation 90 -i "$ROT_TMP" -c copy -timecode 01:02:03:04 \
+        -movflags +faststart -f mov "$OUT/.partial-$ROT_FILE"
+    rm -f "$ROT_TMP"
+    mv -f "$OUT/.partial-$ROT_FILE" "$OUT/$ROT_FILE"
+    GENERATED=$((GENERATED + 1))
+    printf "  made  %s\n" "$ROT_FILE"
+fi
+add_entry "$ROT_FILE" video h264 640 360 25/1 1 yuv420p false null null null null 90 01:02:03:04
+
 SEQ_DIR="sequence_640x360_24"
 if [ -d "$OUT/$SEQ_DIR" ] && [ "$FORCE" -eq 0 ]; then
     SKIPPED=$((SKIPPED + 1))
@@ -241,7 +268,7 @@ is_vfr() {
 
 echo "Verifying against MANIFEST.json"
 for job in "${VERIFY_JOBS[@]}"; do
-    IFS="|" read -r file kind codec width height rate duration pix_fmt vfr frames a_codec a_rate a_channels <<<"$job"
+    IFS="|" read -r file kind codec width height rate duration pix_fmt vfr frames a_codec a_rate a_channels rotation timecode <<<"$job"
     before=$FAILURES
     path="$OUT/$file"
     input_args=()
@@ -265,6 +292,10 @@ for job in "${VERIFY_JOBS[@]}"; do
 
     if [ "$kind" = "video" ]; then
         check_eq "$file" vfr "$(is_vfr "$path")" "$vfr"
+        r=$(probe "$path" v:0 "stream_side_data=rotation")
+        check_eq "$file" rotation "$(field "$r" rotation)" "$([ "$rotation" = "0" ] || echo "$rotation")"
+        t=$(probe "$path" v:0 "stream_tags=timecode")
+        check_eq "$file" timecode "$(field "$t" "TAG:timecode")" "$([ "$timecode" = "null" ] || echo "$timecode")"
     fi
 
     if [ "$kind" = "image_sequence" ]; then

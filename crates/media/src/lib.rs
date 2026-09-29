@@ -18,12 +18,16 @@ mod error;
 mod ffi;
 mod format;
 pub mod log;
+mod probe;
 mod time;
 
 pub use decode::{AudioFrame, Decoder, DecoderOptions, Frame, Plane, Received, VideoFrame};
 pub use demux::{Demuxer, Packet, StreamSummary};
 pub use error::{FfmpegError, MediaError, Result};
 pub use format::{ColourInfo, ColourRange, Hdr, MediaKind, PixelFormat, SampleFormat, SampleType};
+pub use probe::{
+    AudioInfo, CodecInfo, MediaInfo, StreamDetail, StreamInfo, VfrScan, VfrSource, VideoInfo, probe,
+};
 pub use time::{Rational, Timestamp};
 
 /// Initialises FFmpeg once per process and routes its log into `tracing` (see

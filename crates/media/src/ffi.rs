@@ -10,6 +10,8 @@
 use std::ffi::{CStr, c_char, c_int, c_void};
 
 use ffmpeg::ffi as sys;
+
+use crate::time::Rational;
 use ffmpeg_next as ffmpeg;
 
 // ---- Logging ------------------------------------------------------------------------------
@@ -128,6 +130,42 @@ pub(crate) fn pix_fmt_info(format: ffmpeg::format::Pixel) -> Option<PixFmtInfo> 
     })
 }
 
+/// The pixel format stored as a plain integer in codec parameters, if it is in range.
+fn pixel_from_int(value: c_int) -> ffmpeg::format::Pixel {
+    let nb = sys::AVPixelFormat::AV_PIX_FMT_NB as c_int;
+    if (0..nb).contains(&value) {
+        // SAFETY: AVPixelFormat is a C enum with consecutive values from -1 (NONE) to
+        // AV_PIX_FMT_NB, and `value` was checked to lie inside that range.
+        let raw = unsafe { std::mem::transmute::<c_int, sys::AVPixelFormat>(value) };
+        raw.into()
+    } else {
+        ffmpeg::format::Pixel::None
+    }
+}
+
+fn sample_from_int(value: c_int) -> ffmpeg::format::Sample {
+    let nb = sys::AVSampleFormat::AV_SAMPLE_FMT_NB as c_int;
+    if (0..nb).contains(&value) {
+        // SAFETY: as for pixel formats: consecutive values from -1 to AV_SAMPLE_FMT_NB.
+        let raw = unsafe { std::mem::transmute::<c_int, sys::AVSampleFormat>(value) };
+        raw.into()
+    } else {
+        ffmpeg::format::Sample::None
+    }
+}
+
+/// FFmpeg's name for a codec profile (`High`, `Main 10`, `422`), when it has one.
+pub(crate) fn profile_name(codec: ffmpeg::codec::Id, profile: c_int) -> Option<&'static str> {
+    // SAFETY: returns null or a string from the codec's static profile table.
+    unsafe { static_str(sys::avcodec_profile_name(codec.into(), profile)) }
+}
+
+/// Rotation in degrees, counter-clockwise, of a display matrix, as FFmpeg computes it.
+pub(crate) fn display_rotation(matrix: &[i32; 9]) -> f64 {
+    // SAFETY: reads exactly nine i32 values from the borrowed array.
+    unsafe { sys::av_display_rotation_get(matrix.as_ptr()) }
+}
+
 pub(crate) fn chroma_location_name(location: ffmpeg::chroma::Location) -> Option<&'static str> {
     if location == ffmpeg::chroma::Location::Unspecified {
         return None;
@@ -172,4 +210,110 @@ pub(crate) fn format_start_time(input: &ffmpeg::format::context::Input) -> Optio
     // SAFETY: the Input owns a valid AVFormatContext for the duration of the borrow.
     let start = unsafe { (*input.as_ptr()).start_time };
     (start != sys::AV_NOPTS_VALUE).then_some(start)
+}
+
+/// The fields of a stream's `AVStream` and `AVCodecParameters` that `ffmpeg-next` does
+/// not expose, copied out.
+#[derive(Clone, Debug)]
+pub(crate) struct StreamParams {
+    pub codec_tag: u32,
+    pub profile: c_int,
+    pub level: c_int,
+    pub bits_per_raw_sample: c_int,
+    pub bits_per_coded_sample: c_int,
+    pub pixel_format: ffmpeg::format::Pixel,
+    pub sample_format: ffmpeg::format::Sample,
+    pub width: c_int,
+    pub height: c_int,
+    /// The stream's sample aspect ratio, or the codec's when the container has none.
+    pub sample_aspect_ratio: Rational,
+    pub field_order: ffmpeg::FieldOrder,
+    pub primaries: ffmpeg::color::Primaries,
+    pub transfer: ffmpeg::color::TransferCharacteristic,
+    pub matrix: ffmpeg::color::Space,
+    pub range: ffmpeg::color::Range,
+    pub chroma_location: ffmpeg::chroma::Location,
+    pub sample_rate: c_int,
+    pub channels: c_int,
+    pub channel_layout: Option<String>,
+    pub frame_size: c_int,
+    pub display_matrix: Option<[i32; 9]>,
+    pub mastering_display: bool,
+    pub content_light_level: bool,
+    pub dovi: bool,
+}
+
+pub(crate) fn stream_params(stream: &ffmpeg::format::stream::Stream) -> StreamParams {
+    // SAFETY: the Stream borrows a live AVFormatContext, so the AVStream and its codecpar
+    // are valid for this call. Side data entries are owned by codecpar.
+    unsafe {
+        let st = &*stream.as_ptr();
+        let par = &*st.codecpar;
+        let side = |kind: sys::AVPacketSideDataType| {
+            sys::av_packet_side_data_get(par.coded_side_data, par.nb_coded_side_data, kind).as_ref()
+        };
+        let display_matrix = side(sys::AVPacketSideDataType::AV_PKT_DATA_DISPLAYMATRIX)
+            .filter(|sd| sd.size >= 9 * size_of::<i32>() && !sd.data.is_null())
+            .map(|sd| std::ptr::read_unaligned(sd.data as *const [i32; 9]));
+        let stream_sar = Rational::from(ffmpeg::Rational::from(st.sample_aspect_ratio));
+        let codec_sar = Rational::from(ffmpeg::Rational::from(par.sample_aspect_ratio));
+        StreamParams {
+            codec_tag: par.codec_tag,
+            profile: par.profile,
+            level: par.level,
+            bits_per_raw_sample: par.bits_per_raw_sample,
+            bits_per_coded_sample: par.bits_per_coded_sample,
+            pixel_format: if par.codec_type == sys::AVMediaType::AVMEDIA_TYPE_VIDEO {
+                pixel_from_int(par.format)
+            } else {
+                ffmpeg::format::Pixel::None
+            },
+            sample_format: if par.codec_type == sys::AVMediaType::AVMEDIA_TYPE_AUDIO {
+                sample_from_int(par.format)
+            } else {
+                ffmpeg::format::Sample::None
+            },
+            width: par.width,
+            height: par.height,
+            sample_aspect_ratio: if stream_sar.is_valid() {
+                stream_sar
+            } else {
+                codec_sar
+            },
+            field_order: par.field_order.into(),
+            primaries: par.color_primaries.into(),
+            transfer: par.color_trc.into(),
+            matrix: par.color_space.into(),
+            range: par.color_range.into(),
+            chroma_location: par.chroma_location.into(),
+            sample_rate: par.sample_rate,
+            channels: par.ch_layout.nb_channels,
+            channel_layout: channel_layout_description(&par.ch_layout),
+            frame_size: par.frame_size,
+            display_matrix,
+            mastering_display: side(
+                sys::AVPacketSideDataType::AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
+            )
+            .is_some(),
+            content_light_level: side(sys::AVPacketSideDataType::AV_PKT_DATA_CONTENT_LIGHT_LEVEL)
+                .is_some(),
+            dovi: side(sys::AVPacketSideDataType::AV_PKT_DATA_DOVI_CONF).is_some(),
+        }
+    }
+}
+
+/// Timestamps of the first `limit` entries of a stream's seek index, in stream time base.
+/// Demuxers that read a full sample table up front (MOV and MP4) index every frame, so
+/// this lists frame times without reading any packet; others index keyframes or nothing.
+pub(crate) fn index_timestamps(stream: &ffmpeg::format::stream::Stream, limit: usize) -> Vec<i64> {
+    // SAFETY: the Stream borrows a live AVFormatContext; the index is only read, and each
+    // entry pointer is used before any other call on the stream.
+    unsafe {
+        let st = stream.as_ptr() as *mut sys::AVStream;
+        let count = sys::avformat_index_get_entries_count(st).max(0) as usize;
+        (0..count.min(limit))
+            .filter_map(|i| sys::avformat_index_get_entry(st, i as c_int).as_ref())
+            .map(|e| e.timestamp)
+            .collect()
+    }
 }

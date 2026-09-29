@@ -20,7 +20,7 @@ Priority when goals conflict: **speed, then features, then size.**
 | --- | --- | --- | --- |
 | UI frame | under 8 ms at 120 Hz (8.33 ms per refresh) | Phase 1 frame-time monitor, every task | proto-ui: 200 clips on 10 tracks, UI-thread CPU (UI build + tessellation + paint + `Queue::submit`) median 0.37 ms, p99 0.74 ms offscreen; eframe `cpu_usage` in a window (excludes submit) median 1.37 ms, p99 3.00 ms |
 | Scrub latency | under 50 ms | Phase 3 scrub benchmark | not measured yet |
-| Project open | under 1 s | Phase 16 open benchmark | not measured yet |
+| Project open | under 1 s | Phase 16 open benchmark | not measured yet as a whole; `media` probe per file (`cargo bench -p media --bench probe`, M2): 0.16 ms ProRes MOV, 0.79 ms 640x360 H.264 MOV, 3.7 ms 1080p H.264 MP4, 4.0 ms VP9 WebM, 13.2 ms 4K H.264 MP4, 10.3 ms 1080p PNG |
 | Cold start | under 1.5 s | Phase 16 benchmarks | not measured yet |
 | Installer size | about 30 MB, excluding asset packs and models | Phase 1 size check (`scripts/size-check.sh` against `size-budget.toml`, 30 MiB per DMG, MSI, MSIX and AppImage) after each installer build in `package.yml` | arm64 DMG 11.99 MiB with the app icons (local, M2); this budget gives way to features and speed with a Decision Log entry |
 

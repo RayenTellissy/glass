@@ -1009,6 +1009,7 @@ name = "media"
 version = "0.1.0"
 dependencies = [
  "assets",
+ "criterion",
  "ffmpeg-next",
  "serde_json",
  "thiserror",
