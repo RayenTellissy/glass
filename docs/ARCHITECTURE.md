@@ -83,7 +83,7 @@ Rules:
 - `audio` has no dependencies inside the workspace, so the real-time code stays small and auditable.
 - `unsafe` is allowed only in `media::ffi` (FFmpeg, VideoToolbox, D3D11VA, NVDEC, VAAPI calls) and `render::interop` (Metal, DX12 and Vulkan texture import through wgpu-hal). Everything else is safe Rust; clippy runs with `-D warnings`.
 
-Feature flags (Phase 1): `codec-av1`, `codec-prores-sw`, `ai-whisper`, `ai-segmentation`. Off by default for fast local builds, all on in release builds.
+Feature flags (Phase 1): `codec-av1`, `codec-prores-sw`, `ai-whisper`, `ai-segmentation`. Off by default for fast local builds, all on in release builds. The codec flags live in `media` and the AI flags in `engine` (until an AI module exists); `engine` forwards the codec flags and `app` forwards all four. Cargo features cannot depend on the build profile, so release builds pass `--features release-full`, an `app` feature that turns on all four. `crates/app/tests/features.rs` checks that each flag reaches its owner (`cargo test -p app --features release-full`).
 
 ---
 

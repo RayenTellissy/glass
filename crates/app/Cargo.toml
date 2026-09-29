@@ -10,6 +10,15 @@ publish.workspace = true
 name = "glass"
 path = "src/main.rs"
 
+[features]
+default = []
+codec-av1 = ["engine/codec-av1"]
+codec-prores-sw = ["engine/codec-prores-sw"]
+ai-whisper = ["engine/ai-whisper"]
+ai-segmentation = ["engine/ai-segmentation"]
+# Every optional feature. Release builds pass `--features release-full`.
+release-full = ["codec-av1", "codec-prores-sw", "ai-whisper", "ai-segmentation"]
+
 [dependencies]
 engine.workspace = true
 ui.workspace = true

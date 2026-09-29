@@ -13,3 +13,13 @@ source scripts/dev-env.sh
 ```
 
 It exports `CARGO_BUILD_JOBS=4` and, when `FFMPEG_DIR` is not already set and Homebrew is installed, points `FFMPEG_DIR` at Homebrew's FFmpeg (`brew install ffmpeg`), which the FFmpeg bindings build against. No machine-specific path is committed to the repo.
+
+### Feature flags
+
+`codec-av1`, `codec-prores-sw`, `ai-whisper` and `ai-segmentation` are off by default so local builds stay fast. Release builds turn all of them on with the `app` feature `release-full`, because Cargo features cannot follow the build profile:
+
+```sh
+cargo build --release --bin glass --features release-full
+```
+
+To check that every flag still resolves: `cargo test -p app --features release-full`.
