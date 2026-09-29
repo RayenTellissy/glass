@@ -46,7 +46,7 @@ The Cargo workspace (Phase 1) has ten crates, each in `crates/<name>/` with a pa
 | `engine` | Scheduler, playback state, master-clock consumer, timeline evaluation into render graphs, dirty-range invalidation, rendered-frame cache policy, look-ahead, background render, export pipeline, analysis job system. Logging setup and the in-memory log ring (`engine::logging`), used by every binary and read by the debug panel. | `project`, `media`, `render`, `audio`, `plugins`, `assets` | no |
 | `media` | Safe wrapper over `ffmpeg-next`: demux, decode, encode, probe, hardware decode sessions, VFR maps, GOP index, still images, audio decode and resampling (`rubato`), analysis algorithms (thumbnails, waveforms, scene cuts, silence, beats, loudness), proxy generation. Produces platform frame handles, never wgpu objects. | `assets` (codec presets only) | only in `media::ffi` |
 | `render` | Holds the shared wgpu device and queue it receives at startup (it never creates them), render graph compiler, compositor nodes, WGSL shaders, text via `cosmic-text`, vector shapes, masks, LUTs, scopes, VRAM frame cache storage, async readback ring, import of platform frame handles as textures, and the presentation API `ui` uses to show the preview. | `media` (frame handle and colour metadata types), `assets` | only in the platform interop module (`render::interop`) |
-| `project` | The document: immutable edit tree (`im`), sequences, tracks, clips, transitions, keyframes, effect parameter schemas, project settings, undo history, save and load (`serde_json`), schema versions and migrations, autosave diffs. Pure data, no I/O threads, no GPU. | none | no |
+| `project` | The document: immutable edit tree (`imbl`), sequences, tracks, clips, transitions, keyframes, effect parameter schemas, project settings, undo history, save and load (`serde_json`), schema versions and migrations, autosave diffs. Pure data, no I/O threads, no GPU. | none | no |
 | `audio` | `cpal` device I/O, the real-time callback, mixer graph, audio effects, meters, master clock, voice-over recording. | none (receives f32 blocks through ring buffers) | no |
 | `plugins` | `wasmtime` host for Component Model effect, transition and title plugins, plugin manager, resource limits. Defines the host traits (edit operations, texture access, time and project info) that `engine` implements, so plugins and scripts reach the engine without a dependency cycle. Later: Lua scripting, optional Python bridge, VST3/AU helper-process protocol. | `project` (parameter schema types) | no |
 | `assets` | Paths and loaders for bundled data: `assets/theme/`, `assets/i18n/`, fonts, `assets/transitions/`, `assets/titles/`, LUTs; the `t!()` macro; asset pack install locations. | none | no |
@@ -208,7 +208,7 @@ Probe runs on the decode pool and returns in milliseconds, so a clip appears in 
 ```mermaid
 flowchart LR
     A["User gesture in ui"] --> B["Edit command"]
-    B --> C["New immutable root (im), pushed to undo list"]
+    B --> C["New immutable root (imbl), pushed to undo list"]
     C --> D["Scheduler diffs old and new roots"]
     D --> E["Dirty ranges: affected segments only"]
     E --> F["Invalidate those frame cache entries"]
@@ -263,8 +263,9 @@ flowchart LR
 
 ## 5. Project model
 
-- **Immutable edit tree.** The project is a tree of `im` persistent collections: project settings, sequences, tracks (video, audio, subtitle, adjustment), clips, gaps, transitions, markers, keyframe curves, effect stacks. Every edit produces a new root that shares all unchanged nodes with the old one.
-- **Undo** is a list of roots, grouped per gesture, unlimited in depth. Undo and redo move an index; nothing is recomputed.
+- **Immutable edit tree.** The project is a tree of `imbl` persistent collections (the maintained fork of `im`) holding `Arc` nodes: project settings, sequences, tracks (video, audio, subtitle, adjustment), clips, gaps, transitions, markers, keyframe curves, effect stacks. Every edit (`project::edit`) is a pure function from a root to a new root that shares all unchanged nodes with the old one (`Arc::ptr_eq` holds for them), or a typed `EditError` (overlap, off-grid time, unknown id, ...). Every node has a `u64` id from the project's own counter, unique across node kinds and never reused.
+- **Time.** `project::Time` is an exact rational number of seconds (`num/den`, reduced, serialised as `"1001/30000"`). Items on video, subtitle and adjustment tracks sit on the sequence's frame grid, items on audio tracks on its sample grid; edits that break this are rejected. `project` may not depend on `media`, so it has its own `Rational` (same shape and serde form as `media::Rational`) and `Time`; `engine` converts between them.
+- **Undo** (`project::History`) is a list of roots, grouped per gesture (begin, any number of updates, end; a drag is one step), unlimited in depth. Undo and redo move an index; nothing is recomputed. Repeated discrete edits (nudges) coalesce by a caller-chosen key. Each step carries an `EditLabel` whose i18n key (`edit.label.*`) names it in the Edit menu, as in 'Undo Trim'. `History::memory_stats` counts shared nodes once; 100,000 steps on a 1000-clip project cost about one changed path each (`crates/project/tests/history_memory.rs`).
 - **Autosave** writes diffs every 10 s to the cache folder on `glass-io`. On the next launch after a crash, the recovery prompt offers to restore them.
 - **Files** are pretty-printed JSON (`serde_json`) with a stable key order, so projects diff cleanly in git. A 1000-clip project must round-trip byte-identically (Phase 5 Done when).
 - **Versioned schema.** Every file carries a schema version. Loading runs one migration function per version step, each tested against fixtures from every prior version.
@@ -389,7 +390,7 @@ The table below is PLAN.md's defaults table, copied verbatim, with a Status colu
 | HW decode | VideoToolbox (macOS), D3D11VA then NVDEC (Windows), VAAPI (Linux), software fallback | software | VideoToolbox confirmed by proto-decode: 4K60 H.264 at 60 fps with a 3-frame look-ahead, 0 late, 2.06% of the machine against under 5% per stream. D3D11VA pending hardware (Windows PC). NVDEC, VAAPI and the software fallback adopted without prototype |
 | Audio I/O | `cpal` | none | Adopted without prototype |
 | Text shaping | `cosmic-text` | `rustybuzz` + `swash` | Confirmed by proto-gpu through `glyphon` (built on `cosmic-text`): 4K dissolve plus text re-shaped every frame, total GPU p99 0.77 ms, wall p99 1.12 ms (per-pass timestamps overlap on Apple GPUs, so no separate text-pass figure) |
-| Persistent data | `im` crate for the edit tree, `serde_json` for files | `rpds` | Adopted without prototype; Phase 5 round-trip and undo tests confirm it |
+| Persistent data | `im` crate for the edit tree, `serde_json` for files | `rpds` | Changed to `imbl`, the maintained fork of `im` (Decision Log, Phase 5); Phase 5 round-trip and undo tests confirm it |
 | Plugins | `wasmtime`, Component Model ABI | none | Adopted without prototype |
 | Speech-to-text | `whisper-rs`, models downloaded on demand | none | Adopted without prototype |
 | Packaging | `cargo-dist` | hand-written CI | Adopted without prototype |

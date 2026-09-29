@@ -25,6 +25,9 @@ ui = { path = "crates/ui" }
 
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+# Persistent collections with structural sharing for the edit tree (`project`): imbl, the
+# maintained fork of `im` (which is unmaintained and has an unsoundness advisory).
+imbl = { version = "7", features = ["serde"] }
 
 # FFmpeg 9.0.x through ffmpeg-next 9, linked as shared libraries found through FFMPEG_DIR
 # (scripts/dev-env.sh). Only `media` uses it; raw FFmpeg calls stay in `media::ffi`.
