@@ -14,9 +14,9 @@
 //! Linear light is relative to SDR reference white (203 nits): BT.1886 and the pure
 //! power laws are display EOTFs, sRGB is the IEC piecewise curve, PQ is absolute
 //! (10,000 nits is about 49.3) and HLG applies the BT.2100 OOTF for a 1000-nit display
-//! (see [`media::colour`], which holds the matching CPU functions). Primaries are carried
-//! but not converted; gamut conversion into the working primaries belongs to the render
-//! graph.
+//! (see [`media::colour`], which holds the matching CPU functions). Linear output can
+//! also be taken into the working primaries in the same pass ([`YuvParams::with_gamut`]);
+//! the render graph's source node does that (see [`crate::colour`]).
 
 use media::{ColourSpace, HwFrame, HwSurfaceFormat, Matrix, PixelFormat, Range, TransferFn};
 use wgpu::util::DeviceExt;
@@ -35,6 +35,10 @@ struct Params {
     linear: u32,
     planar: u32,
     _pad: u32,
+    // Linear RGB from the frame's primaries into the working primaries.
+    gamut_r: vec4<f32>,
+    gamut_g: vec4<f32>,
+    gamut_b: vec4<f32>,
 }
 
 @group(0) @binding(0) var luma: texture_2d<f32>;
@@ -122,7 +126,8 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         vec3<f32>(1.0),
     );
     if params.linear != 0u {
-        return vec4<f32>(to_linear(e), 1.0);
+        let l = to_linear(e);
+        return vec4<f32>(dot(params.gamut_r.xyz, l), dot(params.gamut_g.xyz, l), dot(params.gamut_b.xyz, l), 1.0);
     }
     return vec4<f32>(e, 1.0);
 }
@@ -224,6 +229,9 @@ pub struct YuvParams {
     pub chroma_offset: (f32, f32),
     pub transfer: TransferFn,
     pub output: YuvOutput,
+    /// Rows of the matrix applied to linear output (identity by default): the frame's
+    /// primaries into the working primaries.
+    pub gamut: [[f32; 4]; 3],
 }
 
 impl YuvParams {
@@ -251,11 +259,20 @@ impl YuvParams {
             chroma_offset: colour.siting.offset(layout.chroma_shift),
             transfer: colour.transfer,
             output: YuvOutput::Linear,
+            gamut: crate::colour::uniform_rows(&crate::colour::IDENTITY),
         }
     }
 
     pub fn with_output(self, output: YuvOutput) -> Self {
         Self { output, ..self }
+    }
+
+    /// Converts linear output with `matrix` (see [`crate::colour::gamut_matrix`]).
+    pub fn with_gamut(self, matrix: &crate::colour::Mat3) -> Self {
+        Self {
+            gamut: crate::colour::uniform_rows(matrix),
+            ..self
+        }
     }
 
     /// The encoded R'G'B' output, as swscale produces it.
@@ -311,7 +328,7 @@ impl YuvParams {
     }
 
     fn uniform(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(80);
+        let mut out = Vec::with_capacity(128);
         for row in self.matrix_rows() {
             for v in row {
                 out.extend_from_slice(&v.to_le_bytes());
@@ -332,6 +349,9 @@ impl YuvParams {
             u32::from(self.layout.planar),
             0,
         ] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in self.gamut.as_flattened() {
             out.extend_from_slice(&v.to_le_bytes());
         }
         out
@@ -470,7 +490,6 @@ impl YuvConverter {
     /// Records the conversion of `planes` into `target`, which must be one of
     /// [`TARGET_FORMATS`]; the frame is scaled to the target's size. Returns `false` for
     /// an unsupported target format.
-    #[allow(clippy::too_many_arguments)]
     pub fn encode(
         &self,
         device: &wgpu::Device,
@@ -479,6 +498,21 @@ impl YuvConverter {
         params: &YuvParams,
         target: &wgpu::TextureView,
         target_format: wgpu::TextureFormat,
+    ) -> bool {
+        self.encode_timed(device, encoder, planes, params, target, target_format, None)
+    }
+
+    /// [`Self::encode`] with timestamp writes for the pass.
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_timed(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        planes: YuvPlanes<'_>,
+        params: &YuvParams,
+        target: &wgpu::TextureView,
+        target_format: wgpu::TextureFormat,
+        timestamps: Option<wgpu::RenderPassTimestampWrites<'_>>,
     ) -> bool {
         let Some((_, pipeline)) = self.pipelines.iter().find(|(f, _)| *f == target_format) else {
             return false;
@@ -525,7 +559,7 @@ impl YuvConverter {
                 },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: None,
+            timestamp_writes: timestamps,
             occlusion_query_set: None,
             multiview_mask: None,
         });
@@ -702,11 +736,11 @@ mod tests {
     }
 
     #[test]
-    fn uniform_is_80_bytes() {
+    fn uniform_is_128_bytes() {
         let p = YuvParams::new(
             &ColourSpace::BT709,
             PlaneLayout::from_surface(HwSurfaceFormat::Nv12),
         );
-        assert_eq!(p.uniform().len(), 80);
+        assert_eq!(p.uniform().len(), 128);
     }
 }
