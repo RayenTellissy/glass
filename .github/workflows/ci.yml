@@ -25,19 +25,20 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # Same runner labels as `dist plan` picks for the release builds.
       matrix:
         include:
           - name: macOS arm64
             os: macos-14
             target: aarch64-apple-darwin
           - name: macOS x86_64
-            os: macos-13
+            os: macos-15-intel
             target: x86_64-apple-darwin
           - name: Windows x86_64
-            os: windows-latest
+            os: windows-2022
             target: x86_64-pc-windows-msvc
           - name: Linux x86_64
-            os: ubuntu-latest
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
@@ -145,7 +146,7 @@ jobs:
 
   deny:
     name: cargo-deny
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -158,7 +159,7 @@ jobs:
   # Runs alone on its own runner, one benchmark at a time (criterion is serial).
   bench:
     name: bench
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     permissions:
       contents: read

@@ -18,15 +18,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # Same runner labels as `dist plan` picks for the release builds.
       matrix:
         include:
           - os: macos-14
             target: aarch64-apple-darwin
             script: make-dmg.sh
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             script: make-dmg.sh
-          - os: windows-latest
+          - os: windows-2022
             target: x86_64-pc-windows-msvc
             script: make-msix.sh
           - os: ubuntu-22.04
