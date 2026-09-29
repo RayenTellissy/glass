@@ -147,7 +147,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [x] Colour space plumbing: BT.709, BT.2020, sRGB, limited and full range, 8/10/12-bit, PQ and HLG flags carried on every frame
 - [x] VFR normalisation to the sequence frame rate with a per-clip timestamp map
 - [x] Accurate seek: nearest keyframe then decode forward, GOP index cached per file on disk
-- [ ] Still images, image sequences, GIF, WebP, HEIC via `image` and platform decoders
+- [~] Still images, image sequences, GIF, WebP, HEIC via `image` and platform decoders
 - [ ] Audio decode to f32 planar at the project rate using a high-quality resampler (`rubato`)
 
 ### Analysis (background, cancellable, results cached under the project's cache folder)
