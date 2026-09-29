@@ -503,3 +503,5 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 1 — local FFmpeg build — 1a04c31 — aarch64-apple-darwin on M2 (stands in for M1): 177 s with 4 jobs, prefix 32 MB (sources 17 MB); workspace checks and proto-decode build link against it, VideoToolbox decode and x265 Main10 work
 - 2026-09-29 — Phase 1 — FFmpeg source packaging — 69df98b — 5 archives plus licences and build scripts, 16 MB
 - 2026-09-29 — Phase 1 — FFmpeg CI job — needs-human: no GitHub remote yet; job added to `.github/workflows/ci.yml` in 8da1053, Windows (MSYS2 + MSVC) and Linux paths are untested until CI runs
+- 2026-09-29 — Phase 0 — proto-ui rerun after review (submit time included) — 4b1620a — offscreen (screen locked, window occluded): UI-thread CPU median 0.37 ms, p99 0.74 ms (no culling 0.60 / 0.79), Queue::submit about 6 µs; windowed rerun still to do on an unlocked screen
+- 2026-09-29 — Phase 0 — proto-decode rerun after review (true 3-frame pacing window) — 4b1620a — pinned FFmpeg 9.0.2, paced x1 2.06% of machine (8.58% + 7.88% of one core), 0 late; paced x2 1.81% per stream, 0 late
