@@ -140,7 +140,7 @@ impl Time {
     }
 
     pub fn checked_sub(self, other: Time) -> Result<Time, TimeError> {
-        self.checked_add(other.neg())
+        self.checked_add(-other)
     }
 
     /// `self * num / den`, exact.
@@ -174,13 +174,6 @@ impl Time {
         Self::from_i128(num, den)
     }
 
-    pub fn neg(self) -> Time {
-        Time {
-            num: -self.num,
-            den: self.den,
-        }
-    }
-
     pub fn abs(self) -> Time {
         Time {
             num: self.num.abs(),
@@ -208,6 +201,17 @@ impl Time {
         }
         let (n, d) = if d < 0 { (-n, -d) } else { (n, d) };
         n.div_euclid(d).clamp(i64::MIN.into(), i64::MAX.into()) as i64
+    }
+}
+
+impl std::ops::Neg for Time {
+    type Output = Time;
+
+    fn neg(self) -> Time {
+        Time {
+            num: -self.num,
+            den: self.den,
+        }
     }
 }
 
