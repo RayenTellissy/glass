@@ -141,8 +141,8 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [ ] Probe: streams, codecs, duration, frame rate, colour metadata, rotation, timecode
 - [ ] Software decode path for video and audio, tested against every fixture
 - [ ] Hardware decode: VideoToolbox. Done when: zero-copy `IOSurface` → Metal texture
-- [ ] Hardware decode: D3D11VA. Done when: shared handle → DX12 texture without CPU copy
-- [ ] Hardware decode: NVDEC and VAAPI (parallel)
+- [ ] Hardware decode: D3D11VA. Done when: shared handle → DX12 texture without CPU copy (needs-human: needs a Windows PC with a D3D11 GPU to implement and verify)
+- [ ] Hardware decode: NVDEC and VAAPI (parallel) (needs-human: needs NVIDIA and Intel or AMD Linux hardware to implement and verify)
 - [ ] Automatic fallback to software per file with a reason string surfaced in the UI
 - [ ] Colour space plumbing: BT.709, BT.2020, sRGB, limited and full range, 8/10/12-bit, PQ and HLG flags carried on every frame
 - [ ] VFR normalisation to the sequence frame rate with a per-clip timestamp map
@@ -526,3 +526,5 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 1 — crash minidumps — dd729fa — crash-handler 0.8.1 and minidumper 0.11.0 (out-of-process monitor, local socket and Mach port, no network code), dirs 7.0.0; off by default, on through `settings.json` or `GLASS_CRASH_REPORTS`; native crash writes `.dmp` (about 45 KB on M2) plus `.txt`, a panic writes `.txt` only, into the data folder's `crashes/`; `crates/app/tests/crash_reports.rs` crashes `glass` in a child process (on: dump and report appear, off and unset: nothing written), 4 tests in 1.9 s; unsafe confined to `app::ffi`; `cargo deny check` passes
 - 2026-09-29 — Phase 1 — contributing session loop — 7c6763d — "Working on a task" in `CONTRIBUTING.md`: the session loop and three-commit rhythm for people, the full check, a per-change check table (deny, i18n and theme checks, frame budget, benches, fixtures, FFmpeg build, packaging and size check), decisions, splits and needs-human, concurrency and disk limits
 - 2026-09-29 — Phase 1 — review fixes — 62a3608..420d50a — CI runners match dist plan (macos-15-intel), UI source check scans if/match blocks and more egui label APIs and palettes, frame budgets judged only on hardware GPUs (lavapipe on Linux, GPU required on macOS arm64), log ring cursor stops at unfilled slots, i18n placeholder warnings deduped and mismatched translations fall back to English, crash socket in a private 0700 folder, GLASS_DEBUG_CRASH debug-only, package-sources guards --out and scripts reject options without values
+- 2026-09-29 — Phase 2 — hardware decode D3D11VA — needs-human: no Windows PC
+- 2026-09-29 — Phase 2 — hardware decode NVDEC and VAAPI — needs-human: no NVIDIA or Linux GPU hardware
