@@ -156,6 +156,8 @@ Full text in `docs/DECISIONS.md`; one line each here.
 
 ## 5. How to resume
 
+**Working unattended.** The owner is not available for questions while the goal runs. Never stop to ask. Decide with PLAN.md's defaults, the Decision Log, and this file, and record any new decision in both logs. When something truly needs a person (a paid account, a certificate, a licence purchase, hardware not on this Mac, the GitHub remote, deleting user data, a download other than crates and the pinned FFmpeg source archives, or copying files from other projects on this machine), tag the task `(needs-human: <reason>)`, add a Progress Log line, and move on to the next task. End every turn with one line: `Open tasks remaining: N`.
+
 **Session loop.** Follow "Working on a task" in `CONTRIBUTING.md` (and PLAN.md's "How to run this plan as a goal"): read PLAN.md and the last 20 Progress Log lines, `df -h /`, `source scripts/dev-env.sh`, run the full check, pick the next task, and use the three-commit rhythm: `plan: start <task>` (mark `[~]`), `<area>: <what changed>`, `plan: done <task>` (mark `[x]`, Progress Log line `- YYYY-MM-DD — Phase N — <task> — <impl hash> — <key numbers>`).
 
 **Parallel worktrees** ("Working in parallel" in `CONTRIBUTING.md`):
