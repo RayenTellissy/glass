@@ -2,6 +2,7 @@
 
 use media::analysis::peaks::{self, PEAKS_VERSION, PeakSettings, Peaks};
 use media::analysis::proxy::{self, PROXY_KIND, PROXY_VERSION, Proxy, ProxySettings};
+use media::analysis::scenes::{self, SCENES_VERSION, SceneCuts, SceneSettings};
 use media::analysis::thumbnails::{self, THUMBNAILS_VERSION, ThumbnailSettings, ThumbnailStrips};
 use media::analysis::{AnalysisError, Control, Stopped};
 use media::timemap::{TIMELINE_CACHE_KIND, TIMELINE_CACHE_VERSION, timeline_cache_params};
@@ -210,5 +211,44 @@ impl AnalysisJob for ProxyJob {
             Some(ctx.cache()),
             ctx,
         )?)
+    }
+}
+
+/// Scene cuts ([`media::analysis::scenes`]), one JSON file.
+#[derive(Clone, Debug)]
+pub struct SceneJob {
+    pub source: SourceFile,
+    pub settings: SceneSettings,
+}
+
+impl Artifact for SceneCuts {
+    const EXTENSION: &'static str = "json";
+
+    fn encode(&self) -> std::io::Result<Vec<u8>> {
+        json_encode(self)
+    }
+
+    fn decode(bytes: &[u8], _: &CacheEntry) -> Option<Self> {
+        serde_json::from_slice::<SceneCuts>(bytes)
+            .ok()
+            .filter(|s| s.version == SCENES_VERSION)
+    }
+}
+
+impl AnalysisJob for SceneJob {
+    type Output = SceneCuts;
+    const KIND: &'static str = "scenes";
+    const VERSION: u32 = SCENES_VERSION;
+
+    fn source_hash(&self) -> ContentHash {
+        self.source.hash
+    }
+
+    fn params(&self) -> String {
+        self.settings.params()
+    }
+
+    fn run(&self, ctx: &JobContext) -> Result<SceneCuts, JobError> {
+        Ok(scenes::detect(&self.source.path, &self.settings, ctx)?)
     }
 }

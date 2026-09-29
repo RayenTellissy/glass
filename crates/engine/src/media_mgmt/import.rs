@@ -119,6 +119,40 @@ pub trait AfterImport: Send + Sync {
     fn clip_imported(&self, clip: &ImportedClip, options: &ImportOptions);
 }
 
+/// Splits clips into scenes on the way in: when [`ImportOptions::split_into_scenes`] is
+/// on, each imported video clip gets a scene cut job ([`crate::analysis::SceneJob`]) on
+/// the analysis pool at background priority. The cuts land in the analysis cache, where
+/// the split-into-scenes dialog reads them.
+pub struct SceneDetectionOnImport {
+    pool: Arc<crate::analysis::AnalysisPool>,
+    settings: media::analysis::scenes::SceneSettings,
+}
+
+impl SceneDetectionOnImport {
+    pub fn new(pool: Arc<crate::analysis::AnalysisPool>) -> Self {
+        Self {
+            pool,
+            settings: media::analysis::scenes::SceneSettings::default(),
+        }
+    }
+}
+
+impl AfterImport for SceneDetectionOnImport {
+    fn clip_imported(&self, clip: &ImportedClip, options: &ImportOptions) {
+        if !options.split_into_scenes || clip.source.class != MediaClass::Video {
+            return;
+        }
+        let job = crate::analysis::SceneJob {
+            source: media::SourceFile {
+                path: clip.source.primary().to_path_buf(),
+                hash: clip.hash,
+            },
+            settings: self.settings,
+        };
+        drop(self.pool.submit(job, crate::analysis::Priority::Background));
+    }
+}
+
 /// A scan or import running on its own thread.
 pub struct Importer {
     cancel: Arc<AtomicBool>,

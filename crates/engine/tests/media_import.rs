@@ -428,3 +428,39 @@ fn known_paths_and_hashes_are_skipped_and_cancel_stops() {
             || events.iter().any(|e| matches!(e, ImportEvent::Finished(_))),
     );
 }
+
+#[test]
+fn split_into_scenes_queues_scene_detection() {
+    use engine::analysis::{AnalysisPool, JobEventKind, Outcome, PoolConfig};
+    use engine::media_mgmt::SceneDetectionOnImport;
+    let Some(fx) = fixtures() else { return };
+    let tmp = TempDir::new("scenes");
+    copy(&fx.join(SMALL), &tmp.0.join("wide.mp4"));
+    let (pool, events) =
+        AnalysisPool::new(PoolConfig::new(media::CacheDir::new(tmp.0.join("cache"))))
+            .expect("pool");
+    let hook = Arc::new(SceneDetectionOnImport::new(Arc::new(pool)));
+    Importer::scan_and_import(
+        vec![tmp.0.join("wide.mp4")],
+        ImportOptions {
+            split_into_scenes: true,
+            ..ImportOptions::default()
+        },
+        vec![hook.clone()],
+    )
+    .expect("import")
+    .wait();
+    // The hook owns the pool; keep it alive until the job ends.
+    let finished = loop {
+        let event = events
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .expect("a scene job event");
+        if event.key.kind == "scenes"
+            && let JobEventKind::Finished(outcome) = event.kind
+        {
+            break outcome;
+        }
+    };
+    assert_eq!(finished, Outcome::Computed);
+    drop(hook);
+}

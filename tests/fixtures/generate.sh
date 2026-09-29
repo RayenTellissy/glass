@@ -486,6 +486,24 @@ make audio_48k_stereo.wav \
 add_entry audio_48k_stereo.wav audio null null null null 3 null false null pcm_s16le 48000 2 0 null null \
     '"sine_hz": 440, "sine_amplitude": 0.125, "sine_channel": 0'
 
+# Scene cuts: six 2 s shots at 30 fps with small motion, joined with hard cuts at frames
+# 60, 120, 180 and 300: testsrc2 (moving), a Mandelbrot zoom with a two-frame white flash
+# at frames 90 and 91, fast animated gradients, RGB bars fading out to black over their
+# last 15 frames, testsrc fading in from black over its first 15 (a fade through black
+# around frame 240) and a pan across HD bars.
+SHOT="format=yuv420p,setsar=1"
+make scenes_cuts_640x360_30.mp4 \
+    -f lavfi -i "testsrc2=size=640x360:rate=30:duration=2,$SHOT" \
+    -f lavfi -i "mandelbrot=size=640x360:rate=30,trim=end_frame=60,drawbox=c=white@0.8:t=fill:enable='between(n,30,31)',$SHOT" \
+    -f lavfi -i "gradients=size=640x360:rate=30:duration=2:speed=0.03,$SHOT" \
+    -f lavfi -i "rgbtestsrc=size=640x360:rate=30:duration=2,fade=t=out:start_frame=45:nb_frames=15,$SHOT" \
+    -f lavfi -i "testsrc=size=640x360:rate=30:duration=2,fade=t=in:start_frame=0:nb_frames=15,$SHOT" \
+    -f lavfi -i "smptehdbars=size=1280x720:rate=30:duration=2,crop=640:360:x='n*4':y=180,$SHOT" \
+    -filter_complex "[0:v][1:v][2:v][3:v][4:v][5:v]concat=n=6:v=1:a=0[v]" -map "[v]" \
+    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 30 -movflags +faststart
+add_entry scenes_cuts_640x360_30.mp4 video h264 640 360 30/1 12 yuv420p false 360 null null null 0 null null \
+    '"hard_cuts": [60, 120, 180, 300], "fade_through_black": 240, "flash_frames": [90, 91]'
+
 {
     echo "{"
     echo "  \"version\": 1,"

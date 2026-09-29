@@ -27,6 +27,8 @@ pub struct UploadedFrame {
     pub textures: Vec<wgpu::Texture>,
     pub views: Vec<wgpu::TextureView>,
     pub params: YuvParams,
+    /// The frame's primaries, for gamut conversion into the working space.
+    pub primaries: media::Primaries,
 }
 
 impl UploadedFrame {
@@ -115,5 +117,6 @@ pub fn upload_frame(
         textures,
         views,
         params,
+        primaries: frame.colour_space().primaries,
     })
 }

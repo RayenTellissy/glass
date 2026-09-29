@@ -12,6 +12,7 @@ pub mod sidecar;
 pub use cards::{Card, CardClip, CardKind, CardOptions, Sidecar, SidecarKind};
 pub use classify::{DropSummary, FileKind, MediaClass, Unreadable, classify};
 pub use import::{
-    AfterImport, ImportEvent, ImportOptions, ImportSummary, ImportedClip, Importer, SkipReason,
+    AfterImport, ImportEvent, ImportOptions, ImportSummary, ImportedClip, Importer,
+    SceneDetectionOnImport, SkipReason,
 };
 pub use scan::{CardSummary, ImportPlan, ImportSource, PlannedFolder, ScanOptions};
