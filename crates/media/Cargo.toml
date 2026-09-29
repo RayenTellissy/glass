@@ -67,6 +67,10 @@ name = "peaks"
 harness = false
 
 [[bench]]
+name = "proxy"
+harness = false
+
+[[bench]]
 name = "scenes"
 harness = false
 

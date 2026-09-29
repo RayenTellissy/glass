@@ -8,9 +8,10 @@ use std::time::Duration;
 
 use engine::analysis::{
     AnalysisJob, AnalysisPool, JobEvent, JobEventKind, Outcome, PeaksJob, PoolConfig, Priority,
-    ThumbnailJob, TimelineJob,
+    ProxyJob, ThumbnailJob, TimelineJob,
 };
 use media::analysis::peaks::{LEVELS, PeakSettings, Peaks};
+use media::analysis::proxy::{ProxyEncoder, ProxyFormat, ProxySettings};
 use media::analysis::thumbnails::{ThumbnailSettings, ThumbnailStrips};
 use media::{CacheDir, CacheEntry, SourceFile, SourceTimeline, StreamSelect, TimelineCache};
 
@@ -485,4 +486,80 @@ fn peaks_are_reused_from_the_cache() {
             peaks.total_samples
         );
     }
+}
+
+/// A proxy through the pool lands under `proxies/<hash>/`; cancelling mid-way and
+/// submitting again finishes it without redoing finished segments; a further submission
+/// is a cache hit.
+#[test]
+fn proxy_job_resumes_and_caches() {
+    let Some(path) = fixture("h264_1080p30.mp4") else {
+        return;
+    };
+    let dir = TempDir::new("proxy");
+    let source = SourceFile::open(&path).expect("hash");
+    let settings = ProxySettings {
+        format: ProxyFormat::ProResProxy,
+        encoder: ProxyEncoder::Software,
+        segment_ms: 250,
+        ..ProxySettings::default()
+    };
+    let job = ProxyJob {
+        source: source.clone(),
+        settings,
+    };
+    let (pool, events) = pool(&dir);
+    let handle = pool.submit(job.clone(), Priority::Background);
+    loop {
+        let event = events.recv_timeout(LIMIT).expect("event");
+        match event.kind {
+            JobEventKind::Progress(p) if p >= 0.4 => {
+                handle.cancel();
+                break;
+            }
+            JobEventKind::Finished(_) => break,
+            _ => {}
+        }
+    }
+    let cancelled = handle.wait_timeout(LIMIT).expect("finished").is_err();
+    let proxy = pool
+        .submit(job.clone(), Priority::Visible)
+        .wait_timeout(LIMIT)
+        .expect("finished")
+        .expect("ok");
+    let file = proxy.path(&dir.cache().entry_hashed_in(
+        media::CacheArea::Proxies,
+        &source.hash,
+        ProxyJob::KIND,
+        &media::cache::params_hash(&settings.params()),
+        ProxyJob::VERSION,
+    ));
+    assert!(file.is_file());
+    assert!(file.starts_with(dir.0.join("proxies").join(source.hash.to_hex())));
+    assert_eq!(proxy.frames, 90);
+    eprintln!(
+        "cancelled: {cancelled}, then {} of {} segments encoded",
+        proxy.segments_encoded, proxy.segments
+    );
+    if cancelled {
+        assert!(
+            proxy.segments_encoded < proxy.segments,
+            "resumed: {} of {} segments encoded",
+            proxy.segments_encoded,
+            proxy.segments
+        );
+    }
+    let again = pool
+        .submit(job, Priority::Visible)
+        .wait_timeout(LIMIT)
+        .expect("finished")
+        .expect("ok");
+    assert_eq!(*again, *proxy);
+    let mut outcomes = Vec::new();
+    while let Ok(event) = events.recv_timeout(Duration::from_millis(200)) {
+        if let JobEventKind::Finished(outcome) = event.kind {
+            outcomes.push(outcome);
+        }
+    }
+    assert_eq!(outcomes.last(), Some(&Outcome::Cached));
 }

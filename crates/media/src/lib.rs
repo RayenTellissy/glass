@@ -20,6 +20,7 @@ pub mod colour;
 mod convert;
 mod decode;
 mod demux;
+mod encode;
 mod error;
 #[allow(unsafe_code)]
 mod ffi;
@@ -27,6 +28,7 @@ mod format;
 pub mod gop;
 mod hw;
 pub mod log;
+mod mux;
 mod probe;
 mod reader;
 mod scan;
@@ -35,13 +37,16 @@ mod time;
 pub mod timemap;
 
 pub use audio::{AudioOptions, AudioReader, ChannelLayout};
-pub use cache::{CacheDir, CacheEntry, ContentHash, SourceFile};
+pub use cache::{CacheArea, CacheDir, CacheEntry, ContentHash, SourceFile};
 pub use colour::{ChromaSiting, ColourSpace, Matrix, Primaries, Range, TransferFn};
 pub use convert::RgbaImage;
 pub use decode::{
     AudioFrame, Decoder, DecoderOptions, Frame, FrameStorage, Plane, Received, VideoFrame,
 };
 pub use demux::{Demuxer, Packet, StreamSummary};
+pub use encode::{
+    AudioEncoderSettings, Encoder, FrameScaler, PcmFormat, VideoEncoderSettings, encoder_available,
+};
 pub use error::{FfmpegError, MediaError, Result};
 pub use format::{ColourInfo, ColourRange, Hdr, MediaKind, PixelFormat, SampleFormat, SampleType};
 pub use gop::{GopIndex, GopSource, Keyframe};
@@ -49,6 +54,7 @@ pub use hw::{
     DecodePath, FallbackReason, HwApi, HwFrame, HwPreference, HwSurfaceFormat,
     hardware_decoder_available,
 };
+pub use mux::Muxer;
 pub use probe::{
     AudioInfo, CodecInfo, MediaInfo, StreamDetail, StreamInfo, VfrScan, VfrSource, VideoInfo, probe,
 };

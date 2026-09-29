@@ -1,11 +1,12 @@
 //! The analysis kinds: each is a type implementing [`AnalysisJob`].
 
 use media::analysis::peaks::{self, PEAKS_VERSION, PeakSettings, Peaks};
+use media::analysis::proxy::{self, PROXY_KIND, PROXY_VERSION, Proxy, ProxySettings};
 use media::analysis::scenes::{self, SCENES_VERSION, SceneCuts, SceneSettings};
 use media::analysis::thumbnails::{self, THUMBNAILS_VERSION, ThumbnailSettings, ThumbnailStrips};
 use media::analysis::{AnalysisError, Control, Stopped};
 use media::timemap::{TIMELINE_CACHE_KIND, TIMELINE_CACHE_VERSION, timeline_cache_params};
-use media::{CacheEntry, ContentHash, SourceFile, SourceTimeline, StreamSelect};
+use media::{CacheArea, CacheEntry, ContentHash, SourceFile, SourceTimeline, StreamSelect};
 
 use super::pool::{AnalysisJob, Artifact, JobContext, JobError};
 
@@ -162,6 +163,54 @@ impl AnalysisJob for PeaksJob {
 
     fn run(&self, ctx: &JobContext) -> Result<Peaks, JobError> {
         Ok(peaks::generate(&self.source.path, &self.settings, ctx)?)
+    }
+}
+
+/// A proxy of a video file ([`media::analysis::proxy`]) under
+/// `<cache>/proxies/<hash>/`. Resumable: a cancelled or interrupted job keeps its
+/// finished segments and a new submission continues from the next one.
+#[derive(Clone, Debug)]
+pub struct ProxyJob {
+    pub source: SourceFile,
+    pub settings: ProxySettings,
+}
+
+impl Artifact for Proxy {
+    const EXTENSION: &'static str = "json";
+
+    fn encode(&self) -> std::io::Result<Vec<u8>> {
+        json_encode(self)
+    }
+
+    /// Valid only while the proxy file is still on disk.
+    fn decode(bytes: &[u8], entry: &CacheEntry) -> Option<Self> {
+        let proxy: Proxy = serde_json::from_slice(bytes).ok()?;
+        (proxy.version == PROXY_VERSION && proxy.path(entry).is_file()).then_some(proxy)
+    }
+}
+
+impl AnalysisJob for ProxyJob {
+    type Output = Proxy;
+    const KIND: &'static str = PROXY_KIND;
+    const VERSION: u32 = PROXY_VERSION;
+    const AREA: CacheArea = CacheArea::Proxies;
+
+    fn source_hash(&self) -> ContentHash {
+        self.source.hash
+    }
+
+    fn params(&self) -> String {
+        self.settings.params()
+    }
+
+    fn run(&self, ctx: &JobContext) -> Result<Proxy, JobError> {
+        Ok(proxy::generate(
+            &self.source.path,
+            &self.settings,
+            ctx.entry(),
+            Some(ctx.cache()),
+            ctx,
+        )?)
     }
 }
 

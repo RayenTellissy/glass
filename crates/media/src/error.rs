@@ -97,6 +97,22 @@ pub enum MediaError {
     #[error("{}: {reason}", path.display())]
     Unsupported { path: PathBuf, reason: Unsupported },
 
+    /// Opening, feeding or draining an encoder failed. `action` says which.
+    #[error("encoder {encoder}: {action}: {source}")]
+    Encode {
+        encoder: String,
+        action: &'static str,
+        source: FfmpegError,
+    },
+
+    /// Creating or writing an output file failed. `action` says which.
+    #[error("{}: {action}: {source}", path.display())]
+    Write {
+        path: PathBuf,
+        action: &'static str,
+        source: FfmpegError,
+    },
+
     /// Converting a decoded frame (for example to RGBA with swscale) failed.
     #[error("converting a {format} {width}x{height} frame to {to}: {source}")]
     Convert {
@@ -116,6 +132,8 @@ impl MediaError {
             | Self::Codec { source, .. }
             | Self::Read { source, .. }
             | Self::Seek { source, .. }
+            | Self::Encode { source, .. }
+            | Self::Write { source, .. }
             | Self::Convert { source, .. } => Some(source),
             Self::NoStream { .. }
             | Self::NoSuchStream { .. }

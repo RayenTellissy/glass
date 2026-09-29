@@ -1,5 +1,5 @@
 //! The analysis job system: background work on source files (timelines, thumbnails,
-//! waveforms, later proxies, scene cuts, silence, beats, loudness) on a small pool of
+//! waveforms, proxies, later scene cuts, silence, beats, loudness) on a small pool of
 //! low-priority `glass-analysis-<n>` threads, with results cached on disk under the
 //! project cache folder.
 //!
@@ -15,7 +15,8 @@
 //!   twice.
 //! - **Cache**: before running, a worker looks for the result on disk
 //!   (`media::CacheDir::entry`: `<cache>/analysis/<hash>/<kind>-<params>-v<version>.<ext>`).
-//!   A hit decodes it and does no work. A miss runs the job and writes the main file
+//!   Proxies use the `proxies/` area instead ([`AnalysisJob::AREA`]). A hit decodes it
+//!   and does no work. A miss runs the job and writes the main file
 //!   last, so its presence means the result is complete; files of other versions of the
 //!   same kind are deleted then.
 //! - **Cancellation** is cooperative: a job calls [`JobContext::checkpoint`] between
@@ -35,7 +36,7 @@
 mod jobs;
 mod pool;
 
-pub use jobs::{PeaksJob, SceneJob, ThumbnailJob, TimelineJob};
+pub use jobs::{PeaksJob, ProxyJob, SceneJob, ThumbnailJob, TimelineJob};
 pub use pool::{
     AnalysisJob, AnalysisPool, Artifact, JobContext, JobError, JobEvent, JobEventKind, JobHandle,
     JobKey, Outcome, PoolConfig, Priority, default_workers,
