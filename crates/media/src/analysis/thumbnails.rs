@@ -39,6 +39,7 @@
 //! visible range.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -302,7 +303,11 @@ pub fn generate(
             None => GopIndex::build(path, StreamSelect::BestVideo),
         };
         match built {
-            Ok((gop, _)) => Some(gop),
+            Ok((gop, _)) => {
+                let gop = Arc::new(gop);
+                source.set_gop_index(gop.clone());
+                Some(gop)
+            }
             Err(error) => {
                 tracing::debug!(path = %path.display(), %error, "no GOP index; exact seeks only");
                 None
@@ -335,7 +340,7 @@ pub fn generate(
                 Some(hit) => hit.clone(),
                 None => {
                     let target = start.rescale(Rational::MICROS).value + nominal;
-                    let frame = match snap_to_keyframe(gop.as_ref(), target, interval_us) {
+                    let frame = match snap_to_keyframe(gop.as_deref(), target, interval_us) {
                         Some(keyframe) => {
                             source.seek_keyframe(Timestamp::new(keyframe, Rational::MICROS))?
                         }

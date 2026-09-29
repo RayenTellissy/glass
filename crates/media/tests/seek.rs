@@ -255,3 +255,50 @@ fn gop_index_round_trips_on_disk() {
         let _ = std::fs::remove_dir_all(cache.root());
     }
 }
+
+/// A seek starts decoding at the target's keyframe, not a GOP earlier: MP4 with
+/// B-frames (index searched by presentation time), open GOPs, Matroska, MOV without
+/// reordering. Seeking to a keyframe sends only the few packets the decoder's reorder
+/// delay needs (one decoder thread), and a keyframe seek returns the keyframe itself.
+#[test]
+fn seeks_start_at_the_targets_keyframe() {
+    for file in [
+        "h264_1080p30.mp4",
+        "h264_bframes_gop120_720p60.mp4",
+        "hevc_10bit_1080p25.mp4",
+        "vp9_720p30.webm",
+        "prores422_1080p23976.mov",
+    ] {
+        let Some(path) = common::fixture(file) else {
+            return;
+        };
+        let (gop, _) = GopIndex::build(&path, StreamSelect::BestVideo).expect("gop");
+        let gop = Arc::new(gop);
+        // One decoder thread: frame threading would add a packet of delay per thread.
+        let options = DecoderOptions {
+            threads: 1,
+            hw: HwPreference::Off,
+        };
+        let mut reader = FrameReader::open_with(&path, StreamSelect::BestVideo, options)
+            .expect("open")
+            .with_gop_index(gop.clone());
+        for k in (1..gop.keyframes.len()).rev() {
+            let target = gop.keyframe_pts(k).expect("keyframe");
+            let before = reader.packets_sent();
+            let frame = seek_frame(&mut reader, target);
+            assert_eq!(frame.pts(), Some(target), "{file} keyframe {k}");
+            let sent = reader.packets_sent() - before;
+            assert!(sent <= 8, "{file} keyframe {k}: {sent} packets decoded");
+
+            let keyframe = reader.seek_keyframe(target).expect("seek");
+            assert_eq!(keyframe, Some(target), "{file} keyframe {k}");
+            let first = reader
+                .next_frame()
+                .expect("decode")
+                .expect("frame")
+                .pts()
+                .expect("pts");
+            assert!(first.cmp_time(target).is_le(), "{file} keyframe {k}");
+        }
+    }
+}

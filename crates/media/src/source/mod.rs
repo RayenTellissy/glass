@@ -408,15 +408,17 @@ impl VideoSource {
     pub fn seek_keyframe(&mut self, target: Timestamp) -> Result<Option<VideoFrame>> {
         match &mut self.inner {
             Inner::Video(reader) => {
-                reader.seek_keyframe(target)?;
+                let keyframe = reader.seek_keyframe(target)?;
                 loop {
-                    match reader.next_frame()? {
-                        Some(frame) => {
-                            if let Some(video) = frame.into_video() {
-                                return Ok(Some(video));
-                            }
-                        }
-                        None => return Ok(None),
+                    let Some(frame) = reader.next_frame()? else {
+                        return Ok(None);
+                    };
+                    let leading = match (keyframe, frame.pts()) {
+                        (Some(k), Some(pts)) => pts.cmp_time(k) == std::cmp::Ordering::Less,
+                        _ => false,
+                    };
+                    if !leading && let Some(video) = frame.into_video() {
+                        return Ok(Some(video));
                     }
                 }
             }
@@ -434,6 +436,14 @@ impl VideoSource {
         match map.source_pts(n) {
             Some(pts) => self.seek_exact(pts),
             None => Ok(None),
+        }
+    }
+
+    /// Uses `gop` for keyframe and exact seeks of a video file instead of scanning the file
+    /// on the first seek; ignored for pictures.
+    pub fn set_gop_index(&mut self, gop: Arc<crate::gop::GopIndex>) {
+        if let Inner::Video(reader) = &mut self.inner {
+            reader.set_gop_index(gop);
         }
     }
 

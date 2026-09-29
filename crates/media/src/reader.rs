@@ -58,6 +58,27 @@ pub struct FrameReader {
     pending: Option<Frame>,
     /// Keyframes of the stream, for accurate seeks; built on the first seek unless given.
     gop: Option<Arc<GopIndex>>,
+    /// After a keyframe seek: packets before this keyframe (in decode order) are dropped.
+    landing: Option<Landing>,
+    /// Packets sent to the decoder (test hook for seek cost).
+    packets_sent: u64,
+}
+
+/// Where a keyframe seek should land, checked against the packets that follow it.
+///
+/// MP4/MOV (FFmpeg's `mov_seek_stream` shifts the target from presentation to decode
+/// time) and Matroska (cues are presentation times) seek by presentation time, so the
+/// demuxer is asked for the keyframe's pts. Containers that search by decode time land
+/// earlier, which only costs dropped packets; one that lands later is seeked again by
+/// the keyframe's decode time, and failing that from the start.
+#[derive(Clone, Copy, Debug)]
+struct Landing {
+    pts: i64,
+    dts: Option<i64>,
+    /// Retries left when the demuxer lands after the keyframe: by decode time, then rewind.
+    retries: u8,
+    /// No packet read since the seek yet.
+    first: bool,
 }
 
 impl FrameReader {
@@ -101,6 +122,8 @@ impl FrameReader {
             skip_through: None,
             pending: None,
             gop: None,
+            landing: None,
+            packets_sent: 0,
         })
     }
 
@@ -110,6 +133,11 @@ impl FrameReader {
     pub fn with_gop_index(mut self, gop: Arc<GopIndex>) -> Self {
         self.gop = Some(gop);
         self
+    }
+
+    /// [`Self::with_gop_index`] on an open reader.
+    pub fn set_gop_index(&mut self, gop: Arc<GopIndex>) {
+        self.gop = Some(gop);
     }
 
     /// The GOP index, scanning the file for it on first use.
@@ -224,14 +252,28 @@ impl FrameReader {
         }
     }
 
-    /// Positions the demuxer at a keyframe and resets the decoder.
+    /// Positions the demuxer at a keyframe (see [`Landing`]) and resets the decoder.
     fn seek_to_keyframe(&mut self, gop: &GopIndex, keyframe: usize) -> Result<()> {
         match gop.keyframe(keyframe) {
             Some(k) => {
-                let at = Timestamp::new(k.dts.unwrap_or(k.pts).min(k.pts), gop.time_base);
-                self.demuxer.seek_stream(self.stream.index, at)?;
+                let pts = Timestamp::new(k.pts, gop.time_base).rescale_floor(self.stream.time_base);
+                let dts = k.dts.map(|d| {
+                    Timestamp::new(d, gop.time_base)
+                        .rescale_floor(self.stream.time_base)
+                        .value
+                });
+                self.demuxer.seek_stream(self.stream.index, pts)?;
+                self.landing = Some(Landing {
+                    pts: pts.value,
+                    dts,
+                    retries: 2,
+                    first: true,
+                });
             }
-            None => self.demuxer.rewind()?,
+            None => {
+                self.demuxer.rewind()?;
+                self.landing = None;
+            }
         }
         self.reset_decoder()?;
         self.draining = false;
@@ -240,6 +282,52 @@ impl FrameReader {
         self.skip_through = None;
         self.last_pts = None;
         Ok(())
+    }
+
+    /// Whether `packet` goes to the decoder after a keyframe seek: packets before the
+    /// keyframe (decode order) are dropped. When the demuxer landed after the keyframe it
+    /// is moved back (by the keyframe's decode time, then to the start) and the packet
+    /// is dropped; when the keyframe cannot be found where the index says, decoding
+    /// restarts from the start of the stream without dropping anything.
+    fn accept_after_seek(&mut self, packet: &crate::demux::Packet) -> Result<bool> {
+        let Some(mut landing) = self.landing else {
+            return Ok(true);
+        };
+        let first = std::mem::replace(&mut landing.first, false);
+        let pts = packet.pts().map(|t| t.value);
+        let dts = packet.dts().map(|t| t.value);
+        if packet.is_key() && pts == Some(landing.pts) {
+            self.landing = None;
+            return Ok(true);
+        }
+        let after = match (dts, landing.dts) {
+            (Some(d), Some(k)) => d > k,
+            _ => packet.is_key() && pts.is_some_and(|p| p > landing.pts),
+        };
+        if !after {
+            self.landing = Some(landing);
+            return Ok(false);
+        }
+        if first && landing.retries > 0 {
+            landing.retries -= 1;
+            landing.first = true;
+            match landing.dts {
+                Some(k) if landing.retries == 1 => self.demuxer.seek_stream(
+                    self.stream.index,
+                    Timestamp::new(k.min(landing.pts), self.stream.time_base),
+                )?,
+                _ => {
+                    landing.retries = 0;
+                    self.demuxer.rewind()?;
+                }
+            }
+            self.landing = Some(landing);
+            return Ok(false);
+        }
+        tracing::debug!(path = %self.demuxer.path().display(), "keyframe seek missed; decoding from the start");
+        self.landing = None;
+        self.demuxer.rewind()?;
+        Ok(false)
     }
 
     /// Drops the decoder's buffered frames after a seek. A hardware decoder that was
@@ -324,6 +412,7 @@ impl FrameReader {
         }
         self.draining = false;
         self.finished = false;
+        self.landing = None;
         Ok(())
     }
 
@@ -344,7 +433,17 @@ impl FrameReader {
                     return Ok(None);
                 }
                 Received::NeedsInput => match self.demuxer.read_packet()? {
-                    Some(packet) => self.decoder.send_packet(&packet)?,
+                    Some(packet) => {
+                        if self.accept_after_seek(&packet)? {
+                            self.packets_sent += 1;
+                            self.decoder.send_packet(&packet)?;
+                        }
+                    }
+                    None if self.landing.take().is_some() => {
+                        // The keyframe never came: decode the whole stream instead.
+                        tracing::debug!(path = %self.demuxer.path().display(), "keyframe seek missed; decoding from the start");
+                        self.demuxer.rewind()?;
+                    }
                     None => {
                         self.decoder.send_eof()?;
                         self.draining = true;
@@ -354,11 +453,21 @@ impl FrameReader {
         }
     }
 
-    /// Positions the demuxer at the last keyframe at or before `target` (for audio, the
-    /// packet at or before it) and resets the decoder without decoding anything. Frames
-    /// then start at or before `target`; callers trim to the exact sample or frame (and
-    /// seek early enough for the decoder's pre-roll).
-    pub fn seek_keyframe(&mut self, target: Timestamp) -> Result<()> {
+    /// Positions the reader at the last keyframe at or before `target` and resets the
+    /// decoder without decoding anything. For video the keyframe comes from the GOP index
+    /// (as for [`Self::seek_exact`]) and its presentation time is returned: frames then
+    /// start at the keyframe, apart from an open GOP's leading frames, which present
+    /// before it and callers drop. For audio the demuxer moves to the packet at or before
+    /// `target` and `None` is returned; callers trim to the exact sample (and seek early
+    /// enough for the decoder's pre-roll).
+    pub fn seek_keyframe(&mut self, target: Timestamp) -> Result<Option<Timestamp>> {
+        if self.stream.kind == MediaKind::Video {
+            let gop = self.gop_index()?;
+            let target = target.rescale_floor(self.stream.time_base);
+            let keyframe = gop.keyframe_at_or_before(target).unwrap_or(0);
+            self.seek_to_keyframe(&gop, keyframe)?;
+            return Ok(gop.keyframe_pts(keyframe));
+        }
         self.demuxer.seek_stream(self.stream.index, target)?;
         self.reset_decoder()?;
         self.draining = false;
@@ -366,7 +475,14 @@ impl FrameReader {
         self.pending = None;
         self.skip_through = None;
         self.last_pts = None;
-        Ok(())
+        self.landing = None;
+        Ok(None)
+    }
+
+    /// Test hook: packets sent to the decoder since the reader was opened.
+    #[doc(hidden)]
+    pub fn packets_sent(&self) -> u64 {
+        self.packets_sent
     }
 
     /// Goes back to the first frame: seeks the demuxer to the start and flushes the
@@ -388,6 +504,7 @@ impl FrameReader {
         self.last_pts = None;
         self.skip_through = None;
         self.pending = None;
+        self.landing = None;
         Ok(())
     }
 }
