@@ -397,6 +397,22 @@ impl HwFrame {
         self.colour_space
     }
 
+    /// A checksum of the picture's samples, read on the CPU through a read-only lock of
+    /// the surface. For tests that compare decoded pictures only.
+    #[doc(hidden)]
+    pub fn content_checksum(&self) -> Option<[u8; 32]> {
+        match &self.handle {
+            #[cfg(target_os = "macos")]
+            Handle::VideoToolbox(buffer) => {
+                let bytes = usize::from(self.format.bytes_per_sample());
+                buffer.content_hash(|plane| {
+                    let (w, _) = self.plane_size(plane).unwrap_or((0, 0));
+                    w as usize * bytes * if plane == 0 { 1 } else { 2 }
+                })
+            }
+        }
+    }
+
     /// The retained `CVPixelBuffer`.
     #[cfg(target_os = "macos")]
     pub fn pixel_buffer(&self) -> &objc2_core_video::CVPixelBuffer {

@@ -485,6 +485,7 @@ Append one line per decision: date, decision, reason. Add the same entry to `doc
 - 2026-09-29 — egui and eframe are used with the `default_fonts` feature off; Glass ships Geist and Geist Mono (OFL) from `assets/fonts/`. Reason: `default_fonts` bundles the Ubuntu font, which `deny.toml` rejects, and the design uses Geist.
 - 2026-09-29 — Phase 1 is merged with its local Done-when parts verified: smoke exits 0, the full local check is green, and the arm64 DMG builds within the size budget. CI green and tagged installers for both platforms stay open as needs-human tasks. From here on, a phase merges to main when every part of its Done when that can run on this Mac passes, and the rest is tagged needs-human. Reason: there is no GitHub remote and no Windows or NVIDIA hardware, and holding main back would not change what can be verified.
 - 2026-09-29 — The pinned FFmpeg build adds dav1d for AV1 software decode, with meson and ninja built from pinned sources as host tools. Reason: AV1 is a supported format (codec-av1 flag, fixtures, export) and FFmpeg's built-in AV1 decoder needs hardware the M1/M2 lack.
+- 2026-09-29 — The content hash keying per-file analysis is BLAKE3 of the size, the first and last 1 MiB and eight 64 KiB blocks, without the modification time. Reason: the cache must survive moving and copying media, and a copy gets a new modification time.
 
 ## Progress Log
 

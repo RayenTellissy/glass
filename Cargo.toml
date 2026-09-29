@@ -30,6 +30,8 @@ thiserror = "2"
 # (scripts/dev-env.sh). Only `media` uses it; raw FFmpeg calls stay in `media::ffi`.
 ffmpeg-next = { version = "9", default-features = false, features = ["codec", "format", "software-scaling"] }
 serde_json = "1"
+# Content hashes for the project cache folder (`media::cache`).
+blake3 = "1"
 
 # GPU: the wgpu version egui-wgpu 0.36 uses, so `render` shares eframe's device.
 wgpu = "30"
@@ -70,6 +72,10 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# Tests hash whole decoded 4K frames; unoptimised BLAKE3 would dominate their run time.
+[profile.dev.package.blake3]
+opt-level = 3
 
 # The profile that 'dist' will build with
 [profile.dist]

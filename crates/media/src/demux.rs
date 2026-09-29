@@ -169,6 +169,20 @@ impl Demuxer {
             })
     }
 
+    /// Moves to the last keyframe of `stream` whose index timestamp is at or before
+    /// `target` (rescaled to the stream's time base, rounded down). Containers index by
+    /// decode time (MOV, MP4) or presentation time (Matroska), so callers pass a
+    /// keyframe's decode time when they know it. Flush decoders afterwards.
+    pub fn seek_stream(&mut self, stream: usize, target: Timestamp) -> Result<()> {
+        let time_base = self.stream(stream)?.time_base;
+        let ts = target.rescale_floor(time_base).value;
+        ffi::seek_stream(&mut self.input, stream, ts).map_err(|e| MediaError::Seek {
+            path: self.path.clone(),
+            target,
+            source: e.into(),
+        })
+    }
+
     /// Seeks back to the first packet of the file.
     pub fn rewind(&mut self) -> Result<()> {
         let start = self

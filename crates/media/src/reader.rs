@@ -3,14 +3,17 @@
 
 use std::cmp::Ordering;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::decode::{Decoder, DecoderOptions, Frame, Received};
 use crate::demux::{Demuxer, StreamSummary};
 use crate::error::{MediaError, Result};
 use crate::ffi;
 use crate::format::MediaKind;
+use crate::gop::GopIndex;
 use crate::hw::{DecodePath, FallbackReason, HwPreference};
 use crate::time::Timestamp;
+use crate::timemap::TimestampMap;
 
 /// Which stream of a file to decode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +54,10 @@ pub struct FrameReader {
     last_pts: Option<Timestamp>,
     /// After a switch to software: frames up to this time were already handed out.
     skip_through: Option<Timestamp>,
+    /// A frame decoded past a seek target, returned by the next `next_frame`.
+    pending: Option<Frame>,
+    /// Keyframes of the stream, for accurate seeks; built on the first seek unless given.
+    gop: Option<Arc<GopIndex>>,
 }
 
 impl FrameReader {
@@ -92,7 +99,29 @@ impl FrameReader {
             finished: false,
             last_pts: None,
             skip_through: None,
+            pending: None,
+            gop: None,
         })
+    }
+
+    /// Uses `gop` (for example loaded from the project cache folder with
+    /// [`GopIndex::load_or_build`]) for accurate seeks instead of scanning the file on
+    /// the first one.
+    pub fn with_gop_index(mut self, gop: Arc<GopIndex>) -> Self {
+        self.gop = Some(gop);
+        self
+    }
+
+    /// The GOP index, scanning the file for it on first use.
+    pub fn gop_index(&mut self) -> Result<Arc<GopIndex>> {
+        if let Some(gop) = &self.gop {
+            return Ok(gop.clone());
+        }
+        let (gop, _) =
+            GopIndex::build(self.demuxer.path(), StreamSelect::Index(self.stream.index))?;
+        let gop = Arc::new(gop);
+        self.gop = Some(gop.clone());
+        Ok(gop)
     }
 
     /// The stream being decoded.
@@ -123,6 +152,109 @@ impl FrameReader {
 
     /// The next frame in presentation order, or `None` once the stream is exhausted.
     pub fn next_frame(&mut self) -> Result<Option<Frame>> {
+        if let Some(frame) = self.pending.take() {
+            return Ok(Some(frame));
+        }
+        self.read_frame()
+    }
+
+    /// Returns exactly the frame on screen at `target`: the last frame presented at or
+    /// before it (the frame whose presentation time equals `target` when there is one),
+    /// or the first frame when `target` is before it; `None` only for a stream without
+    /// frames. Later `next_frame` calls continue after the returned frame.
+    ///
+    /// It starts decoding at the last keyframe presented at or before `target` (from the
+    /// GOP index) and discards frames until it reaches the target, so open GOPs and
+    /// reordered (B-frame) streams land on the right frame; when the target is ahead in
+    /// the current GOP it decodes forward without seeking. Works on hardware and software
+    /// decoders, after the end of the stream and backwards.
+    pub fn seek_exact(&mut self, target: Timestamp) -> Result<Option<Frame>> {
+        let gop = self.gop_index()?;
+        let target = target.rescale_floor(self.stream.time_base);
+        let mut keyframe = gop.keyframe_at_or_before(target).unwrap_or(0);
+        let continue_forward = !self.finished
+            && self.last_pts.is_some_and(|last| {
+                last.cmp_time(target) == Ordering::Less
+                    && gop.keyframe_at_or_before(last) == Some(keyframe)
+            })
+            && self.pending.as_ref().is_none_or(|f| {
+                f.pts()
+                    .is_some_and(|p| p.cmp_time(target) != Ordering::Greater)
+            });
+        if !continue_forward {
+            self.seek_to_keyframe(&gop, keyframe)?;
+        }
+        loop {
+            let mut candidate: Option<Frame> = None;
+            loop {
+                let Some(frame) = self.next_frame()? else {
+                    return Ok(candidate);
+                };
+                let Some(pts) = frame.pts() else {
+                    continue;
+                };
+                match pts.cmp_time(target) {
+                    Ordering::Less => candidate = Some(frame),
+                    Ordering::Equal => return Ok(Some(frame)),
+                    Ordering::Greater => {
+                        if candidate.is_some() {
+                            self.pending = Some(frame);
+                            return Ok(candidate);
+                        }
+                        // The first frame is already past the target: either the target is
+                        // before the first frame, or decoding started too late.
+                        if keyframe == 0 {
+                            return Ok(Some(frame));
+                        }
+                        break;
+                    }
+                }
+            }
+            keyframe -= 1;
+            self.seek_to_keyframe(&gop, keyframe)?;
+        }
+    }
+
+    /// [`Self::seek_exact`] to the source frame sequence frame `n` of `map` shows; `None`
+    /// past the end of the clip.
+    pub fn seek_to_sequence_frame(&mut self, map: &TimestampMap, n: u64) -> Result<Option<Frame>> {
+        match map.source_pts(n) {
+            Some(pts) => self.seek_exact(pts),
+            None => Ok(None),
+        }
+    }
+
+    /// Positions the demuxer at a keyframe and resets the decoder.
+    fn seek_to_keyframe(&mut self, gop: &GopIndex, keyframe: usize) -> Result<()> {
+        match gop.keyframe(keyframe) {
+            Some(k) => {
+                let at = Timestamp::new(k.dts.unwrap_or(k.pts).min(k.pts), gop.time_base);
+                self.demuxer.seek_stream(self.stream.index, at)?;
+            }
+            None => self.demuxer.rewind()?,
+        }
+        self.reset_decoder()?;
+        self.draining = false;
+        self.finished = false;
+        self.pending = None;
+        self.skip_through = None;
+        self.last_pts = None;
+        Ok(())
+    }
+
+    /// Drops the decoder's buffered frames after a seek. A hardware decoder that was
+    /// drained (end of stream sent) is reopened instead: FFmpeg's VideoToolbox HEVC path
+    /// returns the last drained frame once more after a flush.
+    fn reset_decoder(&mut self) -> Result<()> {
+        if self.draining && self.decoder.is_hardware() {
+            self.decoder = Decoder::open_with(&self.demuxer, self.stream.index, self.options)?;
+        } else {
+            self.decoder.flush();
+        }
+        Ok(())
+    }
+
+    fn read_frame(&mut self) -> Result<Option<Frame>> {
         loop {
             let hardware = self.decoder.is_hardware();
             let reason = match self.decode_next() {
@@ -235,11 +367,12 @@ impl FrameReader {
         } else {
             self.demuxer.rewind()?;
         }
-        self.decoder.flush();
+        self.reset_decoder()?;
         self.draining = false;
         self.finished = false;
         self.last_pts = None;
         self.skip_through = None;
+        self.pending = None;
         Ok(())
     }
 }

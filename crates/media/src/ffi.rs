@@ -349,6 +349,23 @@ pub(crate) fn index_entries(stream: &ffmpeg::format::stream::Stream) -> Vec<Inde
     }
 }
 
+/// Seeks to the last keyframe of `stream` whose index timestamp (stream ticks) is at or
+/// before `ts` (`avformat_seek_file` with that stream's time base).
+pub(crate) fn seek_stream(
+    input: &mut ffmpeg::format::context::Input,
+    stream: usize,
+    ts: i64,
+) -> Result<(), ffmpeg::Error> {
+    let index = c_int::try_from(stream).map_err(|_| ffmpeg::Error::StreamNotFound)?;
+    // SAFETY: the Input owns a valid AVFormatContext, borrowed mutably for the call.
+    let ret = unsafe { sys::avformat_seek_file(input.as_mut_ptr(), index, i64::MIN, ts, ts, 0) };
+    if ret < 0 {
+        Err(ffmpeg::Error::from(ret))
+    } else {
+        Ok(())
+    }
+}
+
 /// Tells the demuxer to drop every packet of streams not in `keep` before returning them,
 /// so reading one stream does not pay for the others.
 pub(crate) fn keep_only_streams(input: &mut ffmpeg::format::context::Input, keep: &[usize]) {
@@ -648,6 +665,42 @@ impl PixelBuffer {
         &self,
     ) -> Option<objc2_core_foundation::CFRetained<objc2_io_surface::IOSurfaceRef>> {
         objc2_core_video::CVPixelBufferGetIOSurface(Some(&self.0))
+    }
+
+    /// BLAKE3 of the first `row_bytes(plane)` bytes of every row of every plane, read
+    /// through a read-only CPU lock of the surface. For tests that compare decoded
+    /// pictures; playback never reads surfaces on the CPU.
+    pub(crate) fn content_hash(&self, row_bytes: impl Fn(usize) -> usize) -> Option<[u8; 32]> {
+        use objc2_core_video::{
+            CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane,
+            CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
+        };
+        let flags = CVPixelBufferLockFlags::ReadOnly;
+        // SAFETY: locking a retained buffer read-only; unlocked below on every path.
+        if unsafe { CVPixelBufferLockBaseAddress(&self.0, flags) } != 0 {
+            return None;
+        }
+        let mut hasher = blake3::Hasher::new();
+        let mut ok = true;
+        for plane in 0..self.plane_count() {
+            let base = CVPixelBufferGetBaseAddressOfPlane(&self.0, plane) as *const u8;
+            let stride = CVPixelBufferGetBytesPerRowOfPlane(&self.0, plane);
+            let (_, height) = self.plane_size(plane);
+            let len = row_bytes(plane);
+            if base.is_null() || len > stride {
+                ok = false;
+                break;
+            }
+            for row in 0..height as usize {
+                // SAFETY: the base address is locked and the plane holds `height` rows of
+                // `stride` bytes; `len <= stride` was checked.
+                let bytes = unsafe { std::slice::from_raw_parts(base.add(row * stride), len) };
+                hasher.update(bytes);
+            }
+        }
+        // SAFETY: balances the lock above.
+        unsafe { CVPixelBufferUnlockBaseAddress(&self.0, flags) };
+        ok.then(|| *hasher.finalize().as_bytes())
     }
 }
 

@@ -13,6 +13,7 @@
 //! decode-pool thread at a time; [`Packet`] and the frame types are `Send + Sync` and can
 //! be handed to other threads without copying.
 
+pub mod cache;
 pub mod colour;
 mod convert;
 mod decode;
@@ -21,6 +22,7 @@ mod error;
 #[allow(unsafe_code)]
 mod ffi;
 mod format;
+pub mod gop;
 mod hw;
 pub mod log;
 mod probe;
@@ -29,6 +31,7 @@ mod scan;
 mod time;
 pub mod timemap;
 
+pub use cache::{CacheDir, ContentHash};
 pub use colour::{ChromaSiting, ColourSpace, Matrix, Primaries, Range, TransferFn};
 pub use convert::RgbaImage;
 pub use decode::{
@@ -37,6 +40,7 @@ pub use decode::{
 pub use demux::{Demuxer, Packet, StreamSummary};
 pub use error::{FfmpegError, MediaError, Result};
 pub use format::{ColourInfo, ColourRange, Hdr, MediaKind, PixelFormat, SampleFormat, SampleType};
+pub use gop::{GopIndex, GopSource, Keyframe};
 pub use hw::{
     DecodePath, FallbackReason, HwApi, HwFrame, HwPreference, HwSurfaceFormat,
     hardware_decoder_available,

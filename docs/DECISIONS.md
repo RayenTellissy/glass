@@ -110,3 +110,12 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** AV1 is a supported format (the `codec-av1` flag, the fixtures, export) and FFmpeg's built-in AV1 decoder only drives hardware decoders, which the M1/M2 lack (AV1 hardware decode arrived with the M3).
 - **Details:** `scripts/ffmpeg/versions.env` pins dav1d 1.5.4 (BSD 2-clause), meson 1.12.1 and ninja 1.13.2 by URL and SHA-256. `build.sh` bootstraps ninja with its `configure.py`, runs meson from its unpacked source with `python3`, builds dav1d as a shared library into the same prefix, and configures FFmpeg with `--enable-libdav1d`. meson and ninja are build tools only and are not shipped; dav1d's `COPYING` joins `LICENSES/` and its archive joins the release source bundle.
 - **Consequences:** The local prefix grows from 32 MB to 32.8 MB (libdav1d is 0.9 MB). `cargo deny` is unaffected (a C library). python3 must be on `PATH` where the FFmpeg build runs; the CI runners have it.
+
+## 14. Content hash without the modification time
+
+- **Date:** 2026-09-29
+- **Decision:** The content hash that keys the project cache folder's per-file analysis is BLAKE3 over a version tag, the file size, the first and last 1 MiB and eight evenly spaced 64 KiB blocks. It does not include the modification time.
+- **Reason:** The cache must survive relinking, renaming, moving and copying media (ARCHITECTURE section 6), and a copy gets a new modification time. Sampling keeps hashing at 2.5 MiB per file whatever its size.
+- **Details:** `media::cache::ContentHash::of_file`; files up to 2 MiB plus one block are hashed whole. The accepted risk is two same-size files that agree in every sampled block; compressed media differs throughout after any change, and headers and MP4 indexes are always sampled. A version tag in the hash lets the sampling change later without stale matches.
+- **Consequences:** Editing a file in place without changing its size or any sampled block would reuse stale analysis; tools that do that (metadata editors that rewrite a fixed-size field in the middle of a file) are rare for video. A user-facing "rebuild analysis" action covers it.
+
