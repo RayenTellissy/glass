@@ -11,7 +11,7 @@ Glass is built one `PLAN.md` task at a time, in phase order, and every task foll
 1. **Read the plan.** Open `PLAN.md` and read the last 20 lines of the Progress Log at the bottom, the current phase's "Done when" line and the Decision Log.
 2. **Check the machine.** Run `df -h /` (see [Disk space](#disk-space)), then `source scripts/dev-env.sh` in the shell you build from.
 3. **Check the tree.** Run the [full check](#the-full-check). If anything fails on a clean checkout, fixing it is your first task.
-4. **Pick a task.** Take the first unchecked `[ ]` task in phase order. Do not start a later phase while an earlier one has open tasks; only tasks tagged `(parallel)` may be done out of order, at most two at a time.
+4. **Pick a task.** Take the first unchecked `[ ]` task in phase order. Independent tasks, including tasks from later phases whose inputs are already built, may run at the same time in their own worktrees (see [Working in parallel](#working-in-parallel)).
 5. **Start it.** Mark it `[~]` in `PLAN.md` and commit `plan: start <short task name>`.
 6. **Build it.** Meet the task's own "Done when", or its phase's. Add or update a test or a benchmark that proves it. If the change alters how data moves between crates or threads, update `docs/ARCHITECTURE.md` in the same commit. Commit the work as `<area>: <what changed>`, where the area is a crate or folder (`ui`, `media`, `docs`, `scripts`); several commits are fine.
 7. **Check it.** Run the full check, the smoke binary, and the extra checks the change calls for (see [Before you mark a task done](#before-you-mark-a-task-done)).
@@ -21,15 +21,41 @@ That is the three-commit rhythm: `plan: start`, the implementation commit(s), `p
 
 Work happens on `goal/phase-<N>` branches, never on `main`; a branch is merged when its phase's "Done when" passes.
 
+### Working in parallel
+
+Several tasks can be worked on at once, each in its own git worktree, while the machine still runs only one cargo command at a time.
+
+1. **One worktree per task.** Branch `task/<name>` off the phase branch and check it out in a new worktree next to the main checkout, then prepare it:
+
+   ```sh
+   git worktree add ../glass-<name> -b task/<name> goal/phase-<N>
+   cd ../glass-<name>
+   scripts/worktree-setup.sh
+   ```
+
+   `scripts/worktree-setup.sh` generates the worktree's own test media (git-ignored, about 25 MB) and prints the resolved `CARGO_TARGET_DIR` and `FFMPEG_DIR`. Running it again is harmless.
+2. **Source the environment** in every shell: `source scripts/dev-env.sh`. In any worktree it points `CARGO_TARGET_DIR` at the main checkout's `target/` and `FFMPEG_DIR` at the main checkout's `.glass-cache/ffmpeg/<host-triple>/`, so dependencies and `ffmpeg-sys` compile once for all worktrees (workspace crates still get their own artifacts per worktree).
+3. **Run every cargo command through `scripts/cargo-serial`**: build, test, clippy, run and bench. It waits for any cargo command running in another checkout, prints what it is waiting for and for how long, and holds the lock until its own command, test runs included, has finished:
+
+   ```sh
+   source scripts/dev-env.sh && scripts/cargo-serial test --workspace
+   ```
+
+   `cargo fmt` does not compile and may run directly. Stop a run with Ctrl-C or `SIGTERM`, which reach cargo and release the lock; `SIGKILL` releases the lock but can leave cargo running.
+4. **Benchmarks only when nothing else is building.** `cargo-serial` keeps other builds out while a benchmark runs, but also check that no other heavy work is going on first (see [Benchmarks](#benchmarks)).
+5. **Merge back when the task's checks pass.** The task follows the usual three-commit rhythm on its branch; when its full check is green, merge `task/<name>` into the phase branch and remove the worktree (`git worktree remove ../glass-<name>`).
+
+`PLAN.md` and `docs/DECISIONS.md` merge with git's union driver (`.gitattributes`), so branches that each append Progress Log or Decision Log lines, or mark different checkboxes, merge without conflicts. The known risk: a line changed differently on two branches (the same checkbox marked `[~]` on one and `[x]` on the other) is kept both ways, so it appears twice. Read the changed parts of `PLAN.md` after every merge and delete the stale copy.
+
 ### The full check
 
 ```sh
 source scripts/dev-env.sh
-cargo build --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+scripts/cargo-serial build --workspace
+scripts/cargo-serial test --workspace
+scripts/cargo-serial clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
-cargo run --bin smoke
+scripts/cargo-serial run --bin smoke
 ```
 
 `cargo test --workspace` includes the source rules for UI code (i18n keys, no literal text, no literal colours) and the headless frame-budget tests. CI's check job runs the same commands, plus `python3 assets/theme/check.py` and the source rules as their own step.
@@ -71,9 +97,9 @@ The reference development machine is an Apple M2 with 8 GB of RAM and a small di
 
 #### Concurrency
 
-- **One `cargo build` or `cargo test` at a time** on the machine. Anything else that compiles waits.
+- **One cargo command at a time** on the machine (build, test, clippy, run, bench). Anything else that compiles waits. `scripts/cargo-serial` enforces this across every checkout and worktree of the repo, so run cargo through it.
 - The compiler is capped at four jobs: `.cargo/config.toml` sets `[build] jobs = 4`, and `scripts/dev-env.sh` exports `CARGO_BUILD_JOBS=4` for tools that ignore the config.
-- At most 10 concurrent workers (terminals running tasks, automated sessions), coordinator included; 3 to 5 is better. Only `(parallel)` tasks run beside the current phase task, at most two of them.
+- At most 10 concurrent workers (terminals running tasks, automated sessions), coordinator included; 3 to 5 is better. Each works in its own worktree (see [Working in parallel](#working-in-parallel)).
 - **Benchmarks and the stress project run alone:** serially, with no build, test or other heavy app running. Timing taken on a busy machine is not a result.
 - If the machine swaps, or a build takes more than three times its usual time, drop to a single worker for the rest of the session.
 
@@ -97,7 +123,7 @@ The easiest way to set up a shell is to source the development environment scrip
 source scripts/dev-env.sh
 ```
 
-It exports `CARGO_BUILD_JOBS=4` and, when `FFMPEG_DIR` is not already set, points it at the FFmpeg the bindings build against: the pinned build in `.glass-cache/ffmpeg/<host-triple>/` when `scripts/ffmpeg/build.sh` has produced one (see [FFmpeg](#ffmpeg)), otherwise Homebrew's FFmpeg (`brew install ffmpeg`). No machine-specific path is committed to the repo.
+It exports `CARGO_BUILD_JOBS=4`, points `CARGO_TARGET_DIR` at the main checkout's `target/` (shared by every worktree) and, when `FFMPEG_DIR` is not already set, points it at the FFmpeg the bindings build against: the pinned build in the main checkout's `.glass-cache/ffmpeg/<host-triple>/` (or under `GLASS_FFMPEG_CACHE` when set) when `scripts/ffmpeg/build.sh` has produced one (see [FFmpeg](#ffmpeg)), otherwise Homebrew's FFmpeg (`brew install ffmpeg`). No machine-specific path is committed to the repo.
 
 ### Logging
 
