@@ -10,8 +10,19 @@
 //! [`yuv::YuvConverter`] turns those planes into linear or encoded RGBA with the frame's
 //! [`media::ColourSpace`].
 
+//!
+//! Each frame is described as a [`graph::Graph`] of [`nodes`], compiled (topological
+//! order, culling, intermediate aliasing through a [`graph::TexturePool`]) and executed
+//! with a [`renderer::Renderer`], timed per pass by a [`profiler::GpuProfiler`].
+
+pub mod colour;
+pub mod graph;
 #[allow(unsafe_code)]
 pub mod interop;
+pub mod nodes;
+pub mod profiler;
+pub mod renderer;
+pub mod shaders;
 pub mod upload;
 pub mod yuv;
 
