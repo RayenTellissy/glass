@@ -14,7 +14,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  # Prebuilt FFmpeg used until the pinned build from scripts/ffmpeg/ is cached for the target.
+  # Static FFmpeg command-line tools used only to generate the reference media on Linux
+  # (it needs libvpx and SVT-AV1, which the pinned library build leaves out).
   BTBN_TAG: "autobuild-2026-09-28-13-06"
   BTBN_VERSION: "n9.0.2-14-gebafaee10a"
 
@@ -49,38 +50,68 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Install FFmpeg (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install ffmpeg nasm pkg-config
-          echo "FFMPEG_DIR=$(brew --prefix ffmpeg)" >> "$GITHUB_ENV"
+      # The pinned FFmpeg libraries from scripts/ffmpeg/build.sh, rebuilt only when the
+      # pinned versions or the script change.
+      - name: Cache FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .glass-cache/ffmpeg/src
+            .glass-cache/ffmpeg/${{ matrix.target }}
+          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('scripts/ffmpeg/versions.env', 'scripts/ffmpeg/build.sh') }}
 
-      - name: Install FFmpeg (Linux)
+      - name: Build prerequisites (macOS)
+        if: runner.os == 'macOS'
+        # Homebrew's FFmpeg supplies only the command-line tools for the reference media;
+        # nasm is built by the script when it is missing.
+        run: brew install ffmpeg
+
+      - name: Build prerequisites (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends nasm pkg-config clang libclang-dev
-          name="ffmpeg-${BTBN_VERSION}-linux64-gpl-shared-9.0"
-          curl -fsSL -o "$RUNNER_TEMP/ffmpeg.tar.xz" \
+          sudo apt-get install -y --no-install-recommends nasm cmake libva-dev zlib1g-dev clang libclang-dev
+          name="ffmpeg-${BTBN_VERSION}-linux64-gpl-9.0"
+          curl -fsSL -o "$RUNNER_TEMP/ffmpeg-cli.tar.xz" \
             "https://github.com/BtbN/FFmpeg-Builds/releases/download/${BTBN_TAG}/${name}.tar.xz"
-          tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$RUNNER_TEMP"
-          prefix="$RUNNER_TEMP/$name"
-          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=$prefix/lib" >> "$GITHUB_ENV"
-          echo "$prefix/bin" >> "$GITHUB_PATH"
+          tar -xJf "$RUNNER_TEMP/ffmpeg-cli.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name/bin" >> "$GITHUB_PATH"
 
-      - name: Install FFmpeg (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
+      - name: Build prerequisites (Windows)
+        if: runner.os == 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          path-type: inherit
+          install: make diffutils tar bzip2 xz nasm pkgconf
+
+      - name: MSVC environment (Windows)
+        if: runner.os == 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build FFmpeg (macOS, Linux)
+        if: runner.os != 'Windows'
+        run: scripts/ffmpeg/build.sh --jobs 4
+
+      - name: Build FFmpeg (Windows)
+        if: runner.os == 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
         run: |
-          $name = "ffmpeg-$env:BTBN_VERSION-win64-gpl-shared-9.0"
-          $zip = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
-          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/$env:BTBN_TAG/$name.zip" -OutFile $zip
-          Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP
-          $prefix = Join-Path $env:RUNNER_TEMP $name
-          "FFMPEG_DIR=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          (Join-Path $prefix "bin") | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          # MSYS2's coreutils link.exe would shadow the MSVC linker.
+          rm -f /usr/bin/link.exe
+          scripts/ffmpeg/build.sh --jobs 4
+
+      - name: Use the pinned FFmpeg
+        shell: bash
+        run: |
+          prefix="$GITHUB_WORKSPACE/.glass-cache/ffmpeg/${{ matrix.target }}"
+          cat "$prefix/BUILDINFO"
+          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
+          case "$RUNNER_OS" in
+            Linux) echo "LD_LIBRARY_PATH=$prefix/lib" >> "$GITHUB_ENV" ;;
+            Windows) echo "$prefix/bin" >> "$GITHUB_PATH" ;;
+          esac
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -110,3 +141,23 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check all
+
+  # GPL: every release carries the exact FFmpeg, x264 and x265 sources it was built from.
+  release-sources:
+    name: FFmpeg release sources
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package sources
+        run: |
+          scripts/ffmpeg/package-sources.sh --archive
+          mv .glass-cache/ffmpeg/release-sources.tar.gz "glass-${GITHUB_REF_NAME}-ffmpeg-sources.tar.gz"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: glass-${{ github.ref_name }}-ffmpeg-sources.tar.gz
