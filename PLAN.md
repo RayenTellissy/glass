@@ -150,7 +150,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [ ] Still images, image sequences, GIF, WebP, HEIC via `image` and platform decoders (needs-human: blocked only on the Windows sub-task below)
   - [x] `media::source::VideoSource` for video files, stills (PNG, JPEG, TIFF, BMP, WebP, GIF with `image`; HEIC, HEIF and AVIF with ImageIO on macOS), animated GIF and WebP (variable-rate timelines from frame delays) and numbered sequences (caller's rate, gaps reported); colour from `cICP` and ICC with Display P3 flagged; EXIF orientation applied; fixtures and tests
   - [ ] HEIC, HEIF and AVIF stills on Windows through WIC with the HEIF and AV1 Video Extensions, replacing the `media.unsupported.heif`/`avif` error there (needs-human: needs a Windows PC to implement and verify)
-- [ ] Audio decode to f32 planar at the project rate using a high-quality resampler (`rubato`)
+- [~] Audio decode to f32 planar at the project rate using a high-quality resampler (`rubato`)
 
 ### Analysis (background, cancellable, results cached under the project's cache folder)
 - [ ] Analysis job system: priority queue, cancellation, progress, disk cache keyed by content hash
