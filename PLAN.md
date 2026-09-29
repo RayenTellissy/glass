@@ -424,7 +424,7 @@ Done when: every benchmark and budget is enforced in CI and the stress project p
 - [ ] Memory ceiling: configurable cache size, never swaps (parallel)
 - [ ] Battery mode: lower preview resolution, pause background analysis (parallel)
 - [ ] Fuzzing of parsers: project files, LUTs, subtitles, with `cargo-fuzz`, run in CI only (parallel)
-- [ ] UI snapshot tests for every panel in light and dark (parallel)
+- [~] UI snapshot tests for every panel in light and dark (parallel)
 - [ ] Accessibility: keyboard for everything, screen reader labels, high contrast, scalable UI (parallel)
 - [ ] Full UI localisation and dictionary check in CI (parallel)
 
