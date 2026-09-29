@@ -107,6 +107,13 @@ jobs:
           [ "$RUNNER_OS" = macOS ] && args+=(--target ${{ matrix.target }})
           scripts/package/${{ matrix.script }} "${args[@]}"
 
+      # Fails the release when an installer outgrows size-budget.toml.
+      - name: Size check
+        shell: bash
+        run: |
+          shopt -s nullglob
+          scripts/size-check.sh target/package/${{ matrix.target }}/*.{dmg,msix,AppImage}
+
       - uses: actions/upload-artifact@v4
         with:
           name: artifacts-package-${{ matrix.target }}

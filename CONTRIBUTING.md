@@ -79,3 +79,13 @@ scripts/package/make-dmg.sh --binary target/dist/glass
 ```
 
 It writes `target/package/<target>/Glass.app` and `glass-<version>-<target>.dmg`, signed ad hoc unless `GLASS_CODESIGN_IDENTITY` names a Developer ID identity, and fails if any bundled binary still references a library outside the bundle or the system. Icons are taken from `assets/icons/` when present.
+
+### Size budget
+
+Every installer has a budget in bytes in `size-budget.toml` (30 MiB each for the DMG, MSI, MSIX and AppImage to start). `package.yml` runs the check after building each installer, and it can be run on any local build:
+
+```sh
+scripts/size-check.sh target/package/aarch64-apple-darwin/*.dmg
+```
+
+It prints a table of size, budget and headroom per installer and exits 1 when any is over. Raising a budget is allowed only with a Decision Log line in `PLAN.md` and the same entry in `docs/DECISIONS.md`, in the same commit as the new number.
