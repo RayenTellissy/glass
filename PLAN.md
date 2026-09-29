@@ -125,7 +125,7 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
 - [ ] Benchmark harness with `criterion` and a `bench` CI job that posts results as a PR comment (needs-human: blocked only on the sub-task below)
   - [x] `criterion` harness: workspace dev-dependency, `benches/` targets, `cargo bench --workspace --bench "*"` with short settings and baselines documented in `CONTRIBUTING.md`, and `scripts/bench-report.py` formatting a baseline comparison as Markdown
   - [ ] `bench` job in `ci.yml`: saves a `main` baseline on pushes to main, compares pull requests against it and posts the report as a PR comment (needs-human: no GitHub remote yet; push, merge once to main to seed the baseline, then open a PR and confirm the comment appears)
-- [~] Logging with `tracing`, per-crate filters, in-memory ring buffer exposed to the UI later
+- [x] Logging with `tracing`, per-crate filters, in-memory ring buffer exposed to the UI later
 - [ ] Frame-time monitor: records UI frame durations, exposes p50 and p99, fails tests that exceed budget
 - [ ] i18n: `assets/i18n/en.json`, a `t!()` macro, and a CI check that every key used exists and no literal strings appear in UI code
 - [ ] Theme: tokens in `assets/theme/` (colour, type, spacing, radius, for the default, opposite, and high-contrast themes) loaded into the egui style, and a CI check that no literal colours appear in UI code. Values come from the `00 Foundations` page of the Paper file
@@ -517,3 +517,4 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 1 — size check — a054f90 — `scripts/size-check.sh` against `size-budget.toml` (30 MiB per DMG, MSI, MSIX, AppImage): local arm64 DMG with icons 11.99 MiB passes, a 30 MiB + 1 byte fake fails with exit 1; the CI run is covered by the needs-human tagged-release task, and the MSI is not checked yet because dist builds it with no step after the build
 - 2026-09-29 — Phase 1 — benchmark harness — 6577e1f — criterion 0.8.2 (no plots, no rayon); `engine` bench `enabled_features` 0.73 ns on M2 (stands in for M1) with `--quick`, baseline save and compare checked locally, report script output checked; real engine and UI benchmarks join as the code lands
 - 2026-09-29 — Phase 1 — bench CI job with PR comment — needs-human: no GitHub remote yet; job added to `.github/workflows/ci.yml` in 6577e1f
+- 2026-09-29 — Phase 1 — logging — d131061 — tracing 0.1.44, tracing-subscriber 0.3.23 in `engine::logging`; ring of 10,000 events: record 0.14 µs, full snapshot 0.77 ms on M2 (stands in for M1); tests for wraparound, level and target filters, 8 concurrent writers with a reader
