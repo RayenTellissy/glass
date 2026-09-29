@@ -24,6 +24,9 @@ render = { path = "crates/render" }
 ui = { path = "crates/ui" }
 
 serde_json = "1"
+tracing = "0.1"
+# `tracing-log` routes `log` records (wgpu, winit, eframe) into tracing.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "ansi", "env-filter", "tracing-log", "smallvec"] }
 
 # Benchmarks only (dev-dependency). Plots and rayon are left out: CI reads the JSON
 # estimates, and benchmarks run one at a time anyway.

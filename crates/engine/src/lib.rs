@@ -1,6 +1,8 @@
 //! The Glass engine: scheduler, playback state, timeline evaluation into render graphs,
 //! dirty-range invalidation, rendered-frame cache policy, look-ahead, background render,
-//! the export pipeline and the analysis job system.
+//! the export pipeline and the analysis job system, plus logging setup for every binary.
+
+pub mod logging;
 
 /// Names of the optional codec and AI features compiled into this build.
 pub fn enabled_features() -> Vec<&'static str> {

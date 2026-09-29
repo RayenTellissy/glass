@@ -25,6 +25,8 @@ render.workspace = true
 audio.workspace = true
 plugins.workspace = true
 assets.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

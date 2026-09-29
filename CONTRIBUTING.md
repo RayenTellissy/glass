@@ -14,6 +14,10 @@ source scripts/dev-env.sh
 
 It exports `CARGO_BUILD_JOBS=4` and, when `FFMPEG_DIR` is not already set, points it at the FFmpeg the bindings build against: the pinned build in `.glass-cache/ffmpeg/<host-triple>/` when `scripts/ffmpeg/build.sh` has produced one (see [FFmpeg](#ffmpeg)), otherwise Homebrew's FFmpeg (`brew install ffmpeg`). No machine-specific path is committed to the repo.
 
+### Logging
+
+Binaries log with `tracing` to stderr. `GLASS_LOG` sets the filter in `EnvFilter` syntax, per crate or module: `GLASS_LOG=debug`, `GLASS_LOG=engine=trace,info`, `GLASS_LOG=warn`. Unset, it is `info` with wgpu, naga and winit at `warn`. Code on the audio callback must not log.
+
 ### Feature flags
 
 `codec-av1`, `codec-prores-sw`, `ai-whisper` and `ai-segmentation` are off by default so local builds stay fast. Release builds turn all of them on with the `app` feature `release-full`, because Cargo features cannot follow the build profile:
