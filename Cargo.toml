@@ -8,7 +8,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
+authors = ["Glass contributors"]
 publish = false
+# Placeholder until the GitHub remote exists; dist needs it to generate the release workflow.
+repository = "https://github.com/OWNER/glass"
 
 [workspace.dependencies]
 assets = { path = "crates/assets" }
@@ -28,6 +31,11 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
 
 [workspace.lints.rust]
 # A crate that must call platform APIs keeps that code in one `ffi`, `sys` or

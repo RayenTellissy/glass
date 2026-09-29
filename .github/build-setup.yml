@@ -1,0 +1,59 @@
+# Steps dist inserts into each build-local-artifacts job of release.yml, before
+# `dist build` (see `github-build-setup` in dist-workspace.toml). They mirror the
+# FFmpeg steps of ci.yml: the pinned FFmpeg libraries for the job's target,
+# cached on the pinned versions, exported as FFMPEG_DIR. On Windows they also
+# write the WiX fragment that installs the FFmpeg DLLs and licences with the MSI.
+- name: Cache FFmpeg
+  id: ffmpeg-cache
+  uses: actions/cache@v4
+  # One path: dist copies these steps into release.yml and mangles multi-line values.
+  with:
+    path: .glass-cache/ffmpeg
+    key: ffmpeg-release-${{ join(matrix.targets, '') }}-${{ hashFiles('scripts/ffmpeg/versions.env', 'scripts/ffmpeg/build.sh') }}
+
+- name: FFmpeg build prerequisites (Linux)
+  if: runner.os == 'Linux' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+  run: |
+    sudo apt-get update
+    sudo apt-get install -y --no-install-recommends nasm cmake libva-dev zlib1g-dev
+
+- name: FFmpeg build prerequisites (Windows)
+  if: runner.os == 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+  uses: msys2/setup-msys2@v2
+  with:
+    msystem: MSYS
+    path-type: inherit
+    install: make diffutils tar bzip2 xz nasm pkgconf
+
+- name: MSVC environment (Windows)
+  if: runner.os == 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+  uses: ilammy/msvc-dev-cmd@v1
+
+- name: Build FFmpeg (macOS, Linux)
+  if: runner.os != 'Windows'
+  shell: bash
+  run: scripts/ffmpeg/build.sh --jobs 4
+
+- name: Build FFmpeg (Windows)
+  if: runner.os == 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+  shell: msys2 {0}
+  run: |
+    # MSYS2's coreutils link.exe would shadow the MSVC linker.
+    rm -f /usr/bin/link.exe
+    scripts/ffmpeg/build.sh --jobs 4
+
+- name: Use the pinned FFmpeg
+  shell: bash
+  run: |
+    prefix="$GITHUB_WORKSPACE/.glass-cache/ffmpeg/${{ join(matrix.targets, '') }}"
+    cat "$prefix/BUILDINFO"
+    echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
+    case "$RUNNER_OS" in
+      Linux) echo "LD_LIBRARY_PATH=$prefix/lib" >> "$GITHUB_ENV" ;;
+      Windows) echo "$prefix/bin" >> "$GITHUB_PATH" ;;
+    esac
+
+- name: WiX fragment for the FFmpeg DLLs (Windows)
+  if: runner.os == 'Windows'
+  shell: bash
+  run: scripts/package/wix-ffmpeg-fragment.sh "$FFMPEG_DIR" crates/app/wix/ffmpeg.wxs

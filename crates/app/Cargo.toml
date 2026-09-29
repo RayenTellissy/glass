@@ -5,6 +5,19 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Glass, a fast native video editor"
+
+# Only the `glass` binary ships; every other crate stays out of the release.
+[package.metadata.dist]
+dist = true
+
+[package.metadata.wix]
+upgrade-guid = "C30C6E25-405F-40E7-A9E1-2FDF86517D3C"
+path-guid = "B0EB980E-99BF-4636-AF4D-86B444F87100"
+license = false
+eula = false
 
 [[bin]]
 name = "glass"

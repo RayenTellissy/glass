@@ -142,22 +142,5 @@ jobs:
         with:
           command: check all
 
-  # GPL: every release carries the exact FFmpeg, x264 and x265 sources it was built from.
-  release-sources:
-    name: FFmpeg release sources
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: check
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Package sources
-        run: |
-          scripts/ffmpeg/package-sources.sh --archive
-          mv .glass-cache/ffmpeg/release-sources.tar.gz "glass-${GITHUB_REF_NAME}-ffmpeg-sources.tar.gz"
-
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: glass-${{ github.ref_name }}-ffmpeg-sources.tar.gz
+# Tagged releases (installers and the GPL source bundle) are built by release.yml,
+# which dist generates, and package.yml.
