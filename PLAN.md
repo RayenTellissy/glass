@@ -471,6 +471,7 @@ Append one line per decision: date, decision, reason. Add the same entry to `doc
 - 2026-09-29 — Each task uses three commits: plan: start, the implementation commit(s), and plan: done, whose Progress Log line cites the implementation commit hash. Reason: the log line can then point at the commit that did the work.
 - 2026-09-29 — proto-decode CPU budget ("under 5% CPU per stream") is judged as whole-machine utilisation, counting the app process plus the system decoder service, at 60 fps paced. Measured on M2: 2.18% of machine (9.20% + 8.26% of one core). Reason: the plan does not define the unit; this is how system-wide decode cost is usually stated, and the per-core numbers are recorded in proto-decode/RESULTS.md for re-judging on the reference M1.
 - 2026-09-29 — FFmpeg pinned to 9.0.x instead of 7.x, still a GPL shared build with x264 and x265, used through ffmpeg-next 9. Reason: the maintained ffmpeg-next 9 bindings build against it, and local development and release builds should use the same FFmpeg.
+- 2026-09-29 — Phase 0 is closed with the UI, GPU, and macOS decode defaults confirmed by prototypes. Defaults without a Phase 0 prototype (cpal, im and serde_json, wasmtime, whisper-rs, cargo-dist, Vulkan, NVDEC and VAAPI, min targets) are adopted and confirmed by the tests and benchmarks of the phase that builds them. The GTX 1660 and Windows D3D11VA checks stay open as needs-human. Reason: Phase 0 only defines prototypes for UI, GPU, and decode, and the missing hardware should not block the engine work that follows.
 
 ## Progress Log
 
