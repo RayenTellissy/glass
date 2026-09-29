@@ -138,7 +138,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 
 ### Decode
 - [x] Safe wrapper over `ffmpeg-next`: `Demuxer`, `Decoder`, `Frame`, `Packet`, with error types and no `unsafe` outside `media::ffi`
-- [~] Probe: streams, codecs, duration, frame rate, colour metadata, rotation, timecode
+- [x] Probe: streams, codecs, duration, frame rate, colour metadata, rotation, timecode
 - [ ] Software decode path for video and audio, tested against every fixture
 - [ ] Hardware decode: VideoToolbox. Done when: zero-copy `IOSurface` → Metal texture
 - [ ] Hardware decode: D3D11VA. Done when: shared handle → DX12 texture without CPU copy (needs-human: needs a Windows PC with a D3D11 GPU to implement and verify)
@@ -529,3 +529,4 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 2 — hardware decode D3D11VA — needs-human: no Windows PC
 - 2026-09-29 — Phase 2 — hardware decode NVDEC and VAAPI — needs-human: no NVIDIA or Linux GPU hardware
 - 2026-09-29 — Phase 2 — safe ffmpeg wrapper — abd7bda — ffmpeg-next 9.0.0 and thiserror 2 in `media`; `Demuxer`, `Packet`, `Decoder` (send/receive, flush, EOF), `VideoFrame`/`AudioFrame` in native formats, `MediaError` with path, stream and FFmpeg code, `Rational`/`Timestamp`, FFmpeg log into `tracing` target `ffmpeg`; all unsafe in `media::ffi`; 11 unit and 6 fixture tests, `cargo deny check` passes
+- 2026-09-29 — Phase 2 — probe — ed2e176 — `media::probe` → `MediaInfo`; VFR when the longest frame interval exceeds 1.5x the shortest over up to 2000 index timestamps (MOV/MP4) or 300 scanned packets, no decoding; every MANIFEST entry matches (codec, size, pixel format, rate, duration ±0.1 s, VFR, audio, rotation, timecode), new rotated 90° + `01:02:03:04` tmcd fixture checked by `--verify`; probe bench on M2 (stands in for M1): ProRes MOV 0.16 ms, H.264 1080p 3.7 ms, 4K 13.2 ms, VP9 WebM 4.0 ms, PNG 10.3 ms (FFmpeg's stream-info pass decodes a few H.264 and image frames); image-sequence frame rate deferred to the stills task
