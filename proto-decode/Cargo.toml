@@ -1,0 +1,20 @@
+[package]
+name = "proto-decode"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace]
+
+[dependencies]
+ffmpeg-next = { version = "9", default-features = false, features = ["codec", "format"] }
+wgpu = "30"
+pollster = "0.4"
+png = "0.18"
+libc = "0.2"
+objc2 = "0.6"
+objc2-core-foundation = "0.3"
+objc2-io-surface = { version = "0.3", features = ["IOSurfaceRef", "IOSurfaceTypes"] }
+objc2-metal = { version = "0.3", features = ["MTLTexture", "MTLDevice", "MTLResource", "MTLPixelFormat", "MTLTypes", "objc2-io-surface"] }
+objc2-core-video = { version = "0.3", features = ["CVMetalTextureCache", "CVMetalTexture", "CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn", "CVPixelBufferIOSurface", "objc2-metal", "objc2-io-surface"] }

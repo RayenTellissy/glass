@@ -2,3 +2,4 @@ target/
 .DS_Store
 tests/fixtures/generated/
 .glass-cache/
+proto-decode/media/
