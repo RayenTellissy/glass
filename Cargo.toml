@@ -37,6 +37,12 @@ tracing = "0.1"
 # `tracing-log` routes `log` records (wgpu, winit, eframe) into tracing.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "ansi", "env-filter", "tracing-log", "smallvec"] }
 
+# Opt-in local crash reports: an in-process handler and an out-of-process minidump
+# writer (EmbarkStudios). Local IPC only, no network.
+crash-handler = "0.8"
+minidumper = "0.11"
+dirs = "7"
+
 # Benchmarks only (dev-dependency). Plots and rayon are left out: CI reads the JSON
 # estimates, and benchmarks run one at a time anyway.
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }

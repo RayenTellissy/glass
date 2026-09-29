@@ -6,6 +6,11 @@
     "app.name": "Glass",
     "theme.dark": "Dark",
     "theme.light": "Light",
-    "theme.high_contrast": "High contrast"
+    "theme.high_contrast": "High contrast",
+    "settings.crash_reports.title": "Crash reports",
+    "settings.crash_reports.toggle": "Save a report when Glass quits unexpectedly",
+    "settings.crash_reports.detail": "Crash reports are kept on this computer · Glass never sends them anywhere",
+    "settings.crash_reports.show_folder": "Show crash reports",
+    "settings.crash_reports.none": "No crash reports"
   }
 }

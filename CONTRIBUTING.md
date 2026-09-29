@@ -18,6 +18,17 @@ It exports `CARGO_BUILD_JOBS=4` and, when `FFMPEG_DIR` is not already set, point
 
 Binaries log with `tracing` to stderr. `GLASS_LOG` sets the filter in `EnvFilter` syntax, per crate or module: `GLASS_LOG=debug`, `GLASS_LOG=engine=trace,info`, `GLASS_LOG=warn`. Unset, it is `info` with wgpu, naga and winit at `warn`. Code on the audio callback must not log.
 
+### Crash reports
+
+Crash reports are off unless turned on. Until the Settings dialog exists, turn them on with `{"crash_reports": true}` in `settings.json` in the user config folder, or with `GLASS_CRASH_REPORTS=1` (`0` forces them off). Reports go to `crashes/` in the user data folder: a minidump (`.dmp`) and a text report (`.txt`) for a native crash, a text report only for a panic. Nothing is ever uploaded. To try it:
+
+```sh
+GLASS_CRASH_REPORTS=1 GLASS_DATA_DIR=/tmp/glass-data GLASS_DEBUG_CRASH=segfault cargo run --bin glass
+ls /tmp/glass-data/crashes
+```
+
+`GLASS_DEBUG_CRASH` also takes `abort` and `panic`; `GLASS_CONFIG_DIR` and `GLASS_DATA_DIR` move the two folders. Read a minidump with `minidump-stackwalk` (`cargo install minidump-stackwalk`) and the matching build's debug symbols.
+
 ### Feature flags
 
 `codec-av1`, `codec-prores-sw`, `ai-whisper` and `ai-segmentation` are off by default so local builds stay fast. Release builds turn all of them on with the `app` feature `release-full`, because Cargo features cannot follow the build profile:
