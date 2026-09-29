@@ -104,7 +104,7 @@ Size target: installers around 30 MB, not counting asset packs and models, which
 Done when: a tagged push produces signed-or-unsigned installers for both platforms, CI is green, and `cargo run --bin smoke` exits 0.
 
 - [x] `.cargo/config.toml` with `[build] jobs = 4`, and `CARGO_BUILD_JOBS=4` documented in `CONTRIBUTING.md`
-- [~] Lean dev builds to save disk: `[profile.dev] debug = "line-tables-only"` and `[profile.dev.package."*"] debug = false` in the workspace `Cargo.toml`
+- [x] Lean dev builds to save disk: `[profile.dev] debug = "line-tables-only"` and `[profile.dev.package."*"] debug = false` in the workspace `Cargo.toml`
 - [x] Cargo workspace with crates: `app`, `ui`, `engine`, `media`, `render`, `project`, `audio`, `plugins`, `assets`, `smoke`
 - [ ] Feature flags: `codec-av1`, `codec-prores-sw`, `ai-whisper`, `ai-segmentation`, off by default, all on in release builds
 - [ ] `smoke` binary: opens `tests/fixtures/reference.proj`, plays 2 s headless, exports 1 s, exits 0. Starts as a stub that exits 0 and grows with each phase
@@ -489,3 +489,4 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 0 — move prototypes to experiments — f21aeaf
 - 2026-09-29 — Phase 1 — cargo build jobs config — 5b96ed1
 - 2026-09-29 — Phase 1 — cargo workspace — f07f944
+- 2026-09-29 — Phase 1 — lean dev builds — 2db67d4
