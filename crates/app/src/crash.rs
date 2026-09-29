@@ -33,9 +33,13 @@ use serde::{Deserialize, Serialize};
 
 /// First argument that turns `glass` into the crash monitor.
 pub const MONITOR_ARG: &str = "--crash-monitor";
-/// For testing crash reports: `segfault`, `abort` or `panic` makes `glass` crash that way
-/// right after startup.
+/// For testing crash reports: `segfault`, `abort` or `panic` makes a debug build of
+/// `glass` crash that way right after startup. Release builds ignore it.
 pub const DEBUG_CRASH_ENV: &str = "GLASS_DEBUG_CRASH";
+
+/// Longest socket path, in bytes: `sockaddr_un.sun_path` holds 104 bytes on macOS and
+/// 108 on Linux, including the terminating NUL.
+const MAX_SOCKET_PATH: usize = 103;
 
 /// Log lines kept in a report.
 const LOG_LINES: usize = 200;
@@ -112,7 +116,9 @@ impl Drop for CrashReporting {
 }
 
 /// Turns crash reporting on: the panic hook always, the minidump monitor when it starts.
-pub fn install(dir: &Path) -> CrashReporting {
+/// Reports go to `dir`; the monitor's socket goes in a private folder under the
+/// runtime folder or `data` (see [`socket_path`]).
+pub fn install(dir: &Path, data: &Path) -> CrashReporting {
     let mut reporting = CrashReporting {
         stop: None,
         log_thread: None,
@@ -125,7 +131,7 @@ pub fn install(dir: &Path) -> CrashReporting {
     }
     install_panic_hook(dir.to_path_buf());
 
-    let (monitor, crash_client, info_client) = match start_monitor(dir) {
+    let (monitor, crash_client, info_client) = match start_monitor(dir, data) {
         Ok(started) => started,
         Err(error) => {
             tracing::warn!(
@@ -159,11 +165,88 @@ pub fn install(dir: &Path) -> CrashReporting {
     reporting
 }
 
-fn start_monitor(dir: &Path) -> Result<(Child, Arc<Client>, Arc<Client>), String> {
-    let socket = std::env::temp_dir().join(format!("glass-crash-{}.sock", std::process::id()));
+/// Where the app and its monitor meet: `crash-<pid>.sock` in a folder only this user can
+/// open (created `0700` on Unix), never in a shared `/tmp`. The first candidate whose
+/// path fits in [`MAX_SOCKET_PATH`] wins:
+///
+/// - Unix: `$XDG_RUNTIME_DIR/glass` when that variable is set, then `<data>/run`, then
+///   on macOS only the per-user temporary folder (`$TMPDIR`, under `/var/folders`).
+/// - Windows: the per-user temporary folder (`%TEMP%`).
+fn socket_path(
+    pid: u32,
+    runtime: Option<OsString>,
+    data: &Path,
+    temp: &Path,
+) -> Result<PathBuf, String> {
+    let name = format!("crash-{pid}.sock");
+    let mut candidates = Vec::new();
+    if cfg!(unix) {
+        if let Some(runtime) = runtime.filter(|r| Path::new(r).is_absolute()) {
+            candidates.push(PathBuf::from(runtime).join("glass"));
+        }
+        candidates.push(data.join("run"));
+        if cfg!(target_os = "macos") {
+            candidates.push(temp.join("glass"));
+        }
+    } else {
+        candidates.push(temp.to_path_buf());
+    }
+    let mut problems = Vec::new();
+    for folder in candidates {
+        let socket = folder.join(&name);
+        let len = socket.as_os_str().len();
+        if len > MAX_SOCKET_PATH {
+            problems.push(format!(
+                "{} is {len} bytes, over the {MAX_SOCKET_PATH}-byte socket path limit",
+                socket.display()
+            ));
+            continue;
+        }
+        match private_dir(&folder) {
+            Ok(()) => return Ok(socket),
+            Err(error) => problems.push(format!("{}: {error}", folder.display())),
+        }
+    }
+    Err(format!(
+        "no folder for the socket ({})",
+        problems.join("; ")
+    ))
+}
+
+/// Creates `dir` if needed and, on Unix, makes it a real folder readable only by us.
+fn private_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)?;
+        let meta = std::fs::symlink_metadata(dir)?;
+        if !meta.is_dir() {
+            return Err(std::io::Error::other("not a folder"));
+        }
+        if meta.permissions().mode() & 0o777 != 0o700 {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir)
+    }
+}
+
+fn start_monitor(dir: &Path, data: &Path) -> Result<(Child, Arc<Client>, Arc<Client>), String> {
+    let socket = socket_path(
+        std::process::id(),
+        std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()),
+        data,
+        &std::env::temp_dir(),
+    )?;
     let socket_str = socket
         .to_str()
-        .ok_or("the temporary folder path is not UTF-8")?
+        .ok_or("the socket path is not UTF-8")?
         .to_owned();
     let _ = std::fs::remove_file(&socket);
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -386,7 +469,13 @@ fn os_description() -> String {
     }
 }
 
-/// Makes `glass` crash on purpose when [`DEBUG_CRASH_ENV`] asks for it.
+/// Makes a debug build of `glass` crash on purpose when [`DEBUG_CRASH_ENV`] asks for it.
+/// Release builds compile this to nothing, so a shipped `glass` ignores the variable.
+#[cfg(not(debug_assertions))]
+pub fn trigger_debug_crash() {}
+
+/// Makes a debug build of `glass` crash on purpose when [`DEBUG_CRASH_ENV`] asks for it.
+#[cfg(debug_assertions)]
 pub fn trigger_debug_crash() {
     let Ok(kind) = std::env::var(DEBUG_CRASH_ENV) else {
         return;
@@ -566,6 +655,92 @@ impl ServerHandler for MonitorHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fresh(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("gst-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("test folder");
+        dir
+    }
+
+    #[cfg(unix)]
+    fn mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::metadata(path)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn socket_goes_in_the_runtime_folder_when_there_is_one() {
+        let base = fresh("runtime");
+        let (runtime, data) = (base.join("x"), base.join("data"));
+        std::fs::create_dir_all(&runtime).expect("runtime");
+        let socket = socket_path(42, Some(runtime.clone().into()), &data, &base).expect("path");
+        assert_eq!(socket, runtime.join("glass").join("crash-42.sock"));
+        assert_eq!(mode(&runtime.join("glass")), 0o700);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn socket_falls_back_to_a_private_folder_in_the_data_folder() {
+        let base = fresh("data");
+        let data = base.join("data");
+        // A relative runtime folder is ignored, as the XDG spec asks.
+        let socket = socket_path(7, Some("relative".into()), &data, &base).expect("path");
+        assert_eq!(socket, data.join("run").join("crash-7.sock"));
+        assert_eq!(mode(&data.join("run")), 0o700);
+
+        // A folder left with looser permissions is tightened.
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(data.join("run"), std::fs::Permissions::from_mode(0o755))
+                .expect("chmod");
+        }
+        socket_path(7, None, &data, &base).expect("path");
+        assert_eq!(mode(&data.join("run")), 0o700);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn socket_paths_stay_under_the_length_limit() {
+        let base = fresh("long");
+        let data = base.join("d".repeat(120));
+        let temp = std::env::temp_dir();
+        let result = socket_path(u32::MAX, None, &data, &temp);
+        if cfg!(target_os = "macos") {
+            // The per-user temporary folder takes over.
+            let socket = result.expect("temporary folder fallback");
+            assert_eq!(
+                socket,
+                temp.join("glass").join(format!("crash-{}.sock", u32::MAX))
+            );
+            assert!(socket.as_os_str().len() <= MAX_SOCKET_PATH);
+        } else {
+            // Linux never falls back to the shared /tmp.
+            let error = result.expect_err("no private folder short enough");
+            assert!(error.contains("socket path limit"), "{error}");
+        }
+        assert!(
+            !data.exists(),
+            "a folder too deep for the socket is not created"
+        );
+
+        // The platform default stays well within the limit for a typical home folder.
+        let home = Path::new("/Users/someone-with-a-long-name/Library/Application Support/Glass");
+        let socket = home.join("run").join(format!("crash-{}.sock", u32::MAX));
+        assert!(
+            socket.as_os_str().len() <= MAX_SOCKET_PATH,
+            "{}",
+            socket.display()
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn timestamps_are_utc_civil_dates() {

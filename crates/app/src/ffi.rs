@@ -21,7 +21,9 @@ pub fn attach_crash_handler(client: Arc<Client>) -> Result<CrashHandler, crash_h
     CrashHandler::attach(event)
 }
 
-/// Crashes the process with an invalid memory read, for testing crash reports.
+/// Crashes the process with an invalid memory read, for testing crash reports. Debug
+/// builds only.
+#[cfg(debug_assertions)]
 pub fn crash_with_invalid_read() -> ! {
     // A non-null address in the first page, which is never mapped on any supported OS.
     let address = 0x10usize as *const u32;

@@ -22,7 +22,7 @@ fn main() -> ExitCode {
     let settings = settings::Settings::load(&paths);
     let _crash_reporting = settings
         .crash_reports
-        .then(|| crash::install(&paths.crashes()));
+        .then(|| crash::install(&paths.crashes(), &paths.data));
     crash::trigger_debug_crash();
     ExitCode::SUCCESS
 }
