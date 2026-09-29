@@ -119,3 +119,10 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Details:** `media::cache::ContentHash::of_file`; files up to 2 MiB plus one block are hashed whole. The accepted risk is two same-size files that agree in every sampled block; compressed media differs throughout after any change, and headers and MP4 indexes are always sampled. A version tag in the hash lets the sampling change later without stale matches.
 - **Consequences:** Editing a file in place without changing its size or any sampled block would reuse stale analysis; tools that do that (metadata editors that rewrite a fixed-size field in the middle of a file) are rare for video. A user-facing "rebuild analysis" action covers it.
 
+
+## 15. Working primaries follow the project colour space
+
+- **Date:** 2026-09-29
+- **Decision:** The render working space is linear light in the project primaries: BT.709 by default, BT.2020 when the project colour space is HDR (PQ or HLG). Sources are gamut-converted into it by a render-graph node (Phase 4).
+- **Reason:** Most creator footage and delivery targets are BT.709, and BT.2020 keeps HDR sources unclipped; the project colour space setting (Phase 5) already chooses between them.
+- **Consequences:** `media::ColourSpace` carries source primaries; Phase 4 adds the gamut conversion node; Phase 11 colour management may add ACES on top.
