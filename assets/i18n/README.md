@@ -23,7 +23,7 @@ Every string Glass shows to a user lives here, one JSON file per locale. English
 
 Keys are lowercase dotted segments with at least two parts, each `[a-z0-9_]+`: `<area>.<thing>`, or `<area>.<group>.<thing>` (`settings.crash_reports.title`). The area is the screen or panel the string belongs to. Name a key after what the string is for, not after its English words, so the key survives a copy change.
 
-Placeholders are named: `{done}`, `{total}`. `{{` and `}}` are literal braces. Every call passes exactly the placeholders its string uses; the source check fails otherwise.
+Placeholders are named: `{done}`, `{total}`. `{{` and `}}` are literal braces. Every call passes exactly the placeholders its string uses; the source check fails otherwise. A translation uses the same placeholder names as the English string, in any order; a string that does not is dropped when the locale loads (that key shows English) and logged once, and a test fails if a bundled locale has one.
 
 ## In code
 

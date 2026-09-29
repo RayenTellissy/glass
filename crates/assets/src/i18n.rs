@@ -4,8 +4,12 @@
 //!
 //! A lookup never panics. A key missing from the current locale falls back to English;
 //! a key missing from English too shows as `⟦key⟧` and logs one warning per key.
+//!
+//! A translated string must use the same placeholders as its English string. One that
+//! does not is dropped when the locale loads, so that key falls back to English, and
+//! logged once (see [`Locale::mismatches`]).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{self, Display, Write as _};
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 
@@ -34,6 +38,15 @@ pub struct Locale {
     name: String,
     direction: Direction,
     strings: HashMap<String, String>,
+    mismatches: Vec<PlaceholderMismatch>,
+}
+
+/// A translated string whose placeholders differ from the English string's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlaceholderMismatch {
+    pub key: String,
+    pub english: BTreeSet<String>,
+    pub translated: BTreeSet<String>,
 }
 
 #[derive(Deserialize)]
@@ -74,8 +87,22 @@ impl Display for LocaleError {
 impl std::error::Error for LocaleError {}
 
 impl Locale {
-    /// Parses a locale file (the format is described in `assets/i18n/README.md`).
+    /// Parses a locale file (the format is described in `assets/i18n/README.md`). For a
+    /// locale other than English, a string whose placeholder names differ from the
+    /// English string's is dropped (the key falls back to English, which fills every
+    /// placeholder correctly) and logged once per locale and key; [`mismatches`]
+    /// lists them.
+    ///
+    /// [`mismatches`]: Self::mismatches
     pub fn from_json(json: &str) -> Result<Self, LocaleError> {
+        let mut locale = Self::parse(json)?;
+        if locale.code != "en" {
+            locale.drop_mismatches(&ENGLISH);
+        }
+        Ok(locale)
+    }
+
+    fn parse(json: &str) -> Result<Self, LocaleError> {
         let file: LocaleFile = serde_json::from_str(json).map_err(LocaleError::Json)?;
         for (key, value) in &file.strings {
             if !is_valid_key(key) {
@@ -90,7 +117,46 @@ impl Locale {
             name: file.name,
             direction: file.direction,
             strings: file.strings.into_iter().collect(),
+            mismatches: Vec::new(),
         })
+    }
+
+    fn drop_mismatches(&mut self, english: &Locale) {
+        let mut mismatches: Vec<PlaceholderMismatch> = self
+            .strings
+            .iter()
+            .filter_map(|(key, text)| {
+                let english = placeholder_set(english.get(key)?);
+                let translated = placeholder_set(text);
+                (english != translated).then(|| PlaceholderMismatch {
+                    key: key.clone(),
+                    english,
+                    translated,
+                })
+            })
+            .collect();
+        mismatches.sort_by(|a, b| a.key.cmp(&b.key));
+        for m in &mismatches {
+            self.strings.remove(&m.key);
+            if warn_once(Warned::Mismatch {
+                locale: self.code.clone(),
+                key: m.key.clone(),
+            }) {
+                tracing::warn!(
+                    locale = self.code,
+                    key = m.key,
+                    english = ?m.english,
+                    translated = ?m.translated,
+                    "i18n placeholders differ from English; using the English string"
+                );
+            }
+        }
+        self.mismatches = mismatches;
+    }
+
+    /// Strings dropped at load because their placeholders differ from English.
+    pub fn mismatches(&self) -> &[PlaceholderMismatch] {
+        &self.mismatches
     }
 
     /// English, from the embedded file. If that file were ever broken (a test guards
@@ -103,6 +169,7 @@ impl Locale {
                 name: "English".into(),
                 direction: Direction::Ltr,
                 strings: HashMap::new(),
+                mismatches: Vec::new(),
             }
         })
     }
@@ -173,9 +240,33 @@ pub fn placeholders(text: &str) -> Option<Vec<&str>> {
     Some(names)
 }
 
+fn placeholder_set(text: &str) -> BTreeSet<String> {
+    placeholders(text)
+        .unwrap_or_default()
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
 static ENGLISH: LazyLock<Arc<Locale>> = LazyLock::new(|| Arc::new(Locale::english()));
 static CURRENT: LazyLock<RwLock<Arc<Locale>>> = LazyLock::new(|| RwLock::new(ENGLISH.clone()));
-static WARNED: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
+static WARNED: LazyLock<Mutex<HashSet<Warned>>> = LazyLock::new(Default::default);
+
+/// Problems already logged, so each is logged once per process.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum Warned {
+    MissingKey(String),
+    MissingArgument { key: String, placeholder: String },
+    Mismatch { locale: String, key: String },
+}
+
+/// Records `warning`; true the first time it is seen.
+fn warn_once(warning: Warned) -> bool {
+    WARNED
+        .lock()
+        .map(|mut set| set.insert(warning))
+        .unwrap_or(false)
+}
 
 /// Makes `locale` current for every later [`t!`](crate::t) call.
 pub fn set_locale(locale: Locale) {
@@ -198,7 +289,14 @@ pub fn current() -> Arc<Locale> {
 pub fn missing_keys() -> Vec<String> {
     let mut keys: Vec<String> = WARNED
         .lock()
-        .map(|set| set.iter().cloned().collect())
+        .map(|set| {
+            set.iter()
+                .filter_map(|w| match w {
+                    Warned::MissingKey(key) => Some(key.clone()),
+                    _ => None,
+                })
+                .collect()
+        })
         .unwrap_or_default();
     keys.sort();
     keys
@@ -214,11 +312,7 @@ fn lookup(key: &str, apply: impl FnOnce(&str) -> String) -> String {
     if let Some(text) = current.get(key).or_else(|| ENGLISH.get(key)) {
         return apply(text);
     }
-    let first = WARNED
-        .lock()
-        .map(|mut set| set.insert(key.to_owned()))
-        .unwrap_or(false);
-    if first {
+    if warn_once(Warned::MissingKey(key.to_owned())) {
         tracing::warn!(key, locale = current.code(), "missing i18n key");
     }
     missing_marker(key)
@@ -230,7 +324,7 @@ pub fn text(key: &str) -> String {
 }
 
 /// The string for `key` with `{name}` placeholders filled from `args`. A placeholder
-/// with no argument is left as written and logged. Use [`t!`](crate::t) instead.
+/// with no argument is left as written and logged once per key and placeholder. Use [`t!`](crate::t) instead.
 pub fn text_with(key: &str, args: &[(&str, &dyn Display)]) -> String {
     lookup(key, |template| fill(key, template, args))
 }
@@ -257,7 +351,12 @@ fn fill(key: &str, template: &str, args: &[(&str, &dyn Display)]) -> String {
                 let _ = write!(out, "{value}");
             }
             None => {
-                tracing::warn!(key, placeholder = name, "i18n placeholder has no argument");
+                if warn_once(Warned::MissingArgument {
+                    key: key.to_owned(),
+                    placeholder: name.to_owned(),
+                }) {
+                    tracing::warn!(key, placeholder = name, "i18n placeholder has no argument");
+                }
                 out.push('{');
                 out.push_str(name);
                 out.push('}');
@@ -365,6 +464,78 @@ mod tests {
         let fallback = text("app.name");
         set_locale(Locale::english());
         assert_eq!(fallback, "Glass");
+    }
+
+    #[test]
+    fn a_missing_argument_is_recorded_once_per_key_and_placeholder() {
+        let args: [(&str, &dyn Display); 0] = [];
+        for _ in 0..3 {
+            assert_eq!(fill("test.fill_once", "{a} {b}", &args), "{a} {b}");
+        }
+        let warned = WARNED.lock().expect("warned set");
+        let recorded = |p: &str| {
+            warned.contains(&Warned::MissingArgument {
+                key: "test.fill_once".into(),
+                placeholder: p.into(),
+            })
+        };
+        assert!(recorded("a") && recorded("b"));
+        drop(warned);
+        // A second call finds both already recorded, so it does not log again.
+        assert!(!warn_once(Warned::MissingArgument {
+            key: "test.fill_once".into(),
+            placeholder: "a".into(),
+        }));
+        assert!(!missing_keys().contains(&"test.fill_once".to_owned()));
+    }
+
+    #[test]
+    fn translations_with_other_placeholders_fall_back_to_english() {
+        let english = Locale::parse(
+            r#"{"locale":"en","name":"English","strings":{
+                "a.count":"{count} clips","a.pair":"{done} of {total}","a.plain":"Plain"}}"#,
+        )
+        .expect("english");
+        let mut fr = Locale::parse(
+            r#"{"locale":"fr","name":"Français","strings":{
+                "a.count":"{n} plans","a.pair":"{total} : {done}","a.plain":"Simple {x}"}}"#,
+        )
+        .expect("fr");
+        fr.drop_mismatches(&english);
+        let keys: Vec<&str> = fr.mismatches().iter().map(|m| m.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            ["a.count", "a.plain"],
+            "a.pair uses the same names in another order"
+        );
+        assert_eq!(fr.get("a.count"), None);
+        assert_eq!(fr.get("a.plain"), None);
+        assert_eq!(fr.get("a.pair"), Some("{total} : {done}"));
+        assert_eq!(
+            fr.mismatches()[0].translated,
+            BTreeSet::from(["n".to_owned()])
+        );
+
+        // `from_json` checks against the embedded English.
+        let de = Locale::from_json(
+            r#"{"locale":"de","name":"Deutsch","strings":{"app.name":"Glas {x}"}}"#,
+        )
+        .expect("de");
+        assert_eq!(de.mismatches().len(), 1);
+        assert_eq!(de.get("app.name"), None);
+        assert!(Locale::english().mismatches().is_empty());
+    }
+
+    #[test]
+    fn bundled_locales_match_english_placeholders() {
+        for (code, json) in BUNDLED {
+            let locale = Locale::from_json(json).expect("bundled locale parses");
+            assert!(
+                locale.mismatches().is_empty(),
+                "{code}: {:?}",
+                locale.mismatches()
+            );
+        }
     }
 
     #[test]
