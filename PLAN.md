@@ -137,7 +137,7 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
 Done when: every fixture file decodes to GPU textures and f32 audio through the same API, with hardware decode active on both platforms, and `smoke` plays the reference project.
 
 ### Decode
-- [ ] Safe wrapper over `ffmpeg-next`: `Demuxer`, `Decoder`, `Frame`, `Packet`, with error types and no `unsafe` outside `media::ffi`
+- [~] Safe wrapper over `ffmpeg-next`: `Demuxer`, `Decoder`, `Frame`, `Packet`, with error types and no `unsafe` outside `media::ffi`
 - [ ] Probe: streams, codecs, duration, frame rate, colour metadata, rotation, timecode
 - [ ] Software decode path for video and audio, tested against every fixture
 - [ ] Hardware decode: VideoToolbox. Done when: zero-copy `IOSurface` → Metal texture
