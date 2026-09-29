@@ -461,7 +461,7 @@ Done when: a new user can complete the first-run flow without external help and 
 
 ## Decision Log
 
-Append one line per decision: date, decision, reason.
+Append one line per decision: date, decision, reason. Add the same entry to `docs/DECISIONS.md`, which may carry more context.
 
 - 2026-09-29 — Adopted the defaults table in Phase 0 as the starting stack. Reason: fastest path to a single small binary on both platforms.
 - 2026-09-29 — Free and open source under MIT. Licensing and activation dropped. Reason: product decision.

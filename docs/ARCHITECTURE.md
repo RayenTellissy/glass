@@ -317,4 +317,4 @@ The table below is PLAN.md's defaults table, copied verbatim, with a Status colu
 | Packaging | `cargo-dist` | hand-written CI | Adopted without prototype |
 | Min targets | macOS 12 arm64 + x86_64, Windows 10 x86_64 | Linux best effort | Adopted without prototype; only macOS arm64 is built locally |
 
-Prototype sources and full result tables: [`proto-ui/RESULTS.md`](../proto-ui/RESULTS.md), [`proto-gpu/RESULTS.md`](../proto-gpu/RESULTS.md), [`proto-decode/RESULTS.md`](../proto-decode/RESULTS.md). Decisions and their reasons: `PLAN.md` Decision Log.
+Prototype sources and full result tables: [`proto-ui/RESULTS.md`](../proto-ui/RESULTS.md), [`proto-gpu/RESULTS.md`](../proto-gpu/RESULTS.md), [`proto-decode/RESULTS.md`](../proto-decode/RESULTS.md). Decisions and their reasons: [`DECISIONS.md`](DECISIONS.md).
