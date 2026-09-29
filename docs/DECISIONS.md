@@ -102,3 +102,11 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** Phase 1 is merged to main with its local Done-when parts verified (smoke exits 0, the full local check is green, the arm64 DMG builds within the size budget). CI green and tagged installers for both platforms stay open as needs-human tasks. From here on, a phase merges when every part of its Done when that can run on this Mac passes, and the rest is tagged needs-human.
 - **Reason:** There is no GitHub remote and no Windows or NVIDIA hardware; holding main back would not change what can be verified.
 - **Consequences:** Needs-human tasks remain open in PLAN.md and are resolved when a person pushes the repo, runs CI, and tests on the missing hardware.
+
+## 13. dav1d in the pinned FFmpeg build for AV1 software decode
+
+- **Date:** 2026-09-29
+- **Decision:** The pinned FFmpeg build adds dav1d for AV1 software decode, with meson and ninja built from pinned sources as host tools.
+- **Reason:** AV1 is a supported format (the `codec-av1` flag, the fixtures, export) and FFmpeg's built-in AV1 decoder only drives hardware decoders, which the M1/M2 lack (AV1 hardware decode arrived with the M3).
+- **Details:** `scripts/ffmpeg/versions.env` pins dav1d 1.5.4 (BSD 2-clause), meson 1.12.1 and ninja 1.13.2 by URL and SHA-256. `build.sh` bootstraps ninja with its `configure.py`, runs meson from its unpacked source with `python3`, builds dav1d as a shared library into the same prefix, and configures FFmpeg with `--enable-libdav1d`. meson and ninja are build tools only and are not shipped; dav1d's `COPYING` joins `LICENSES/` and its archive joins the release source bundle.
+- **Consequences:** The local prefix grows from 32 MB to 32.8 MB (libdav1d is 0.9 MB). `cargo deny` is unaffected (a C library). python3 must be on `PATH` where the FFmpeg build runs; the CI runners have it.
