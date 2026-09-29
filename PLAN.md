@@ -93,7 +93,7 @@ Size target: installers around 30 MB, not counting asset packs and models, which
 - Prototype `proto-gpu`: two 4K textures, one dissolve WGSL shader, one text overlay via `wgpu`. Done when: under 2 ms GPU time on Apple M1 and a GTX 1660 class GPU (split; resolved by its sub-tasks)
   - [x] `proto-gpu` on Apple silicon
   - [ ] `proto-gpu` on a GTX 1660 class GPU (needs-human: no NVIDIA hardware available locally)
-- [ ] Prototype `proto-decode`: FFmpeg hardware decode of 4K H.264 to a `wgpu` texture on macOS. Done when: 60 fps sustained with under 5% CPU per stream
+- [~] Prototype `proto-decode`: FFmpeg hardware decode of 4K H.264 to a `wgpu` texture on macOS. Done when: 60 fps sustained with under 5% CPU per stream
 - [ ] Same prototype on Windows via D3D11VA. Done when: same budget
 - [ ] Write `docs/ARCHITECTURE.md`: threading model, data flow diagram, crate layout, cache design, the defaults table above
 - [ ] Write `docs/DECISIONS.md` (Decision Log) with the entries created so far
