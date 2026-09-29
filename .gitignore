@@ -3,3 +3,4 @@ target/
 tests/fixtures/generated/
 .glass-cache/
 experiments/proto-decode/media/
+crates/app/wix/ffmpeg.wxs
