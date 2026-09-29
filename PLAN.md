@@ -163,7 +163,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [ ] Loudness analysis (EBU R128 integrated and short-term)
 
 ### Media management
-- [ ] Import from drag-drop, file dialog, and folders, recursive, with camera card structures recognised (AVCHD, XDCAM, Sony, Canon, DJI)
+- [~] Import from drag-drop, file dialog, and folders, recursive, with camera card structures recognised (AVCHD, XDCAM, Sony, Canon, DJI)
 - [ ] Media pool with bins, colour labels, tags, and a search index
 - [ ] Relinking: fuzzy match by name, duration, and content hash, batch relink dialog
 - [ ] Offline media placeholder that keeps edits intact and renders a labelled slate
