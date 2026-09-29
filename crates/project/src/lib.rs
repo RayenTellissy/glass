@@ -2,3 +2,5 @@
 //! transitions, keyframes and effect parameter schemas, plus undo history, save and
 //! load, and schema migrations. Pure data: no I/O threads, no GPU, and no dependencies
 //! on other Glass crates.
+
+pub mod media_pool;
