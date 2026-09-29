@@ -2,6 +2,91 @@
 
 `PLAN.md` is the source of truth for what gets built and in which order. `docs/ARCHITECTURE.md` describes how the crates fit together, and `docs/DECISIONS.md` records why.
 
+## Working on a task
+
+Glass is built one `PLAN.md` task at a time, in phase order, and every task follows the same loop. This section adapts PLAN.md's "How to run this plan as a goal" for people; the plan's version is the one to follow when the two differ.
+
+### The session loop
+
+1. **Read the plan.** Open `PLAN.md` and read the last 20 lines of the Progress Log at the bottom, the current phase's "Done when" line and the Decision Log.
+2. **Check the machine.** Run `df -h /` (see [Disk space](#disk-space)), then `source scripts/dev-env.sh` in the shell you build from.
+3. **Check the tree.** Run the [full check](#the-full-check). If anything fails on a clean checkout, fixing it is your first task.
+4. **Pick a task.** Take the first unchecked `[ ]` task in phase order. Do not start a later phase while an earlier one has open tasks; only tasks tagged `(parallel)` may be done out of order, at most two at a time.
+5. **Start it.** Mark it `[~]` in `PLAN.md` and commit `plan: start <short task name>`.
+6. **Build it.** Meet the task's own "Done when", or its phase's. Add or update a test or a benchmark that proves it. If the change alters how data moves between crates or threads, update `docs/ARCHITECTURE.md` in the same commit. Commit the work as `<area>: <what changed>`, where the area is a crate or folder (`ui`, `media`, `docs`, `scripts`); several commits are fine.
+7. **Check it.** Run the full check, the smoke binary, and the extra checks the change calls for (see [Before you mark a task done](#before-you-mark-a-task-done)).
+8. **Finish it.** Mark it `[x]`, append one Progress Log line, `- YYYY-MM-DD — Phase N — <short task name> — <short hash of the main implementation commit> — <key numbers>`, and commit `plan: done <short task name>`. Never leave a task at `[~]` with a broken build.
+
+That is the three-commit rhythm: `plan: start`, the implementation commit(s), `plan: done`. The done commit comes last so its log line can cite the implementation commit's hash.
+
+Work happens on `goal/phase-<N>` branches, never on `main`; a branch is merged when its phase's "Done when" passes.
+
+### The full check
+
+```sh
+source scripts/dev-env.sh
+cargo build --workspace
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+cargo run --bin smoke
+```
+
+`cargo test --workspace` includes the source rules for UI code (i18n keys, no literal text, no literal colours) and the headless frame-budget tests. CI's check job runs the same commands, plus `python3 assets/theme/check.py` and the source rules as their own step.
+
+### Before you mark a task done
+
+Every task passes the full check. Depending on what it touched, also run:
+
+| If the change touches | Run | See |
+| --- | --- | --- |
+| A dependency | `cargo deny check` | [Licences and advisories](#licences-and-advisories) |
+| UI text | `cargo test -p app --test ui_source -- --nocapture` (fails on missing keys, warns on unused ones) | [User-facing strings](#user-facing-strings) |
+| Theme tokens or colours | `python3 assets/theme/check.py` and the same `ui_source` test | [Colours and theme](#colours-and-theme) |
+| A UI screen | its headless frame-budget test (p99 under 8 ms) | [UI frame budget](#ui-frame-budget) |
+| Performance-sensitive code | `cargo bench -p <crate> --bench "*"` against a saved baseline, alone on the machine | [Benchmarks](#benchmarks) |
+| Media decoding or tests that read media | `tests/fixtures/generate.sh --verify` | [Test media](#test-media) |
+| `scripts/ffmpeg/` or `versions.env` | `scripts/ffmpeg/build.sh`, then the full check against the new build | [FFmpeg](#ffmpeg) |
+| Packaging, bundled files or anything that grows the app | `scripts/package/make-dmg.sh` and `scripts/size-check.sh` | [Packaging](#packaging) |
+
+The quality gates that apply to every task, from PLAN.md:
+
+- builds and tests pass on macOS and Windows in CI;
+- no UI-thread stall over 8 ms in the frame-time monitor while the feature is used;
+- the size check still passes, or the budget was raised with a Decision Log entry;
+- every new user-facing string is in `assets/i18n/en.json`;
+- UI matches its board in the Paper file and uses only its tokens, with exact values read from the board, not from screenshots (a moment with no board gets one first, following `DESIGN_HANDOFF.md`);
+- if data flow changed, `docs/ARCHITECTURE.md` changed in the same commit.
+
+### Decisions, splits and blocked tasks
+
+- **Defaults.** Phase 0 records the defaults. Use them. Change one only when a benchmark in this repo proves it fails a budget, and record the change in the Decision Log in `PLAN.md` (`- YYYY-MM-DD — <decision>. Reason: <reason>.`) and in `docs/DECISIONS.md`. The same goes for dropping a task (`[-]`) or raising a budget.
+- **Splitting.** A task is at most a few hours of focused work. If it turns out larger, split it in place into indented sub-tasks under the original line, which stays as a heading with its checkbox until every sub-task is `[x]` or `[-]`. Splitting is normal.
+- **Blocked.** A task that needs a paid account, a signing certificate, a licence purchase, hardware you do not have, or a person's decision about deleting user data gets `(needs-human: <one-line reason>)` on its line and a Progress Log line, committed as `plan: needs-human <short task name>`. Do what can be done locally first, then move on to the next task. When only needs-human sub-tasks are left, the parent line says `(needs-human: blocked only on the sub-task(s) below)`.
+- **Never:** commit to `main`, add telemetry, download models or large assets into the repo (use on-demand download paths and ignored folders), hardcode UI strings or colours, or block the UI thread.
+
+### Machine limits
+
+The reference development machine is an Apple M2 with 8 GB of RAM and a small disk, so these limits hold for everyone sharing it, people and scripts alike.
+
+#### Concurrency
+
+- **One `cargo build` or `cargo test` at a time** on the machine. Anything else that compiles waits.
+- The compiler is capped at four jobs: `.cargo/config.toml` sets `[build] jobs = 4`, and `scripts/dev-env.sh` exports `CARGO_BUILD_JOBS=4` for tools that ignore the config.
+- At most 10 concurrent workers (terminals running tasks, automated sessions), coordinator included; 3 to 5 is better. Only `(parallel)` tasks run beside the current phase task, at most two of them.
+- **Benchmarks and the stress project run alone:** serially, with no build, test or other heavy app running. Timing taken on a busy machine is not a result.
+- If the machine swaps, or a build takes more than three times its usual time, drop to a single worker for the rest of the session.
+
+#### Disk space
+
+- Check `df -h /` at the start of every session.
+- Build only for this Mac's architecture (arm64). Intel, universal, Windows and Linux builds, and fuzzing, run in CI only.
+- Build release only to run benchmarks, the stress project or a local package.
+- Download only the smallest speech and segmentation models locally, into the user data folder, never into the repo.
+- **Below 15 GB free:** run `cargo sweep --time 7` (`cargo install cargo-sweep`) to drop build output older than a week; then delete the regenerable caches under the project cache folder (rendered frames, proxies, thumbnails, waveforms); if still below 15 GB, run `cargo clean`.
+- **Below 10 GB after that cleanup:** stop, tag the current task `(needs-human)` and say why in the Progress Log.
+- Never delete source, fixture scripts, autosave data, or anything outside the repo and its cache folder.
+
 ## Building
 
 The development machine is modest, so the compiler is capped at four parallel jobs. `.cargo/config.toml` sets `[build] jobs = 4` for every build in this repo; also export `CARGO_BUILD_JOBS=4` in your shell so tools that ignore the config file follow the same limit.
