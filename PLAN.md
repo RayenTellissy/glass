@@ -191,7 +191,7 @@ Done when: the stress project (Phase 16) plays at full rate on both platforms, s
 
 Done when: a sequence with 5 video layers, blend modes, transforms, text, shapes, and masks renders at 4K within 8 ms GPU time, and readback for export does not stall the UI.
 
-- [ ] Render graph: per-frame DAG compiled into `wgpu` passes with resource aliasing
+- [~] Render graph: per-frame DAG compiled into `wgpu` passes with resource aliasing
 - [ ] Linear-light working space, `Rgba16Float` intermediates, dithered 8-bit output
 - [ ] Layer compositing with blend modes: normal, multiply, screen, overlay, add, subtract, difference, soft light, hard light, colour dodge, colour burn
 - [ ] Transform node: position, scale, rotation, anchor, bicubic resampling, motion-blur ready
