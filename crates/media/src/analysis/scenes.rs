@@ -287,7 +287,6 @@ impl SceneSignal {
 
         let mut candidates: Vec<(usize, f32, CutKind)> = Vec::new();
         let mut window = Vec::with_capacity(2 * half_window);
-        let mut thresholds = vec![f32::INFINITY; n];
         for i in 1..n {
             window.clear();
             let lo = i.saturating_sub(half_window).max(1);
@@ -301,7 +300,6 @@ impl SceneSignal {
                 let mad = median_of(&mut window);
                 (median + k * 1.4826 * mad).max(floor)
             };
-            thresholds[i] = threshold;
             if self.scores[i] > threshold
                 && self.stands_out(i, settings.local_ratio())
                 && !self.is_flash(i, flash, threshold)

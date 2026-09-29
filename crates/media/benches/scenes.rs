@@ -41,7 +41,11 @@ fn scenes(c: &mut Criterion) {
             let median = times[times.len() / 2].as_secs_f64();
             let result = result.expect("ran");
             let seconds = result.frames as f64 / result.fps;
-            let label = if threads == 0 { "all cores" } else { "2 threads" };
+            let label = if threads == 0 {
+                "all cores"
+            } else {
+                "2 threads"
+            };
             println!(
                 "{file} ({label}): {} frames in {:.1} ms, {:.0} fps, {:.1}x realtime",
                 result.frames,
