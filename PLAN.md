@@ -116,7 +116,10 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
   - [x] Build locally for `aarch64-apple-darwin`, check the workspace and `experiments/proto-decode` against it, and make `scripts/dev-env.sh` prefer it over Homebrew
   - [x] `scripts/ffmpeg/package-sources.sh` gathering the exact source archives and licence texts for a release, plus GPL compliance notes in `CONTRIBUTING.md`
   - [ ] CI job building FFmpeg per target, cached on the `versions.env` hash, and release attachment of the sources (needs-human: no GitHub remote yet, and the Windows and Linux builds can only run in CI; push, confirm all four targets build and a `v*` tag attaches the sources)
-- [~] `cargo-dist` config producing DMG, MSI or MSIX, and AppImage on tags
+- [ ] `cargo-dist` config producing DMG, MSI or MSIX, and AppImage on tags (needs-human: blocked only on the sub-task below)
+  - [x] `dist-workspace.toml` and the generated `release.yml` (cargo-dist 0.32: archives and a WiX MSI with the FFmpeg DLLs for the `glass` binary with `release-full`, four targets), plus `scripts/package/` for DMG, MSIX and AppImage, run by `package.yml` as a dist local-artifacts job
+  - [x] Build `Glass.app` and the DMG locally on `aarch64-apple-darwin` and check linkage, signature and launch from the mounted image
+  - [ ] Tagged release in CI producing the DMGs, MSI, MSIX and AppImage (needs-human: no GitHub remote yet; Windows MSI/MSIX and Linux AppImage can only be built in CI. Set `repository` in `Cargo.toml`, run `dist generate`, push a `v*` tag and check every installer; MSIX and notarised DMG also need signing certificates)
 - [ ] App icons exported from the Brand page: macOS icon with the graphite, light, and clear appearances, Windows `.ico` and Linux PNGs using the bare mark, with the small-size variants the page defines (glow drops out at 64 px, a slice at 32 px)
 - [ ] Size check in CI: fails when an installer grows past the stored budget (starting at 30 MB). Raising the budget is allowed with a Decision Log entry
 - [ ] Benchmark harness with `criterion` and a `bench` CI job that posts results as a PR comment
@@ -505,3 +508,5 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 1 — FFmpeg CI job — needs-human: no GitHub remote yet; job added to `.github/workflows/ci.yml` in 8da1053, Windows (MSYS2 + MSVC) and Linux paths are untested until CI runs
 - 2026-09-29 — Phase 0 — proto-ui rerun after review (submit time included) — 4b1620a — offscreen (screen locked, window occluded): UI-thread CPU median 0.37 ms, p99 0.74 ms (no culling 0.60 / 0.79), Queue::submit about 6 µs; windowed rerun still to do on an unlocked screen
 - 2026-09-29 — Phase 0 — proto-decode rerun after review (true 3-frame pacing window) — 4b1620a — pinned FFmpeg 9.0.2, paced x1 2.06% of machine (8.58% + 7.88% of one core), 0 late; paced x2 1.81% per stream, 0 late
+- 2026-09-29 — Phase 1 — cargo-dist packaging — 53a888f — cargo-dist 0.32 (installers: shell, powershell, npm, homebrew, msi; no DMG, MSIX or AppImage, so scripts/package/ adds them); local arm64 Glass.app 30.6 MB, DMG 10.5 MB (12.3 MB with the app icons), only @rpath and system references, starts and exits 0 from the mounted DMG, bundled FFmpeg dylibs load from it
+- 2026-09-29 — Phase 1 — cargo-dist tagged release in CI — needs-human: no GitHub remote yet; Windows MSI/MSIX and Linux AppImage can only be built in CI (scripts in 1b919d9, workflows in 53a888f)
