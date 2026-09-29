@@ -7,6 +7,7 @@
 
 use std::fmt;
 
+use crate::colour::{ColourSpace, LayoutHint};
 use crate::ffi;
 use crate::format::ColourInfo;
 use crate::time::Timestamp;
@@ -297,6 +298,7 @@ pub struct HwFrame {
     width: u32,
     height: u32,
     colour: ColourInfo,
+    colour_space: ColourSpace,
 }
 
 impl fmt::Debug for HwFrame {
@@ -323,6 +325,16 @@ impl HwFrame {
             return Err(fourcc);
         }
         let (width, height) = buffer.plane_size(0);
+        let colour_space = ColourSpace::resolve(
+            &colour,
+            LayoutHint {
+                bit_depth: format.bit_depth(),
+                rgb: false,
+                jpeg: false,
+                surface_full_range: Some(full_range),
+                height,
+            },
+        );
         Ok(Self {
             handle: Handle::VideoToolbox(buffer),
             format,
@@ -331,6 +343,7 @@ impl HwFrame {
             width,
             height,
             colour,
+            colour_space,
         })
     }
 
@@ -373,9 +386,15 @@ impl HwFrame {
         }
     }
 
-    /// Colour metadata of the frame, as the bitstream tags it.
+    /// Colour metadata of the frame, as the file tags it.
     pub fn colour(&self) -> ColourInfo {
         self.colour
+    }
+
+    /// The complete colour description: the tags, with untagged fields filled in by the
+    /// rule in [`crate::colour`] (an untagged range comes from the surface format).
+    pub fn colour_space(&self) -> ColourSpace {
+        self.colour_space
     }
 
     /// The retained `CVPixelBuffer`.

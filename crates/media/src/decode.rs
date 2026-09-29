@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use ffmpeg_next as ffmpeg;
 
+use crate::colour::{ColourSpace, LayoutHint};
 use crate::demux::{Demuxer, Packet};
 use crate::error::{MediaError, Result};
 use crate::ffi;
@@ -68,9 +69,14 @@ pub struct Decoder {
     frames_out: u64,
     /// Test hook: fail like a broken hardware decoder after this many frames.
     fail_after: Option<u64>,
+    /// The container's colour tags, for frames whose bitstream leaves them out.
+    stream_colour: ColourInfo,
 }
 
 /// What [`Decoder::receive_frame`] produced.
+// A frame is a few hundred bytes of handles and metadata (the pixels are reference
+// counted elsewhere) and moves once per decode, so boxing it would only add an allocation.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum Received {
     Frame(Frame),
@@ -121,6 +127,7 @@ impl Decoder {
                 kind: summary.kind,
             });
         }
+        let stream_colour = stream_colour(&stream);
         let mut fallback = FallbackReason::NotRequested;
         if summary.kind == MediaKind::Video && options.hw != HwPreference::Off {
             let codec_tag = ffi::stream_params(&stream).codec_tag;
@@ -145,6 +152,7 @@ impl Decoder {
                         eof_sent: false,
                         frames_out: 0,
                         fail_after: None,
+                        stream_colour,
                     });
                 }
                 Err(reason) if options.hw == HwPreference::Require => {
@@ -214,6 +222,7 @@ impl Decoder {
             eof_sent: false,
             frames_out: 0,
             fail_after: None,
+            stream_colour,
         })
     }
 
@@ -338,14 +347,19 @@ impl Decoder {
     pub fn receive_frame(&mut self) -> Result<Received> {
         self.injected_failure()?;
         let time_base = self.time_base;
+        let stream_colour = self.stream_colour;
         let result = match &mut self.inner {
             Inner::Video(d) => {
                 let mut frame = ffmpeg::frame::Video::empty();
                 d.receive_frame(&mut frame).map(|()| {
+                    let colour = colour_of(&frame).or(stream_colour);
+                    let colour_space = ColourSpace::resolve(&colour, cpu_layout(&frame));
                     Frame::Video(VideoFrame {
                         inner: frame,
                         time_base,
                         hw: None,
+                        colour,
+                        colour_space,
                     })
                 })
             }
@@ -364,7 +378,10 @@ impl Decoder {
         }
         match result {
             Ok(Frame::Video(mut frame)) if self.hw.is_some() && self.decode_path.is_hardware() => {
-                frame.hw = self.hardware_frame(&frame.inner)?;
+                frame.hw = self.hardware_frame(&frame.inner, frame.colour)?;
+                if let Some(hw) = &frame.hw {
+                    frame.colour_space = hw.colour_space();
+                }
                 Ok(Received::Frame(Frame::Video(frame)))
             }
             Ok(frame) => Ok(Received::Frame(frame)),
@@ -378,10 +395,14 @@ impl Decoder {
 
     /// The hardware surface of a frame from a hardware decoder, or `None` when FFmpeg fell
     /// back to software on its own (the frame is then a CPU frame).
-    fn hardware_frame(&mut self, frame: &ffmpeg::frame::Video) -> Result<Option<HwFrame>> {
+    fn hardware_frame(
+        &mut self,
+        frame: &ffmpeg::frame::Video,
+        colour: ColourInfo,
+    ) -> Result<Option<HwFrame>> {
         #[cfg(target_os = "macos")]
         if let Some(buffer) = ffi::PixelBuffer::from_frame(frame) {
-            return match HwFrame::from_videotoolbox(buffer, colour_of(frame)) {
+            return match HwFrame::from_videotoolbox(buffer, colour) {
                 Ok(hw) => Ok(Some(hw)),
                 Err(fourcc) => {
                     let reason = FallbackReason::FormatUnsupported {
@@ -397,6 +418,8 @@ impl Decoder {
                 }
             };
         }
+        #[cfg(not(target_os = "macos"))]
+        let _ = colour;
         let offered = self.hw.as_ref().is_some_and(|h| {
             h.negotiation
                 .offered
@@ -579,6 +602,32 @@ pub struct VideoFrame {
     inner: ffmpeg::frame::Video,
     time_base: Rational,
     hw: Option<HwFrame>,
+    colour: ColourInfo,
+    colour_space: ColourSpace,
+}
+
+/// The container's colour tags for a stream.
+fn stream_colour(stream: &ffmpeg::format::stream::Stream) -> ColourInfo {
+    let p = ffi::stream_params(stream);
+    ColourInfo::from_ffmpeg(
+        p.primaries,
+        p.transfer,
+        p.matrix,
+        p.range,
+        p.chroma_location,
+    )
+}
+
+/// The layout facts the colour defaulting rule needs, for a CPU frame.
+fn cpu_layout(frame: &ffmpeg::frame::Video) -> LayoutHint {
+    let format = PixelFormat::from_ffmpeg(frame.format());
+    LayoutHint {
+        bit_depth: format.bit_depth(),
+        rgb: format.is_rgb(),
+        jpeg: format.name().starts_with("yuvj"),
+        surface_full_range: None,
+        height: frame.height(),
+    }
 }
 
 fn colour_of(frame: &ffmpeg::frame::Video) -> ColourInfo {
@@ -658,8 +707,17 @@ impl VideoFrame {
         self.inner.aspect_ratio().into()
     }
 
+    /// The colour tags of the frame as the file states them (the bitstream's, else the
+    /// container's); `None` fields are untagged.
     pub fn colour(&self) -> ColourInfo {
-        colour_of(&self.inner)
+        self.colour
+    }
+
+    /// The complete colour description, untagged fields filled in by the rule in
+    /// [`crate::colour`]. For a hardware frame it is the surface's
+    /// ([`HwFrame::colour_space`]).
+    pub fn colour_space(&self) -> ColourSpace {
+        self.colour_space
     }
 
     /// Number of CPU planes (0 for a hardware surface).

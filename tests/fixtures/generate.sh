@@ -54,14 +54,20 @@ json_or_null() {
     if [ "$1" = "null" ]; then echo "null"; else echo "\"$1\""; fi
 }
 
-# add_entry file kind codec width height frame_rate duration pix_fmt vfr frames audio_codec audio_rate audio_channels [rotation [timecode]]
+# add_entry file kind codec width height frame_rate duration pix_fmt vfr frames audio_codec audio_rate audio_channels [rotation [timecode [colour]]]
 # rotation is the display matrix's counter-clockwise angle in degrees (default 0), timecode
-# the first frame's SMPTE timecode tag (default none).
+# the first frame's SMPTE timecode tag (default none), colour the stream's colour tags as
+# "primaries,transfer,matrix,range" in ffprobe's names (default: not checked).
 add_entry() {
     local file=$1 kind=$2 codec=$3 width=$4 height=$5 rate=$6 duration=$7 pix_fmt=$8 vfr=$9
     local frames=${10} a_codec=${11} a_rate=${12} a_channels=${13}
-    local rotation=${14:-0} timecode=${15:-null}
+    local rotation=${14:-0} timecode=${15:-null} colour=${16:-null}
     local audio="null"
+    local colour_json="null"
+    if [ "$colour" != "null" ]; then
+        IFS="," read -r c_prim c_trc c_space c_range <<<"$colour"
+        colour_json="{ \"primaries\": \"$c_prim\", \"transfer\": \"$c_trc\", \"matrix\": \"$c_space\", \"range\": \"$c_range\" }"
+    fi
     if [ "$a_codec" != "null" ]; then
         audio="{ \"codec\": \"$a_codec\", \"sample_rate\": $a_rate, \"channels\": $a_channels }"
     fi
@@ -78,9 +84,10 @@ add_entry() {
       \"frames\": $frames,
       \"audio\": $audio,
       \"rotation\": $rotation,
-      \"timecode\": $(json_or_null "$timecode")
+      \"timecode\": $(json_or_null "$timecode"),
+      \"colour\": $colour_json
     }")
-    VERIFY_JOBS+=("$file|$kind|$codec|$width|$height|$rate|$duration|$pix_fmt|$vfr|$frames|$a_codec|$a_rate|$a_channels|$rotation|$timecode")
+    VERIFY_JOBS+=("$file|$kind|$codec|$width|$height|$rate|$duration|$pix_fmt|$vfr|$frames|$a_codec|$a_rate|$a_channels|$rotation|$timecode|$colour")
 }
 
 # make file -- ffmpeg output arguments (inputs included). Writes to a temporary name
@@ -160,6 +167,42 @@ make vfr_h264_720p.mp4 \
     -c:v libx264 -preset veryfast -pix_fmt yuv420p -video_track_timescale 30000 \
     -movflags +faststart
 add_entry vfr_h264_720p.mp4 video h264 1280 720 30/1 3 yuv420p true null null null null
+
+# Colour: vertical bars of exact Y'CbCr codes (geq), so conversions can be checked on
+# known patches. setparams tags the frames before encoding, so FFmpeg does not insert a
+# matrix or range conversion to match the output tags. 10-bit HEVC in BT.2020 with PQ (top-left chroma siting, HDR10 metadata)
+# and with HLG (untagged siting), bars: black, PQ 203-nit reference white (572), 75%
+# (721), 100% (940), BT.2020 75% red (237, 418, 848).
+BARS10="lum='if(lt(X/W,0.2),64,if(lt(X/W,0.4),572,if(lt(X/W,0.6),721,if(lt(X/W,0.8),940,237))))'"
+BARS10="$BARS10:cb='if(lt(X/W,0.8),512,418)':cr='if(lt(X/W,0.8),512,848)'"
+make hevc_pq_10bit_640x360.mp4 \
+    -f lavfi -i "color=black:size=640x360:rate=25:duration=1,format=yuv420p10le,geq=$BARS10,setparams=range=tv:color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc" \
+    -c:v libx265 -preset fast -pix_fmt yuv420p10le -tag:v hvc1 \
+    -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc -color_range tv \
+    -x265-params "log-level=error:keyint=25:lossless=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=limited:chromaloc=2:hdr10=1:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400" \
+    -movflags +faststart
+add_entry hevc_pq_10bit_640x360.mp4 video hevc 640 360 25/1 1 yuv420p10le false null null null null 0 null bt2020,smpte2084,bt2020nc,tv
+
+make hevc_hlg_10bit_640x360.mp4 \
+    -f lavfi -i "color=black:size=640x360:rate=25:duration=1,format=yuv420p10le,geq=$BARS10,setparams=range=tv:color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc" \
+    -c:v libx265 -preset fast -pix_fmt yuv420p10le -tag:v hvc1 \
+    -color_primaries bt2020 -color_trc arib-std-b67 -colorspace bt2020nc -color_range tv \
+    -x265-params "log-level=error:keyint=25:lossless=1:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:range=limited" \
+    -movflags +faststart
+add_entry hevc_hlg_10bit_640x360.mp4 video hevc 640 360 25/1 1 yuv420p10le false null null null null 0 null bt2020,arib-std-b67,bt2020nc,tv
+
+# Full range 8-bit BT.709 H.264 (FFmpeg's H.264 decoder reports full range 4:2:0 as
+# yuvj420p), bars: black (0), 75% (191), white (255), BT.709 75% red
+# (41, 106, 224), 50% (128).
+BARS8="lum='if(lt(X/W,0.2),0,if(lt(X/W,0.4),191,if(lt(X/W,0.6),255,if(lt(X/W,0.8),41,128))))'"
+BARS8="$BARS8:cb='if(between(X/W,0.6,0.8),106,128)':cr='if(between(X/W,0.6,0.8),224,128)'"
+make h264_fullrange_640x360.mp4 \
+    -f lavfi -i "color=black:size=640x360:rate=25:duration=1,format=yuv420p,geq=$BARS8,setparams=range=pc:color_primaries=bt709:color_trc=bt709:colorspace=bt709" \
+    -c:v libx264 -preset veryfast -qp 2 -pix_fmt yuv420p -g 25 \
+    -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range pc \
+    -x264-params "colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=on" \
+    -movflags +faststart
+add_entry h264_fullrange_640x360.mp4 video h264 640 360 25/1 1 yuvj420p false null null null null 0 null bt709,bt709,bt709,pc
 
 make still_1080p.png \
     -f lavfi -i "smptehdbars=size=1920x1080" -frames:v 1 -pix_fmt rgb24
@@ -268,7 +311,7 @@ is_vfr() {
 
 echo "Verifying against MANIFEST.json"
 for job in "${VERIFY_JOBS[@]}"; do
-    IFS="|" read -r file kind codec width height rate duration pix_fmt vfr frames a_codec a_rate a_channels rotation timecode <<<"$job"
+    IFS="|" read -r file kind codec width height rate duration pix_fmt vfr frames a_codec a_rate a_channels rotation timecode colour <<<"$job"
     before=$FAILURES
     path="$OUT/$file"
     input_args=()
@@ -296,6 +339,12 @@ for job in "${VERIFY_JOBS[@]}"; do
         check_eq "$file" rotation "$(field "$r" rotation)" "$([ "$rotation" = "0" ] || echo "$rotation")"
         t=$(probe "$path" v:0 "stream_tags=timecode")
         check_eq "$file" timecode "$(field "$t" "TAG:timecode")" "$([ "$timecode" = "null" ] || echo "$timecode")"
+        if [ "$colour" != "null" ]; then
+            c=$(probe "$path" v:0 "stream=color_primaries,color_transfer,color_space,color_range")
+            check_eq "$file" colour \
+                "$(field "$c" color_primaries),$(field "$c" color_transfer),$(field "$c" color_space),$(field "$c" color_range)" \
+                "$colour"
+        fi
     fi
 
     if [ "$kind" = "image_sequence" ]; then

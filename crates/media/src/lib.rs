@@ -13,6 +13,7 @@
 //! decode-pool thread at a time; [`Packet`] and the frame types are `Send + Sync` and can
 //! be handed to other threads without copying.
 
+pub mod colour;
 mod convert;
 mod decode;
 mod demux;
@@ -26,6 +27,7 @@ mod probe;
 mod reader;
 mod time;
 
+pub use colour::{ChromaSiting, ColourSpace, Matrix, Primaries, Range, TransferFn};
 pub use convert::RgbaImage;
 pub use decode::{
     AudioFrame, Decoder, DecoderOptions, Frame, FrameStorage, Plane, Received, VideoFrame,

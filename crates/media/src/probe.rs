@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use ffmpeg_next as ffmpeg;
 
+use crate::colour::{ColourSpace, LayoutHint};
 use crate::demux::{Demuxer, StreamSummary};
 use crate::error::Result;
 use crate::ffi;
@@ -145,7 +146,11 @@ pub struct VideoInfo {
     /// `avg_frame_rate` for VFR ones, whichever exists otherwise.
     pub frame_rate: Option<Rational>,
     pub vfr: VfrScan,
+    /// The stream's colour tags as the file states them.
     pub colour: ColourInfo,
+    /// The tags with untagged fields filled in by the rule in [`crate::colour`], as the
+    /// decoded frames will carry them.
+    pub colour_space: ColourSpace,
     pub hdr: Hdr,
     pub mastering_display_metadata: bool,
     pub content_light_level: bool,
@@ -387,6 +392,16 @@ fn video_info(stream: &ffmpeg::format::stream::Stream, params: &ffi::StreamParam
         params.range,
         params.chroma_location,
     );
+    let colour_space = ColourSpace::resolve(
+        &colour,
+        LayoutHint {
+            bit_depth,
+            rgb: pixel_format.is_some_and(|p| p.is_rgb()),
+            jpeg: pixel_format.is_some_and(|p| p.name().starts_with("yuvj")),
+            surface_full_range: None,
+            height,
+        },
+    );
     let (rotation, mirrored) = params
         .display_matrix
         .map(|m| orientation(ffi::display_rotation(&m), &m))
@@ -410,6 +425,7 @@ fn video_info(stream: &ffmpeg::format::stream::Stream, params: &ffi::StreamParam
         },
         hdr: colour.hdr(),
         colour,
+        colour_space,
         mastering_display_metadata: params.mastering_display,
         content_light_level: params.content_light_level,
         dolby_vision: params.dovi,

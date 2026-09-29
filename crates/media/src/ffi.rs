@@ -7,7 +7,7 @@
 //! fields hold values FFmpeg itself wrote. Integer fields that hold enum values are range
 //! checked before they become Rust enums.
 
-use std::ffi::{CStr, c_char, c_int, c_void};
+use std::ffi::{CStr, c_char, c_int, c_uint, c_void};
 
 use ffmpeg::ffi as sys;
 
@@ -335,34 +335,119 @@ pub(crate) fn keep_only_streams(input: &mut ffmpeg::format::context::Input, keep
     }
 }
 
-/// Sets the YUV to RGB matrix (an `AVColorSpace` value, which swscale's `SWS_CS_*`
-/// constants share) and the input range of a scaler; the output is full-range RGB.
-pub(crate) fn set_scaler_colourspace(
-    scaler: &mut ffmpeg::software::scaling::Context,
-    matrix: ffmpeg::color::Space,
-    full_range_input: bool,
-) -> Result<(), ffmpeg::Error> {
-    let space: sys::AVColorSpace = matrix.into();
-    // SAFETY: sws_getCoefficients returns a pointer to a static table (falling back to
-    // the default for unknown values); the scaler is a live context borrowed mutably.
-    let ret = unsafe {
-        let table = sys::sws_getCoefficients(space as c_int);
-        sys::sws_setColorspaceDetails(
-            scaler.as_mut_ptr(),
-            table,
-            c_int::from(full_range_input),
-            table,
-            1,
+/// How swscale reads YUV input: the matrix, the input range and the chroma position in
+/// 1/256 luma samples (`None` for a direction without subsampling).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SwsYuv {
+    pub matrix: ffmpeg::color::Space,
+    pub full_range: bool,
+    pub h_chroma_pos: Option<i32>,
+    pub v_chroma_pos: Option<i32>,
+}
+
+/// Converts a CPU frame to tightly packed 8-bit RGBA at the same size with swscale
+/// (bilinear, accurate rounding, full chroma interpolation). For YUV input `matrix` (an
+/// `AVColorSpace` value, which swscale's `SWS_CS_*` constants share), the input range and
+/// the chroma position (in 1/256 luma samples, `None` for a direction without
+/// subsampling) are set before the scaler is initialised, which `sws_getContext` cannot
+/// do. RGB input ignores them.
+pub(crate) fn scale_to_rgba(
+    frame: &ffmpeg::frame::Video,
+    yuv: Option<SwsYuv>,
+) -> Result<Vec<u8>, ffmpeg::Error> {
+    let (width, height) = (frame.width(), frame.height());
+    let w = c_int::try_from(width).map_err(|_| ffmpeg::Error::InvalidData)?;
+    let h = c_int::try_from(height).map_err(|_| ffmpeg::Error::InvalidData)?;
+    let src_format: sys::AVPixelFormat = frame.format().into();
+    let flags = sys::SwsFlags::SWS_BILINEAR as c_uint
+        | sys::SwsFlags::SWS_ACCURATE_RND as c_uint
+        | sys::SwsFlags::SWS_FULL_CHR_H_INT as c_uint;
+    // Rows padded to 64 bytes so swscale's vector paths can write whole blocks.
+    let row = width as usize * 4;
+    let stride = row.next_multiple_of(64);
+    let mut out = vec![0u8; stride * height as usize];
+    // SAFETY: the context is allocated, configured through its public fields before
+    // sws_init_context (as the API documents), used once and freed on every path. The
+    // source pointers and strides come from the live frame; the destination buffer holds
+    // `stride * height` bytes, which is what swscale writes for RGBA at this size.
+    unsafe {
+        let ctx = sys::sws_alloc_context();
+        if ctx.is_null() {
+            return Err(ffmpeg::Error::Other {
+                errno: ffmpeg::error::ENOMEM,
+            });
+        }
+        (*ctx).src_w = w;
+        (*ctx).src_h = h;
+        (*ctx).dst_w = w;
+        (*ctx).dst_h = h;
+        (*ctx).src_format = src_format as c_int;
+        (*ctx).dst_format = sys::AVPixelFormat::AV_PIX_FMT_RGBA as c_int;
+        (*ctx).flags = flags;
+        if let Some(yuv) = yuv {
+            if let Some(p) = yuv.h_chroma_pos {
+                (*ctx).src_h_chr_pos = p;
+            }
+            if let Some(p) = yuv.v_chroma_pos {
+                (*ctx).src_v_chr_pos = p;
+            }
+        }
+        let ret = sys::sws_init_context(ctx, std::ptr::null_mut(), std::ptr::null_mut());
+        if ret < 0 {
+            sys::sws_freeContext(ctx);
+            return Err(ffmpeg::Error::from(ret));
+        }
+        if let Some(SwsYuv {
+            matrix, full_range, ..
+        }) = yuv
+        {
+            let space: sys::AVColorSpace = matrix.into();
+            let table = sys::sws_getCoefficients(space as c_int);
+            let ret = sys::sws_setColorspaceDetails(
+                ctx,
+                table,
+                c_int::from(full_range),
+                table,
+                1,
+                0,
+                1 << 16,
+                1 << 16,
+            );
+            if ret < 0 {
+                sys::sws_freeContext(ctx);
+                return Err(ffmpeg::Error::from(ret));
+            }
+        }
+        let raw = &*frame.as_ptr();
+        let dst = [
+            out.as_mut_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        ];
+        let dst_stride = [stride as c_int, 0, 0, 0];
+        let src: [*const u8; 4] = [raw.data[0], raw.data[1], raw.data[2], raw.data[3]];
+        let written = sys::sws_scale(
+            ctx,
+            src.as_ptr(),
+            raw.linesize.as_ptr(),
             0,
-            1 << 16,
-            1 << 16,
-        )
-    };
-    if ret < 0 {
-        Err(ffmpeg::Error::from(ret))
-    } else {
-        Ok(())
+            h,
+            dst.as_ptr(),
+            dst_stride.as_ptr(),
+        );
+        sys::sws_freeContext(ctx);
+        if written != h {
+            return Err(ffmpeg::Error::from(written.min(-1)));
+        }
     }
+    if stride != row {
+        for y in 1..height as usize {
+            out.copy_within(y * stride..y * stride + row, y * row);
+        }
+        out.truncate(row * height as usize);
+    }
+    Ok(out)
 }
 
 // ---- Hardware decode ----------------------------------------------------------------------

@@ -258,6 +258,22 @@ impl ColourInfo {
         }
     }
 
+    /// These tags, with each untagged field taken from `fallback` (a frame's tags over
+    /// its container's).
+    pub fn or(self, fallback: ColourInfo) -> Self {
+        Self {
+            primaries: self.primaries.or(fallback.primaries),
+            transfer: self.transfer.or(fallback.transfer),
+            matrix: self.matrix.or(fallback.matrix),
+            range: if self.range == ColourRange::Unspecified {
+                fallback.range
+            } else {
+                self.range
+            },
+            chroma_location: self.chroma_location.or(fallback.chroma_location),
+        }
+    }
+
     pub fn hdr(&self) -> Hdr {
         match self.transfer {
             Some("smpte2084") => Hdr::Pq,

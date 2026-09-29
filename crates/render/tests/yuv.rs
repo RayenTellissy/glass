@@ -2,10 +2,13 @@
 //! colour bars come out as the RGB the matrix and range define, for 8-bit NV12 and
 //! 10-bit P010, into both output formats. Skips when no GPU adapter exists.
 
-use media::{ColourInfo, ColourRange, HwSurfaceFormat};
+use media::colour::Defaulted;
+use media::{
+    ChromaSiting, ColourSpace, Hdr, HwSurfaceFormat, Matrix, Primaries, Range, TransferFn,
+};
 use render::interop::plane_formats;
 use render::wgpu;
-use render::yuv::{YuvConverter, YuvParams};
+use render::yuv::{PlaneLayout, YuvConverter, YuvParams, YuvPlanes};
 
 const W: u32 = 64;
 const H: u32 = 16;
@@ -180,21 +183,26 @@ fn run(format: HwSurfaceFormat, target_format: wgpu::TextureFormat) {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    let colour = ColourInfo {
-        primaries: Some("bt709"),
-        transfer: Some("bt709"),
-        matrix: Some("bt709"),
-        range: ColourRange::Limited,
-        chroma_location: Some("center"),
+    let colour = ColourSpace {
+        primaries: Primaries::Bt709,
+        transfer: TransferFn::Bt1886,
+        matrix: Matrix::Bt709,
+        range: Range::Limited,
+        siting: ChromaSiting::Center,
+        bit_depth: format.bit_depth(),
+        hdr: Hdr::None,
+        defaulted: Defaulted::default(),
     };
-    let params = YuvParams::new(&colour, format, false, H);
+    let params = YuvParams::new(&colour, PlaneLayout::from_surface(format)).encoded();
     let converter = YuvConverter::new(&device);
     let mut encoder = device.create_command_encoder(&Default::default());
     assert!(converter.encode(
         &device,
         &mut encoder,
-        &luma,
-        &chroma,
+        YuvPlanes::Biplanar {
+            luma: &luma,
+            chroma: &chroma,
+        },
         &params,
         &target.create_view(&Default::default()),
         target_format,

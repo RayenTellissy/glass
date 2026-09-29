@@ -3,6 +3,7 @@
 
 use ffmpeg_next as ffmpeg;
 
+use crate::colour::{ColourSpace, Matrix, Range};
 use crate::decode::VideoFrame;
 use crate::error::{MediaError, Result};
 use crate::ffi;
@@ -27,26 +28,20 @@ impl RgbaImage {
 }
 
 impl VideoFrame {
-    /// Converts to full-range 8-bit RGBA with swscale (bilinear, accurate rounding, full
-    /// chroma interpolation), at the same size.
-    ///
-    /// YUV uses the frame's matrix and range. An untagged matrix is taken as BT.709 above
-    /// 576 lines and BT.601 at or below, and an untagged range as limited, which is what
-    /// cameras and encoders that omit the tags produce.
+    /// Converts to full-range 8-bit RGBA (encoded R'G'B', no transfer function applied)
+    /// with swscale (bilinear, accurate rounding, full chroma interpolation), at the same
+    /// size, using the frame's [`ColourSpace`]: its matrix, range and chroma siting, with
+    /// untagged values filled in by the rule in [`crate::colour`].
     pub fn to_rgba8(&self) -> Result<RgbaImage> {
+        self.to_rgba8_as(&self.colour_space())
+    }
+
+    /// [`Self::to_rgba8`] with another colour description, for example a different chroma
+    /// siting to compare against.
+    pub fn to_rgba8_as(&self, colour: &ColourSpace) -> Result<RgbaImage> {
         let frame = self.raw();
         let (width, height) = (frame.width(), frame.height());
         let format = self.format();
-        if self.is_hardware() {
-            // Hardware surfaces convert on the GPU (render::interop); there is no CPU copy.
-            return Err(MediaError::Convert {
-                format: format.name(),
-                width,
-                height,
-                to: "rgba",
-                source: ffmpeg::Error::InvalidData.into(),
-            });
-        }
         let error = |e: ffmpeg::Error| MediaError::Convert {
             format: format.name(),
             width,
@@ -54,36 +49,27 @@ impl VideoFrame {
             to: "rgba",
             source: e.into(),
         };
-        let mut scaler = ffmpeg::software::scaling::Context::get(
-            frame.format(),
-            width,
-            height,
-            ffmpeg::format::Pixel::RGBA,
-            width,
-            height,
-            ffmpeg::software::scaling::Flags::BILINEAR
-                | ffmpeg::software::scaling::Flags::ACCURATE_RND
-                | ffmpeg::software::scaling::Flags::FULL_CHR_H_INT,
-        )
-        .map_err(error)?;
-        if !format.is_rgb() {
-            let matrix = match frame.color_space() {
-                ffmpeg::color::Space::Unspecified if height > 576 => ffmpeg::color::Space::BT709,
-                ffmpeg::color::Space::Unspecified => ffmpeg::color::Space::BT470BG,
-                tagged => tagged,
+        if self.is_hardware() {
+            // Hardware surfaces convert on the GPU (render::interop); there is no CPU copy.
+            return Err(error(ffmpeg::Error::InvalidData));
+        }
+        let yuv = (!format.is_rgb()).then(|| {
+            let matrix = match colour.matrix {
+                Matrix::Bt709 | Matrix::Identity => ffmpeg::color::Space::BT709,
+                Matrix::Bt601 => ffmpeg::color::Space::BT470BG,
+                Matrix::Bt2020 => ffmpeg::color::Space::BT2020NCL,
+                Matrix::Smpte240m => ffmpeg::color::Space::SMPTE240M,
             };
-            let full = frame.color_range() == ffmpeg::color::Range::JPEG
-                || format.name().starts_with("yuvj");
-            ffi::set_scaler_colourspace(&mut scaler, matrix, full).map_err(error)?;
-        }
-        let mut out = ffmpeg::frame::Video::empty();
-        scaler.run(frame, &mut out).map_err(error)?;
-        let row = width as usize * 4;
-        let stride = out.stride(0);
-        let mut data = Vec::with_capacity(row * height as usize);
-        for line in out.data(0).chunks(stride).take(height as usize) {
-            data.extend_from_slice(&line[..row]);
-        }
+            let shift = format.chroma_shift();
+            let (h, v) = colour.siting.position_256(shift);
+            ffi::SwsYuv {
+                matrix,
+                full_range: colour.range == Range::Full,
+                h_chroma_pos: (shift.0 > 0).then_some(h),
+                v_chroma_pos: (shift.1 > 0).then_some(v),
+            }
+        });
+        let data = ffi::scale_to_rgba(frame, yuv).map_err(error)?;
         Ok(RgbaImage {
             width,
             height,

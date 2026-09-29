@@ -238,9 +238,12 @@ fn decoded_frame_matches_ffmpeg_cli() {
         .expect("video");
     let ours = frame.to_rgba8().expect("rgba");
 
-    // The same conversion the helper documents for an untagged 1080p frame.
+    // The same conversion the helper documents for an untagged 1080p frame, with the
+    // left chroma siting the H.264 decoder reports (the scale filter's "auto" siting
+    // treats it as centred, so it is passed explicitly).
+    assert_eq!(frame.colour_space().siting, media::ChromaSiting::Left);
     let filter = format!(
-        "select=eq(n\\,{FRAME}),scale=in_color_matrix=bt709:in_range=tv:out_range=pc:flags=bilinear+accurate_rnd+full_chroma_int,format=rgba"
+        "select=eq(n\\,{FRAME}),scale=in_color_matrix=bt709:in_range=tv:out_range=pc:in_chroma_loc=left:flags=bilinear+accurate_rnd+full_chroma_int,format=rgba"
     );
     let output = Command::new(&cli)
         .args(["-v", "error", "-i"])

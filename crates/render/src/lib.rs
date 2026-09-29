@@ -5,11 +5,14 @@
 //! `render::interop`.
 //!
 //! Decoded video reaches the GPU in two steps: [`interop::SurfaceImporter`] wraps a
-//! hardware surface ([`media::HwFrame`]) as one wgpu texture per plane without a copy, and
-//! [`yuv::YuvConverter`] turns those planes into RGBA with the frame's matrix and range.
+//! hardware surface ([`media::HwFrame`]) as one wgpu texture per plane without a copy (or
+//! [`upload::upload_frame`] writes a software-decoded frame's planes), and
+//! [`yuv::YuvConverter`] turns those planes into linear or encoded RGBA with the frame's
+//! [`media::ColourSpace`].
 
 #[allow(unsafe_code)]
 pub mod interop;
+pub mod upload;
 pub mod yuv;
 
 /// The wgpu this crate is built against (the version egui-wgpu uses), so callers that
