@@ -489,6 +489,7 @@ Append one line per decision: date, decision, reason. Add the same entry to `doc
 - 2026-09-29 — The pinned FFmpeg build adds dav1d for AV1 software decode, with meson and ninja built from pinned sources as host tools. Reason: AV1 is a supported format (codec-av1 flag, fixtures, export) and FFmpeg's built-in AV1 decoder needs hardware the M1/M2 lack.
 - 2026-09-29 — The content hash keying per-file analysis is BLAKE3 of the size, the first and last 1 MiB and eight 64 KiB blocks, without the modification time. Reason: the cache must survive moving and copying media, and a copy gets a new modification time.
 - 2026-09-29 — The render working space is linear light in the project primaries: BT.709 by default, BT.2020 when the project colour space is HDR (PQ or HLG). Sources are gamut-converted into it by a render-graph node (Phase 4). Reason: most creator footage and delivery targets are BT.709, and BT.2020 keeps HDR sources unclipped; the project colour space setting (Phase 5) already chooses between them.
+- 2026-09-29 — Independent tasks now run in parallel in separate git worktrees, including tasks from the next phases whose inputs are already built, with cargo commands serialised by scripts/cargo-serial and one shared target directory. The hard limits stay: at most 10 agents, one cargo command at a time, 4 compiler jobs, serial benchmarks. Reason: the user asked for faster progress, and most agent time is spent outside the compiler.
 
 ## Progress Log
 
