@@ -20,6 +20,13 @@ project = { path = "crates/project" }
 render = { path = "crates/render" }
 ui = { path = "crates/ui" }
 
+# Line tables keep backtraces useful while saving disk; dependencies carry no debug info.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [workspace.lints.rust]
 # Allowed locally only in media::ffi and render::interop (docs/ARCHITECTURE.md).
 unsafe_code = "deny"

@@ -17,9 +17,6 @@ version = "0.1.0"
 [[package]]
 name = "audio"
 version = "0.1.0"
-dependencies = [
- "project",
-]
 
 [[package]]
 name = "engine"
