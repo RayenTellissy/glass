@@ -70,5 +70,9 @@ harness = false
 name = "proxy"
 harness = false
 
+[[bench]]
+name = "scenes"
+harness = false
+
 [lints]
 workspace = true
