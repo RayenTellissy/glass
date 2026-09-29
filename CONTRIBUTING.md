@@ -60,6 +60,16 @@ In CI the `bench` job in `ci.yml` saves a `main` baseline on every push to `main
 
 UI code is checked headless: `ui::headless::HeadlessUi` renders egui into an offscreen wgpu texture (a locked screen or a CI runner has no visible window) and records each frame into a `ui::frame_time::FrameTimeMonitor`. A UI test runs its screen for a few hundred frames and calls `monitor.stats().assert_p99_within_budget()`, which fails with p50, p95, p99, max and the over-budget count when the p99 is not under 8 ms; `crates/ui/tests/frame_budget.rs` is the example to copy. Keep each such test under a few seconds. Without a GPU the test prints `SKIPPED ...` and returns; set `GLASS_REQUIRE_GPU=1` where a GPU is expected so a missing one fails instead.
 
+## User-facing strings
+
+Every string the UI shows is a key in `assets/i18n/en.json`, used through `t!("key")` or `t!("key", name = value)`. Add the key in the same change as the code that shows it, and write it in the product's voice (see [`assets/i18n/README.md`](assets/i18n/README.md)). The source check runs in CI and locally:
+
+```sh
+cargo test -p app --test ui_source -- --nocapture
+```
+
+It fails on a missing key, a wrong placeholder, or literal text passed to an egui text API, and prints keys nothing uses yet as warnings. A debug-only string can carry `// allow-literal-text: <reason>`.
+
 ## Licences and advisories
 
 Glass is distributed linked against a GPL build of FFmpeg, so every dependency must use a licence compatible with GPLv3. `deny.toml` holds the allow-list (with the reasoning for borderline entries), checks the RustSec advisory database, warns on duplicate crate versions and only accepts crates from crates.io. Run it before adding a dependency:

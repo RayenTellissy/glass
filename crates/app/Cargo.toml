@@ -36,5 +36,8 @@ release-full = ["codec-av1", "codec-prores-sw", "ai-whisper", "ai-segmentation"]
 engine.workspace = true
 ui.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true

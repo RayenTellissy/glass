@@ -73,6 +73,7 @@ name = "app"
 version = "0.1.0"
 dependencies = [
  "engine",
+ "serde_json",
  "ui",
 ]
 
@@ -94,6 +95,11 @@ dependencies = [
 [[package]]
 name = "assets"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tracing",
+]
 
 [[package]]
 name = "audio"

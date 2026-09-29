@@ -119,6 +119,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # i18n keys exist and UI code passes no literal text to egui (see assets/i18n/README.md).
+      - name: UI source rules
+        run: cargo test -p app --test ui_source -- --nocapture
+
       - name: Build
         run: cargo build --workspace
 

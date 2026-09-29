@@ -4,3 +4,6 @@
 
 pub mod frame_time;
 pub mod headless;
+
+/// `t!("key")` looks up a user-facing string; see [`assets::i18n`].
+pub use assets::t;
