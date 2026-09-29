@@ -116,7 +116,7 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
   - [x] Build locally for `aarch64-apple-darwin`, check the workspace and `experiments/proto-decode` against it, and make `scripts/dev-env.sh` prefer it over Homebrew
   - [x] `scripts/ffmpeg/package-sources.sh` gathering the exact source archives and licence texts for a release, plus GPL compliance notes in `CONTRIBUTING.md`
   - [ ] CI job building FFmpeg per target, cached on the `versions.env` hash, and release attachment of the sources (needs-human: no GitHub remote yet, and the Windows and Linux builds can only run in CI; push, confirm all four targets build and a `v*` tag attaches the sources)
-- [ ] `cargo-dist` config producing DMG, MSI or MSIX, and AppImage on tags
+- [~] `cargo-dist` config producing DMG, MSI or MSIX, and AppImage on tags
 - [ ] App icons exported from the Brand page: macOS icon with the graphite, light, and clear appearances, Windows `.ico` and Linux PNGs using the bare mark, with the small-size variants the page defines (glow drops out at 64 px, a slice at 32 px)
 - [ ] Size check in CI: fails when an installer grows past the stored budget (starting at 30 MB). Raising the budget is allowed with a Decision Log entry
 - [ ] Benchmark harness with `criterion` and a `bench` CI job that posts results as a PR comment
