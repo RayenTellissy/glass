@@ -1,0 +1,12 @@
+# Installer size budgets in bytes, checked by scripts/size-check.sh after every
+# installer build (package.yml). The target is about 30 MB per installer, excluding
+# asset packs and models, which download on demand.
+#
+# Raising a budget is allowed, but only together with a Decision Log line in PLAN.md
+# and the same entry in docs/DECISIONS.md, saying what grew and why.
+
+[budget]
+dmg = 31457280       # 30 MiB, macOS disk image (one per architecture)
+msi = 31457280       # 30 MiB, Windows installer from cargo-dist
+msix = 31457280      # 30 MiB, Windows package
+appimage = 31457280  # 30 MiB, Linux AppImage

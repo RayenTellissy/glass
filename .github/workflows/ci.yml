@@ -1,0 +1,258 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "goal/**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  # Static FFmpeg command-line tools used only to generate the reference media on Linux
+  # (it needs libvpx and SVT-AV1, which the pinned library build leaves out).
+  BTBN_TAG: "autobuild-2026-09-28-13-06"
+  BTBN_VERSION: "n9.0.2-14-gebafaee10a"
+
+jobs:
+  check:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    env:
+      GLASS_REQUIRE_GPU: ${{ matrix.require_gpu || '0' }}
+    strategy:
+      fail-fast: false
+      # Same runner labels as `dist plan` picks for the release builds.
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+            # Apple silicon runners have a Metal GPU, so the frame-budget tests must not skip.
+            require_gpu: "1"
+          - name: macOS x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+          - name: Windows x86_64
+            os: windows-2022
+            target: x86_64-pc-windows-msvc
+          - name: Linux x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # The pinned FFmpeg libraries from scripts/ffmpeg/build.sh, rebuilt only when the
+      # pinned versions or the script change.
+      - name: Cache FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .glass-cache/ffmpeg/src
+            .glass-cache/ffmpeg/${{ matrix.target }}
+          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('scripts/ffmpeg/versions.env', 'scripts/ffmpeg/build.sh') }}
+
+      - name: Build prerequisites (macOS)
+        if: runner.os == 'macOS'
+        # Homebrew's FFmpeg supplies only the command-line tools for the reference media;
+        # nasm is built by the script when it is missing.
+        run: brew install ffmpeg
+
+      - name: Build prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # mesa-vulkan-drivers brings lavapipe, a software Vulkan adapter: the headless UI
+          # tests render their frames on it, and skip only the frame-budget assertion.
+          sudo apt-get install -y --no-install-recommends nasm cmake libva-dev zlib1g-dev clang libclang-dev mesa-vulkan-drivers
+          name="ffmpeg-${BTBN_VERSION}-linux64-gpl-9.0"
+          curl -fsSL -o "$RUNNER_TEMP/ffmpeg-cli.tar.xz" \
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/${BTBN_TAG}/${name}.tar.xz"
+          tar -xJf "$RUNNER_TEMP/ffmpeg-cli.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name/bin" >> "$GITHUB_PATH"
+
+      - name: Build prerequisites (Windows)
+        if: runner.os == 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          path-type: inherit
+          install: make diffutils tar bzip2 xz nasm pkgconf
+
+      - name: MSVC environment (Windows)
+        if: runner.os == 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build FFmpeg (macOS, Linux)
+        if: runner.os != 'Windows'
+        run: scripts/ffmpeg/build.sh --jobs 4
+
+      - name: Build FFmpeg (Windows)
+        if: runner.os == 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: |
+          # MSYS2's coreutils link.exe would shadow the MSVC linker.
+          rm -f /usr/bin/link.exe
+          scripts/ffmpeg/build.sh --jobs 4
+
+      - name: Use the pinned FFmpeg
+        shell: bash
+        run: |
+          prefix="$GITHUB_WORKSPACE/.glass-cache/ffmpeg/${{ matrix.target }}"
+          cat "$prefix/BUILDINFO"
+          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
+          case "$RUNNER_OS" in
+            Linux) echo "LD_LIBRARY_PATH=$prefix/lib" >> "$GITHUB_ENV" ;;
+            Windows) echo "$prefix/bin" >> "$GITHUB_PATH" ;;
+          esac
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Theme token files: schema, every role in every theme, WCAG contrast pairs. The
+      # files are the same on every platform, so Windows (no python3 on PATH) skips it.
+      - name: Theme tokens
+        if: runner.os != 'Windows'
+        run: python3 assets/theme/check.py
+
+      # i18n keys exist, and UI code passes no literal text to egui and builds no colour
+      # outside the theme module (assets/i18n/README.md, assets/theme/README.md).
+      - name: UI source rules
+        run: cargo test -p app --test ui_source -- --nocapture
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Reference media
+        if: runner.os != 'Windows'
+        run: tests/fixtures/generate.sh --verify
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Smoke
+        run: cargo run --bin smoke
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check all
+
+  # Criterion benchmarks. Pushes to main save the `main` baseline in the Actions cache;
+  # pull requests compare against the newest one and post the table as a PR comment.
+  # Runs alone on its own runner, one benchmark at a time (criterion is serial).
+  bench:
+    name: bench
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bench
+
+      # Same FFmpeg steps as the check job, Linux only.
+      - name: Cache FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: |
+            .glass-cache/ffmpeg/src
+            .glass-cache/ffmpeg/${{ env.TARGET }}
+          key: ffmpeg-${{ env.TARGET }}-${{ hashFiles('scripts/ffmpeg/versions.env', 'scripts/ffmpeg/build.sh') }}
+
+      - name: Build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nasm cmake libva-dev zlib1g-dev clang libclang-dev
+
+      - name: Build FFmpeg
+        run: scripts/ffmpeg/build.sh --jobs 4
+
+      - name: Use the pinned FFmpeg
+        run: |
+          prefix="$GITHUB_WORKSPACE/.glass-cache/ffmpeg/$TARGET"
+          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$prefix/lib" >> "$GITHUB_ENV"
+
+      - name: Restore the main baseline
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: target/criterion
+          key: criterion-main-${{ github.event.pull_request.base.sha }}
+          restore-keys: criterion-main-
+
+      # `--bench "*"` runs only criterion targets; library and binary test harnesses
+      # would reject criterion's flags.
+      - name: Bench and save the main baseline
+        if: github.event_name == 'push'
+        run: cargo bench --locked --workspace --bench "*" -- --save-baseline main
+
+      - name: Save the main baseline
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: target/criterion
+          key: criterion-main-${{ github.sha }}
+
+      - name: Bench against the main baseline
+        if: github.event_name == 'pull_request'
+        run: cargo bench --locked --workspace --bench "*" -- --baseline-lenient main
+
+      - name: Report
+        run: |
+          python3 scripts/bench-report.py --baseline main > bench-report.md
+          cat bench-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Updates one comment per PR instead of adding a new one on every push. Pull
+      # requests from forks get a read-only token, so they only get the job summary.
+      - name: Comment on the pull request
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs")
+            const marker = "<!-- glass-bench -->"
+            const body = `${marker}\n${fs.readFileSync("bench-report.md", "utf8")}`
+            const { owner, repo } = context.repo
+            const issue_number = context.issue.number
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number })
+            const existing = comments.find((c) => c.body && c.body.startsWith(marker))
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body })
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body })
+            }
+
+# Tagged releases (installers and the GPL source bundle) are built by release.yml,
+# which dist generates, and package.yml.

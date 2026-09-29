@@ -1,0 +1,68 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+exclude = ["experiments"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+authors = ["Glass contributors"]
+publish = false
+# Placeholder until the GitHub remote exists; dist needs it to generate the release workflow.
+repository = "https://github.com/OWNER/glass"
+
+[workspace.dependencies]
+assets = { path = "crates/assets" }
+audio = { path = "crates/audio" }
+engine = { path = "crates/engine" }
+media = { path = "crates/media" }
+plugins = { path = "crates/plugins" }
+project = { path = "crates/project" }
+render = { path = "crates/render" }
+ui = { path = "crates/ui" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# UI: egui on wgpu, the versions proto-ui measured. `default_fonts` stays off because
+# it bundles the Ubuntu font, which deny.toml rejects; Glass ships Geist and Geist Mono
+# (OFL) from assets/fonts/ instead. eframe joins `app` with the window.
+egui = { version = "0.36", default-features = false }
+egui-wgpu = "0.36"
+eframe = { version = "0.36", default-features = false, features = ["accesskit", "wgpu", "wayland", "x11"] }
+pollster = "0.4"
+tracing = "0.1"
+# `tracing-log` routes `log` records (wgpu, winit, eframe) into tracing.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "ansi", "env-filter", "tracing-log", "smallvec"] }
+
+# Opt-in local crash reports: an in-process handler and an out-of-process minidump
+# writer (EmbarkStudios). Local IPC only, no network.
+crash-handler = "0.8"
+minidumper = "0.11"
+dirs = "7"
+
+# Benchmarks only (dev-dependency). Plots and rayon are left out: CI reads the JSON
+# estimates, and benchmarks run one at a time anyway.
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+# Line tables keep backtraces useful while saving disk; dependencies carry no debug info.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+[workspace.lints.rust]
+# A crate that must call platform APIs keeps that code in one `ffi`, `sys` or
+# `interop` module with a local #[allow(unsafe_code)] (docs/ARCHITECTURE.md).
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"

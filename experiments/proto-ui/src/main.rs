@@ -1,6 +1,10 @@
 //! Timeline frame-time prototype: 200 fake clips on 10 tracks, repainted
 //! continuously with vsync off while zoom, scroll and playhead change every
-//! frame, then prints frame-time statistics and writes them to RESULTS.md.
+//! frame, then prints frame-time statistics and writes them to
+//! RESULTS.generated[.offscreen][.no-cull].md.
+
+mod offscreen;
+mod spans;
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -110,7 +114,13 @@ fn make_tracks() -> (Vec<Track>, f32) {
 
 #[derive(Default)]
 struct Samples {
+    /// UI build + tessellation + paint + `Queue::submit`: the judged metric.
+    ui_thread_ms: Vec<f32>,
+    /// eframe's `cpu_usage`, which leaves out `Queue::submit`.
     cpu_ms: Vec<f32>,
+    submit_ms: Vec<f32>,
+    acquire_ms: Vec<f32>,
+    present_ms: Vec<f32>,
     build_ms: Vec<f32>,
     interval_ms: Vec<f32>,
     shapes: Vec<usize>,
@@ -118,6 +128,7 @@ struct Samples {
 
 struct Opts {
     cull: bool,
+    offscreen: bool,
     measure_frames: usize,
     display_hz: String,
 }
@@ -346,13 +357,23 @@ impl eframe::App for TimelineApp {
         let interval = self.last_frame.map(|l| now - l);
         self.last_frame = Some(now);
 
-        // cpu_usage covers the previous frame: UI build, tessellation and paint
-        // submission, excluding time spent waiting on surface acquire/present.
+        // cpu_usage and the span totals cover the previous frame. cpu_usage is
+        // UI build, tessellation and paint encoding; egui-wgpu subtracts the
+        // time in acquire, Queue::submit and present from it, so submit is
+        // added back to get the UI thread's real CPU cost.
+        let submit = spans::take_ms(spans::Kind::Submit);
+        let acquire = spans::take_ms(spans::Kind::Acquire);
+        let present = spans::take_ms(spans::Kind::Present);
         if self.frame > WARMUP_FRAMES
             && let (Some(cpu), Some(interval)) = (frame.info().cpu_usage, interval)
             && let Ok(mut s) = self.samples.lock()
         {
-            s.cpu_ms.push(cpu * 1000.0);
+            let cpu = cpu * 1000.0;
+            s.cpu_ms.push(cpu);
+            s.submit_ms.push(submit);
+            s.acquire_ms.push(acquire);
+            s.present_ms.push(present);
+            s.ui_thread_ms.push(cpu + submit);
             s.interval_ms.push(interval.as_secs_f32() * 1000.0);
         }
 
@@ -428,6 +449,7 @@ fn parse_opts() -> Opts {
     };
     Opts {
         cull: !args.iter().any(|a| a == "--no-cull"),
+        offscreen: args.iter().any(|a| a == "--offscreen"),
         measure_frames: value("--frames")
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_MEASURE_FRAMES),
@@ -436,6 +458,9 @@ fn parse_opts() -> Opts {
 }
 
 fn main() -> eframe::Result {
+    if !spans::install() {
+        eprintln!("could not install the span timer; submit times will read 0");
+    }
     let opts = Arc::new(parse_opts());
     let samples = Arc::new(Mutex::new(Samples::default()));
     let (tracks, duration) = make_tracks();
@@ -451,7 +476,34 @@ fn main() -> eframe::Result {
 
     let backend = Arc::new(Mutex::new(String::from("unknown")));
     let window_px = Arc::new(Mutex::new((0.0f32, 0.0f32, 0.0f32)));
-    {
+    if opts.offscreen {
+        let mut app = TimelineApp {
+            tracks,
+            duration,
+            frame: 0,
+            started: Instant::now(),
+            last_frame: None,
+            samples: samples.clone(),
+            opts: opts.clone(),
+            done: false,
+        };
+        let mut s = samples
+            .lock()
+            .map_err(|_| eframe::Error::AppCreation("poisoned".into()))?;
+        let name = offscreen::run(opts.measure_frames, WARMUP_FRAMES, &mut s, |ui, frame| {
+            app.frame = frame;
+            app.draw(ui)
+        })
+        .map_err(|e| eframe::Error::AppCreation(e.to_string().into()))?;
+        if let (Ok(mut b), Ok(mut w)) = (backend.lock(), window_px.lock()) {
+            *b = name;
+            *w = (
+                offscreen::WIDTH_PX as f32 / offscreen::PIXELS_PER_POINT,
+                offscreen::HEIGHT_PX as f32 / offscreen::PIXELS_PER_POINT,
+                offscreen::PIXELS_PER_POINT,
+            );
+        }
+    } else {
         let samples = samples.clone();
         let opts = opts.clone();
         let backend = backend.clone();
@@ -496,49 +548,67 @@ fn main() -> eframe::Result {
     let backend = backend.lock().map(|b| b.clone()).unwrap_or_default();
     let (w, h, ppp) = window_px.lock().map(|w| *w).unwrap_or_default();
     let shape_stats = stats(&s.shapes.iter().map(|&n| n as f32).collect::<Vec<_>>());
-    let present_ms: Vec<f32> = s
-        .interval_ms
-        .iter()
-        .zip(&s.cpu_ms)
-        .map(|(i, c)| (i - c).max(0.0))
-        .collect();
-    let cpu = stats(&s.cpu_ms);
-    let verdict = match &cpu {
+    let ui_thread = stats(&s.ui_thread_ms);
+    let submit_seen = s.submit_ms.iter().any(|&m| m > 0.0);
+    let mode = if opts.offscreen {
+        "offscreen texture (`--offscreen`), no surface acquire or present"
+    } else {
+        "window, vsync off (`PresentMode::AutoNoVsync`)"
+    };
+    let verdict = match &ui_thread {
+        _ if !submit_seen => "NO DATA (Queue::submit was never timed)",
         Some(c) if c.median < 4.0 && c.p99 < 8.0 => "PASS (median < 4 ms and p99 < 8 ms)",
         Some(_) => "FAIL (budget is median < 4 ms and p99 < 8 ms)",
         None => "NO DATA",
     };
 
     let report = format!(
-        "# proto-ui results\n\n\
+        "# proto-ui generated results\n\n\
+         Written by the prototype on each run; hand-written notes live in RESULTS.md.\n\n\
          Timeline stress prototype: {clip_count} clips on {TRACKS} tracks, egui/eframe 0.36, release build.\n\
-         Zoom, scroll and playhead change every frame, continuous repaint, vsync off (`PresentMode::AutoNoVsync`).\n\n\
+         Zoom, scroll and playhead change every frame, continuous repaint. Target: {mode}.\n\n\
          - Renderer: {backend}\n\
          - Window: {w:.0} x {h:.0} points at {ppp} pixels per point\n\
          - Display refresh rate: {} Hz (the 120 Hz budget is 8.33 ms per frame, so the CPU numbers are what matter)\n\
          - Off-screen culling: {}\n\
          - Warm-up frames: {WARMUP_FRAMES}, measured frames: {}\n\
          - Shapes per frame (median / max): {:.0} / {:.0}\n\n\
-         Verdict: **{verdict}**\n\n\
+         Verdict on UI-thread CPU: **{verdict}**\n\n\
          | Metric (ms) | frames | median | p95 | p99 | max | mean |\n\
          | --- | --- | --- | --- | --- | --- | --- |\n\
-         {}\n{}\n{}\n{}\n\n\
-         - *Full frame CPU*: eframe's per-frame CPU time (UI build + tessellation + paint submission), excluding surface acquire/present waits.\n\
+         {}\n{}\n{}\n{}\n{}\n{}\n{}\n\n\
+         - *UI-thread CPU (judged)*: UI build + tessellation + paint encoding + `Queue::submit`, per frame.\n\
+         - *eframe cpu_usage*: eframe's reported frame time, which leaves out acquire, `Queue::submit` and present.\n\
+         - *Queue::submit*, *Surface acquire*, *Present*: time inside egui-wgpu's scopes of those names, timed through `profiling`'s tracing backend.\n\
          - *UI build only*: time spent inside the app's `ui` callback.\n\
-         - *Frame interval*: wall-clock time between consecutive frames.\n\
-         - *Acquire/present wait*: frame interval minus full frame CPU, a cheap proxy for the GPU/present side.\n",
+         - *Frame interval*: wall-clock time between consecutive frames.\n",
         opts.display_hz,
         if opts.cull { "on" } else { "off" },
-        s.cpu_ms.len(),
+        s.ui_thread_ms.len(),
         shape_stats.as_ref().map(|s| s.median).unwrap_or(0.0),
         shape_stats.as_ref().map(|s| s.max).unwrap_or(0.0),
-        row("Full frame CPU", &s.cpu_ms),
+        row("UI-thread CPU (judged)", &s.ui_thread_ms),
+        row(
+            if opts.offscreen {
+                "Before submit"
+            } else {
+                "eframe cpu_usage"
+            },
+            &s.cpu_ms
+        ),
+        row("Queue::submit", &s.submit_ms),
+        row("Surface acquire", &s.acquire_ms),
+        row("Present", &s.present_ms),
         row("UI build only", &s.build_ms),
         row("Frame interval", &s.interval_ms),
-        row("Acquire/present wait", &present_ms),
     );
     println!("{report}");
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("RESULTS.md");
+    let name = format!(
+        "RESULTS.generated{}{}.md",
+        if opts.offscreen { ".offscreen" } else { "" },
+        if opts.cull { "" } else { ".no-cull" }
+    );
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
     if let Err(err) = std::fs::write(&path, &report) {
         eprintln!("could not write {}: {err}", path.display());
     }

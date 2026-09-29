@@ -1,0 +1,67 @@
+{
+  "fill" : {
+    "linear-gradient" : [ "extended-gray:1.00000,1.00000", "extended-gray:0.89430,1.00000" ],
+    "orientation" : { "start" : { "x" : 0.5, "y" : 0 }, "stop" : { "x" : 0.5, "y" : 1 } }
+  },
+  "fill-specializations" : [
+    {
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [ "extended-gray:0.16860,1.00000", "extended-gray:0.05500,1.00000" ],
+        "orientation" : { "start" : { "x" : 0.5, "y" : 0 }, "stop" : { "x" : 0.5, "y" : 1 } }
+      }
+    }
+  ],
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "name" : "mark-ink",
+          "image-name" : "mark-ink.svg",
+          "glass" : false,
+          "hidden-specializations" : [
+            { "appearance" : "dark", "value" : true },
+            { "appearance" : "tinted", "value" : true }
+          ]
+        },
+        {
+          "name" : "mark",
+          "image-name" : "mark.svg",
+          "glass" : false,
+          "hidden-specializations" : [
+            { "value" : true },
+            { "appearance" : "dark", "value" : false }
+          ]
+        },
+        {
+          "name" : "mark-clear",
+          "image-name" : "mark-clear.svg",
+          "glass" : false,
+          "hidden-specializations" : [
+            { "value" : true },
+            { "appearance" : "tinted", "value" : false }
+          ]
+        }
+      ],
+      "shadow" : { "kind" : "none", "opacity" : 0.5 },
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    },
+    {
+      "layers" : [
+        {
+          "name" : "glow",
+          "image-name" : "glow.svg",
+          "glass" : false,
+          "hidden-specializations" : [
+            { "value" : true },
+            { "appearance" : "dark", "value" : false }
+          ]
+        }
+      ],
+      "shadow" : { "kind" : "none", "opacity" : 0.5 },
+      "specular" : false,
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    }
+  ],
+  "supported-platforms" : { "squares" : [ "macOS" ] }
+}

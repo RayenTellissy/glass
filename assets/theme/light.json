@@ -1,0 +1,140 @@
+{
+  "$schema": "./schema.json",
+  "name": "light",
+  "mode": "light",
+  "description": "Opposite theme. Paper tokens --color-light-*.",
+  "colors": {
+    "bg/0": {
+      "value": "#E6E6E6",
+      "paper": "--color-light-bg-0"
+    },
+    "bg/1": {
+      "value": "#F4F4F4",
+      "paper": "--color-light-bg-1"
+    },
+    "bg/2": {
+      "value": "#FFFFFF",
+      "paper": "--color-light-bg-2"
+    },
+    "bg/3": {
+      "value": "#EBEBEB",
+      "paper": "--color-light-bg-3"
+    },
+    "border/subtle": {
+      "value": "#DADADA",
+      "paper": "--color-light-border-subtle"
+    },
+    "border/strong": {
+      "value": "#808080",
+      "paper": "--color-light-border-strong"
+    },
+    "text/primary": {
+      "value": "#141414",
+      "paper": "--color-light-text-primary"
+    },
+    "text/secondary": {
+      "value": "#474747",
+      "paper": "--color-light-text-secondary"
+    },
+    "text/muted": {
+      "value": "#666666",
+      "paper": "--color-light-text-muted"
+    },
+    "text/inverse": {
+      "value": "#FAFAFA",
+      "paper": "--color-light-text-inverse"
+    },
+    "accent": {
+      "value": "#141414",
+      "paper": "--color-light-accent"
+    },
+    "accent/soft": {
+      "value": "#1414140F",
+      "paper": "--color-light-accent-soft"
+    },
+    "state/success": {
+      "value": "#177441",
+      "paper": "--color-light-state-success"
+    },
+    "state/warning": {
+      "value": "#8C5800",
+      "paper": "--color-light-state-warning"
+    },
+    "state/error": {
+      "value": "#BF3429",
+      "paper": "--color-light-state-error"
+    },
+    "state/info": {
+      "value": "#2F62D0",
+      "paper": "--color-light-state-info"
+    },
+    "clip/video": {
+      "value": "#3767D6",
+      "paper": "--color-light-clip-video"
+    },
+    "clip/audio": {
+      "value": "#1F9463",
+      "paper": "--color-light-clip-audio"
+    },
+    "clip/title": {
+      "value": "#C48A12",
+      "paper": "--color-light-clip-title"
+    },
+    "clip/adjustment": {
+      "value": "#8657D6",
+      "paper": "--color-light-clip-adjustment"
+    },
+    "clip/subtitle": {
+      "value": "#17928E",
+      "paper": "--color-light-clip-subtitle"
+    },
+    "clip/offline": {
+      "value": "#CF3A2F",
+      "paper": "--color-light-clip-offline"
+    },
+    "scope/red": {
+      "value": "#FF5B52",
+      "paper": "--color-light-scope-red",
+      "alias": "--color-scope-red",
+      "source": "var(--color-scope-red)"
+    },
+    "scope/green": {
+      "value": "#43D27D",
+      "paper": "--color-light-scope-green",
+      "alias": "--color-scope-green",
+      "source": "var(--color-scope-green)"
+    },
+    "scope/blue": {
+      "value": "#4F8DFF",
+      "paper": "--color-light-scope-blue",
+      "alias": "--color-scope-blue",
+      "source": "var(--color-scope-blue)"
+    },
+    "scope/luma": {
+      "value": "#E6E6E6",
+      "paper": "--color-light-scope-luma",
+      "alias": "--color-scope-luma",
+      "source": "var(--color-scope-luma)"
+    },
+    "glass/top": {
+      "value": "#FFFFFFD9",
+      "paper": "--color-light-glass-top"
+    },
+    "glass/bottom": {
+      "value": "#FFFFFF8C",
+      "paper": "--color-light-glass-bottom"
+    },
+    "glass/edge": {
+      "value": "#0000001A",
+      "paper": "--color-light-glass-edge"
+    },
+    "glass/highlight": {
+      "value": "#FFFFFFF2",
+      "paper": "--color-light-glass-highlight"
+    },
+    "glass/shadow": {
+      "value": "#00000026",
+      "paper": "--color-light-glass-shadow"
+    }
+  }
+}

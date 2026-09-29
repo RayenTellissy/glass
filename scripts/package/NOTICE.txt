@@ -1,0 +1,21 @@
+Glass
+
+The Glass source code is licensed under the MIT licence (LICENSES/Glass-LICENSE).
+
+This build of Glass is distributed together with FFmpeg, built as a GPL
+("--enable-gpl --enable-version3") shared library build that links x264 and
+x265. Because of those libraries, this build as a whole is distributed under
+the terms of the GNU General Public License, version 3 (LICENSES/FFmpeg-COPYING.GPLv3).
+You may redistribute and modify it under those terms. It comes with no warranty.
+
+The licence texts of every bundled library are in LICENSES/:
+
+  FFmpeg-COPYING.GPLv3, FFmpeg-LICENSE.md   FFmpeg
+  x264-COPYING                              x264 (GPL version 2 or later)
+  x265-COPYING                              x265 (GPL version 2 or later)
+  nv-codec-headers-LICENSE, zlib-LICENSE    Windows and Linux builds only
+
+Corresponding source: every Glass release attaches the exact FFmpeg, x264 and
+x265 source archives this build was made from, with their SHA-256 checksums and
+build scripts, as glass-<tag>-ffmpeg-sources.tar.gz. The Glass source code
+for the same version is in the release's source archive and its git tag.

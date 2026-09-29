@@ -1,0 +1,20 @@
+<svg width="1024" height="1024" viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg">
+  <!-- Caustic and frame glow of "App icon / Graphite" (300 px board), redrawn
+       without CSS blur: the radii are widened and the opacity lowered to match. -->
+  <defs>
+    <radialGradient id="video" cx="106" cy="235" r="1" gradientTransform="translate(106 235) scale(96 80) translate(-106 -235)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4C7FEA"/><stop offset="1" stop-color="#4C7FEA" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="title" cx="194" cy="241.5" r="1" gradientTransform="translate(194 241.5) scale(96 80) translate(-194 -241.5)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E5AE36"/><stop offset="1" stop-color="#E5AE36" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="frame" cx="185" cy="155" r="99" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <g opacity="0.2">
+    <rect x="0" y="140" width="300" height="160" fill="url(#video)"/>
+    <rect x="0" y="140" width="300" height="160" fill="url(#title)"/>
+  </g>
+  <rect x="0" y="0" width="300" height="300" fill="url(#frame)"/>
+</svg>

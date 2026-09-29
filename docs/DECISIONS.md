@@ -60,7 +60,7 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Date:** 2026-09-29
 - **Decision:** The proto-decode budget "under 5% CPU per stream" is judged as whole-machine utilisation: the app process plus the system decoder service (VTDecoderXPCService on macOS), divided by the number of logical cores, at 60 fps paced.
 - **Reason:** The plan does not define the unit; this is how system-wide decode cost is usually stated. The per-core numbers are recorded in `experiments/proto-decode/RESULTS.md` so the result can be re-judged on the reference M1.
-- **Evidence:** On the M2 (8 logical cores), the judged run (CVMetalTextureCache per frame, paced 60 fps, one stream) used 2.18% of the machine: 9.20% of one core in the process plus 8.26% of one core in VTDecoderXPCService, at 60.1 fps with 0 late frames.
+- **Evidence:** On the M2 (8 logical cores), the judged run (CVMetalTextureCache per frame, paced 60 fps, one stream) used 2.18% of the machine: 9.20% of one core in the process plus 8.26% of one core in VTDecoderXPCService, at 60.1 fps with 0 late frames. Rerun after review with a true 3-frame pacing window (the first run allowed 6 slots) against the pinned FFmpeg 9.0.2: 2.06% of the machine (8.58% + 7.88% of one core), 60 fps, 0 late; two paced streams 1.81% each, 0 late. The verdict is unchanged.
 - **Alternatives:** Judging against a single core. Measured that way, the same run is above 5% (9.20% in the process alone), so the unit decides the verdict; the per-core figures are kept for that reason.
 - **Consequences:** Later "under X% CPU" budgets are judged the same way, with per-core numbers recorded alongside.
 
@@ -79,3 +79,26 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** Phase 0 is closed. The UI toolkit, GPU (Metal), decode through `ffmpeg-next`, and VideoToolbox hardware decode are confirmed by the `experiments/` prototypes. Defaults without a Phase 0 prototype (`cpal`, `im` and `serde_json`, `wasmtime`, `whisper-rs`, `cargo-dist`, Vulkan, NVDEC and VAAPI, min targets) are adopted and confirmed by the tests and benchmarks of the phase that builds them.
 - **Reason:** Phase 0 only defines prototypes for UI, GPU, and decode, and the missing Windows and NVIDIA hardware should not block the engine work that follows.
 - **Consequences:** The GTX 1660 run of `experiments/proto-gpu` and the Windows D3D11VA port of `experiments/proto-decode` stay open as needs-human tasks.
+
+## 10. App icon small-size rule
+
+- **Date:** 2026-09-29
+- **Decision:** The mark's slice count follows its own drawn size: 4 slices at 32 pt and up, 3 below. Glow is a tile rule: simplified at 128 px, none at 64 px and below.
+- **Reason:** The Brand page text said a slice drops "at 32 px" on one board and "below 32 px" on another; the drawn size ramps on both boards agree once the rule is read as the mark's size, not the icon's.
+- **Consequences:** The Windows `.ico` uses the 3-slice mark at 16 and 24 px only. Details per output size are in `assets/icons/README.md`.
+
+## 11. egui without its default fonts
+
+- **Date:** 2026-09-29
+- **Decision:** `egui` is used with its `default_fonts` feature off (workspace dependency `egui = { version = "0.36", default-features = false }`; `eframe` likewise). Glass ships its own fonts, Geist and Geist Mono (OFL), from `assets/fonts/` and installs them into the egui context.
+- **Reason:** `default_fonts` bundles the Ubuntu font, whose licence has no FSF compatibility ruling, so `deny.toml` does not allow it. The design uses Geist and Geist Mono anyway (section 8 of `docs/ARCHITECTURE.md`).
+- **Evidence:** Without any font, egui 0.36 lays out text with zero width and draws nothing, so the fonts are required, not optional. `cargo tree -e features -i epaint` shows no `default_fonts` feature enabled.
+- **Consequences:** Until the Geist files are added to `assets/fonts/` (400, 500, 600 and Mono 400, 500, from the official vercel/geist-font release, with the OFL text), the headless test harness in `ui::headless` loads a system font at test time (never bundled) and draws shapes only when none exists.
+
+
+## 12. Phases merge when their local Done-when parts pass
+
+- **Date:** 2026-09-29
+- **Decision:** Phase 1 is merged to main with its local Done-when parts verified (smoke exits 0, the full local check is green, the arm64 DMG builds within the size budget). CI green and tagged installers for both platforms stay open as needs-human tasks. From here on, a phase merges when every part of its Done when that can run on this Mac passes, and the rest is tagged needs-human.
+- **Reason:** There is no GitHub remote and no Windows or NVIDIA hardware; holding main back would not change what can be verified.
+- **Consequences:** Needs-human tasks remain open in PLAN.md and are resolved when a person pushes the repo, runs CI, and tests on the missing hardware.
