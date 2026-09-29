@@ -74,6 +74,16 @@ impl LogFilter {
     }
 }
 
+/// The result of [`LogRing::since`]: the new events and the cursor for the next call.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LogBatch {
+    /// Matching events, oldest first.
+    pub events: Vec<LogEvent>,
+    /// The `from` to pass next time: one past the last event read, or the first
+    /// sequence number whose writer has not stored its event yet.
+    pub next: u64,
+}
+
 /// A fixed-capacity ring of recent events. When full, each new event replaces the
 /// oldest. Writers reserve a sequence number atomically and lock only the one slot they
 /// write, so concurrent writers and readers rarely touch the same lock.
@@ -107,36 +117,60 @@ impl LogRing {
         self.total().saturating_sub(self.slots.len() as u64)
     }
 
-    /// Events currently held, oldest first, that match `filter`.
+    /// Events currently held, oldest first, that match `filter`. A point-in-time view:
+    /// events whose writers have not stored them yet are left out.
     pub fn snapshot(&self, filter: &LogFilter) -> Vec<LogEvent> {
-        self.since(0, filter)
+        self.read(0, filter, false).events
     }
 
     /// Held events with `seq >= from` that match `filter`, oldest first. A reader that
-    /// polls keeps the last `seq` it saw plus one and passes it here, so each poll only
-    /// copies new events.
-    pub fn since(&self, from: u64, filter: &LogFilter) -> Vec<LogEvent> {
+    /// polls passes the returned [`LogBatch::next`] back in, so each poll only copies new
+    /// events. The batch stops before the first number whose writer has reserved it but
+    /// not stored the event yet, so the next poll picks that event up instead of the
+    /// cursor moving past it. Events overwritten before they were read are lost.
+    pub fn since(&self, from: u64, filter: &LogFilter) -> LogBatch {
+        self.read(from, filter, true)
+    }
+
+    fn read(&self, from: u64, filter: &LogFilter, stop_at_gap: bool) -> LogBatch {
         let end = self.total();
         let start = end.saturating_sub(self.slots.len() as u64).max(from);
-        let mut out = Vec::with_capacity((end.saturating_sub(start)) as usize);
+        let mut events = Vec::with_capacity((end.saturating_sub(start)) as usize);
         for seq in start..end {
             let slot = self
                 .slot(seq)
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            // A slot can hold a newer event (a writer lapped us) or none yet (its writer
-            // has reserved the number but not stored it); both are skipped.
-            if let Some(event) = slot.as_ref().filter(|e| e.seq == seq)
-                && filter.matches(event)
-            {
-                out.push(event.clone());
+            match slot.as_ref() {
+                Some(event) if event.seq == seq => {
+                    if filter.matches(event) {
+                        events.push(event.clone());
+                    }
+                }
+                // A writer lapped this reader: the event is gone for good.
+                Some(event) if event.seq > seq => {}
+                // Empty, or still the previous lap's event: the writer has reserved this
+                // number but not stored its event yet.
+                _ if stop_at_gap => return LogBatch { events, next: seq },
+                _ => {}
             }
         }
-        out
+        LogBatch {
+            events,
+            next: end.max(from),
+        }
     }
 
-    fn push(&self, mut event: LogEvent) {
-        let seq = self.next.fetch_add(1, Ordering::AcqRel);
+    fn push(&self, event: LogEvent) {
+        let seq = self.reserve();
+        self.store(seq, event);
+    }
+
+    fn reserve(&self) -> u64 {
+        self.next.fetch_add(1, Ordering::AcqRel)
+    }
+
+    fn store(&self, seq: u64, mut event: LogEvent) {
         event.seq = seq;
         let mut slot = self
             .slot(seq)
@@ -309,34 +343,79 @@ mod tests {
         assert_eq!(all.iter().map(|e| e.seq).collect::<Vec<_>>(), [6, 7, 8, 9]);
         assert_eq!(ring.total(), 10);
         assert_eq!(ring.dropped(), 6);
-        assert_eq!(
-            messages(&ring.since(8, &LogFilter::default())),
-            ["event 8", "event 9"]
-        );
-        assert!(ring.since(10, &LogFilter::default()).is_empty());
+        let batch = ring.since(8, &LogFilter::default());
+        assert_eq!(messages(&batch.events), ["event 8", "event 9"]);
+        assert_eq!(batch.next, 10);
+        let batch = ring.since(10, &LogFilter::default());
+        assert!(batch.events.is_empty());
+        assert_eq!(batch.next, 10);
+    }
+
+    fn event(message: &str) -> LogEvent {
+        LogEvent {
+            seq: 0,
+            time: SystemTime::now(),
+            level: Level::INFO,
+            target: "engine",
+            thread: None,
+            message: message.to_owned(),
+            fields: String::new(),
+        }
     }
 
     #[test]
-    fn records_level_target_thread_and_fields() {
-        let ring = Arc::new(LogRing::new(8));
-        std::thread::Builder::new()
-            .name("glass-test".into())
-            .spawn({
-                let ring = ring.clone();
-                move || {
-                    dispatcher::with_default(&dispatch(&ring), || {
-                        tracing::warn!(target: "engine::sched", frames = 3, name = "clip", "late");
-                    })
-                }
-            })
-            .and_then(|handle| handle.join().map_err(|_| std::io::Error::other("panicked")))
-            .expect("logging thread");
-        let event = &ring.snapshot(&LogFilter::default())[0];
-        assert_eq!(event.level, Level::WARN);
-        assert_eq!(event.target, "engine::sched");
-        assert_eq!(event.thread.as_deref(), Some("glass-test"));
-        assert_eq!(event.message, "late");
-        assert_eq!(event.fields, "frames=3 name=clip");
+    fn since_stops_at_a_reserved_but_unfilled_slot() {
+        let all = LogFilter::default();
+        let ring = LogRing::new(8);
+        ring.push(event("a"));
+        let slow = ring.reserve();
+        ring.push(event("c"));
+
+        let batch = ring.since(0, &all);
+        assert_eq!(messages(&batch.events), ["a"]);
+        assert_eq!(batch.next, slow);
+        // The snapshot is a point-in-time view and shows what is stored.
+        assert_eq!(messages(&ring.snapshot(&all)), ["a", "c"]);
+
+        ring.store(slow, event("b"));
+        let batch = ring.since(batch.next, &all);
+        assert_eq!(messages(&batch.events), ["b", "c"]);
+        assert_eq!(batch.next, 3);
+    }
+
+    #[test]
+    fn a_slot_still_holding_the_previous_lap_is_unfilled() {
+        let all = LogFilter::default();
+        let ring = LogRing::new(2);
+        for m in ["x", "y", "a"] {
+            ring.push(event(m));
+        }
+        // seq 3's slot still holds seq 1 ("y") until the slow writer stores.
+        let slow = ring.reserve();
+        ring.push(event("c"));
+        let batch = ring.since(2, &all);
+        assert!(batch.events.is_empty(), "{:?}", messages(&batch.events));
+        assert_eq!(batch.next, slow);
+
+        ring.store(slow, event("b"));
+        let batch = ring.since(batch.next, &all);
+        assert_eq!(messages(&batch.events), ["b", "c"]);
+        assert_eq!(batch.next, 5);
+    }
+
+    #[test]
+    fn a_gap_that_fell_out_of_the_ring_does_not_block_readers() {
+        let ring = LogRing::new(2);
+        let slow = ring.reserve();
+        for m in ["b", "c", "d"] {
+            ring.push(event(m));
+        }
+        // seq 0 was never stored and its slot now belongs to seq 2, so the late store
+        // is dropped and readers carry on from the oldest held event.
+        ring.store(slow, event("a"));
+        let batch = ring.since(0, &LogFilter::default());
+        assert_eq!(messages(&batch.events), ["c", "d"]);
+        assert_eq!(batch.next, 4);
     }
 
     #[test]

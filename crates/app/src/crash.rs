@@ -215,8 +215,9 @@ impl LogForwarder {
     fn tick(&mut self, client: &Client) -> Result<(), minidumper::Error> {
         let mut changed = false;
         if let Some(ring) = engine::logging::ring() {
-            for event in ring.since(self.next, &LogFilter::default()) {
-                self.next = event.seq + 1;
+            let batch = ring.since(self.next, &LogFilter::default());
+            self.next = batch.next;
+            for event in batch.events {
                 if self.lines.len() == LOG_LINES {
                     self.lines.pop_front();
                 }
