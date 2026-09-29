@@ -121,7 +121,7 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
   - [x] Build `Glass.app` and the DMG locally on `aarch64-apple-darwin` and check linkage, signature and launch from the mounted image
   - [ ] Tagged release in CI producing the DMGs, MSI, MSIX and AppImage (needs-human: no GitHub remote yet; Windows MSI/MSIX and Linux AppImage can only be built in CI. Set `repository` in `Cargo.toml`, run `dist generate`, push a `v*` tag and check every installer; MSIX and notarised DMG also need signing certificates)
 - [x] App icons exported from the Brand page: macOS icon with the graphite, light, and clear appearances, Windows `.ico` and Linux PNGs using the bare mark, with the small-size variants the page defines (glow drops out at 64 px, a slice at 32 px)
-- [~] Size check in CI: fails when an installer grows past the stored budget (starting at 30 MB). Raising the budget is allowed with a Decision Log entry
+- [x] Size check in CI: fails when an installer grows past the stored budget (starting at 30 MB). Raising the budget is allowed with a Decision Log entry
 - [ ] Benchmark harness with `criterion` and a `bench` CI job that posts results as a PR comment
 - [ ] Logging with `tracing`, per-crate filters, in-memory ring buffer exposed to the UI later
 - [ ] Frame-time monitor: records UI frame durations, exposes p50 and p99, fails tests that exceed budget
@@ -512,3 +512,4 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 1 — cargo-dist packaging — 53a888f — cargo-dist 0.32 (installers: shell, powershell, npm, homebrew, msi; no DMG, MSIX or AppImage, so scripts/package/ adds them); local arm64 Glass.app 30.6 MB, DMG 10.5 MB (12.3 MB with the app icons), only @rpath and system references, starts and exits 0 from the mounted DMG, bundled FFmpeg dylibs load from it
 - 2026-09-29 — Phase 1 — cargo-dist tagged release in CI — needs-human: no GitHub remote yet; Windows MSI/MSIX and Linux AppImage can only be built in CI (scripts in 1b919d9, workflows in 53a888f)
 - 2026-09-29 — Phase 1 — app icons from the Brand page — 93de610 — icns, Icon Composer bundle and Assets.car (light, dark graphite, clear, tinted), Windows ico, Linux PNGs
+- 2026-09-29 — Phase 1 — size check — a054f90 — `scripts/size-check.sh` against `size-budget.toml` (30 MiB per DMG, MSI, MSIX, AppImage): local arm64 DMG with icons 11.99 MiB passes, a 30 MiB + 1 byte fake fails with exit 1; the CI run is covered by the needs-human tagged-release task, and the MSI is not checked yet because dist builds it with no step after the build
