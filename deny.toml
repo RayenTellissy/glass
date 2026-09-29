@@ -1,0 +1,67 @@
+# cargo-deny configuration: `cargo deny check` from the repo root.
+#
+# Glass ships linked against a GPL build of FFmpeg (x264, x265), so the program as
+# distributed is GPLv3. Every dependency must carry a licence that can be combined
+# into a GPLv3 work.
+
+[graph]
+all-features = true
+
+[advisories]
+# The RustSec advisory database (https://github.com/rustsec/advisory-db).
+db-urls = ["https://github.com/rustsec/advisory-db"]
+unmaintained = "workspace"
+yanked = "deny"
+ignore = []
+
+[licenses]
+confidence-threshold = 0.9
+# The list covers licences expected later (fonts, Unicode data); do not warn while unused.
+unused-allowed-license = "allow"
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    # Unicode data licences (ICU, unicode-ident): permissive, notice-only.
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    # File-level copyleft; section 3.3 of MPL 2.0 explicitly permits combining with GPL.
+    "MPL-2.0",
+    "BSL-1.0",
+    # Only for bundled font files, which are data shipped alongside the program rather
+    # than code linked into it; the FSF does not treat OFL fonts as GPL-incompatible
+    # in that use.
+    "OFL-1.1",
+    "GPL-3.0-only",
+    "GPL-3.0-or-later",
+    "LGPL-3.0-only",
+    "LGPL-3.0-or-later",
+    # ffmpeg-next and ffmpeg-sys-next; the FSF lists WTFPL as GPL-compatible.
+    "WTFPL",
+]
+# Deliberately absent: GPL-2.0-only and LGPL-2.1-only (cannot be relicensed to v3),
+# Apache-1.0 and Apache-1.1, BSD-4-Clause (advertising clause), SSPL, BUSL,
+# Commons Clause and any proprietary or non-commercial licence. Ubuntu-font-1.0 (egui's
+# default fonts) is also absent: it has no FSF compatibility ruling, so the UI crate
+# should ship its own fonts with egui's `default_fonts` feature off.
+
+[licenses.private]
+# Workspace crates are not published; their own licence is covered by LICENSE.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
