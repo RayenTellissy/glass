@@ -37,11 +37,11 @@ Consequences for every design choice below:
 
 ## 2. Crate layout
 
-The Cargo workspace (Phase 1) has ten crates. Two are binaries (`app`, `smoke`); the rest are libraries.
+The Cargo workspace (Phase 1) has ten crates, each in `crates/<name>/` with a package of the same name. Two are binaries (`app` builds `glass`, `smoke` builds `smoke`); the rest are libraries. `experiments/` is excluded from the workspace.
 
 | Crate | Responsibility | May depend on (workspace crates) | `unsafe` |
 | --- | --- | --- | --- |
-| `app` | The `glass` binary. Creates the eframe window, the wgpu device, the threads and the engine, then hands control to `ui`. Owns command-line flags, safe mode, portable mode, crash minidumps. | all library crates | no |
+| `app` | The `glass` binary. Creates the eframe window, the wgpu device, the threads and the engine, then hands control to `ui`. Owns command-line flags, safe mode, portable mode, crash minidumps. | `ui`, `engine` | no |
 | `ui` | egui panels and widgets: timeline, preview, media pool, inspector, browsers, colour, audio, export, settings, debug panel. Theme and i18n application. Turns input into edit commands and engine requests. | `project`, `engine`, `render` (presentation API only), `assets` | no |
 | `engine` | Scheduler, playback state, master-clock consumer, timeline evaluation into render graphs, dirty-range invalidation, rendered-frame cache policy, look-ahead, background render, export pipeline, analysis job system. | `project`, `media`, `render`, `audio`, `plugins`, `assets` | no |
 | `media` | Safe wrapper over `ffmpeg-next`: demux, decode, encode, probe, hardware decode sessions, VFR maps, GOP index, still images, audio decode and resampling (`rubato`), analysis algorithms (thumbnails, waveforms, scene cuts, silence, beats, loudness), proxy generation. Produces platform frame handles, never wgpu objects. | `assets` (codec presets only) | only in `media::ffi` |
@@ -50,9 +50,9 @@ The Cargo workspace (Phase 1) has ten crates. Two are binaries (`app`, `smoke`);
 | `audio` | `cpal` device I/O, the real-time callback, mixer graph, audio effects, meters, master clock, voice-over recording. | none (receives f32 blocks through ring buffers) | no |
 | `plugins` | `wasmtime` host for Component Model effect, transition and title plugins, plugin manager, resource limits. Later: Lua scripting, optional Python bridge, VST3/AU helper-process protocol. | `project` (parameter schema types) | no |
 | `assets` | Paths and loaders for bundled data: `assets/theme/`, `assets/i18n/`, fonts, `assets/transitions/`, `assets/titles/`, LUTs; the `t!()` macro; asset pack install locations. | none | no |
-| `smoke` | Headless check binary: opens `tests/fixtures/reference.proj`, plays 2 s, exports 1 s, exits 0. | `project`, `engine`, `media`, `render`, `audio`, `assets` | no |
+| `smoke` | Headless check binary: opens `tests/fixtures/reference.proj`, plays 2 s, exports 1 s, exits 0. | `engine` | no |
 
-Dependency direction (an arrow means "depends on"). There are no cycles; lower rows never depend on higher ones.
+Dependency direction (an arrow means "depends on"). There are no cycles; lower rows never depend on higher ones. The test `crates/app/tests/dependency_direction.rs` fails when a crate's manifest adds a workspace dependency this diagram does not show.
 
 ```mermaid
 flowchart TD

@@ -1,0 +1,17 @@
+[package]
+name = "smoke"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "smoke"
+path = "src/main.rs"
+
+[dependencies]
+engine.workspace = true
+
+[lints]
+workspace = true
