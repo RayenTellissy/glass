@@ -96,7 +96,7 @@ fn every_theme_renders_within_the_frame_budget() {
             headless.adapter()
         );
         assert_eq!(stats.frames_in_window, FRAMES);
-        stats.assert_p99_within_budget();
+        headless.assert_p99_within_budget("themed frame budget", &stats);
     }
     if text {
         // The loaded font really has glyphs: the name lays out wider than a few points.

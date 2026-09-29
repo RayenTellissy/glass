@@ -19,10 +19,10 @@ use std::time::{Duration, Instant};
 use egui::{Pos2, Rect, vec2};
 use egui_wgpu::wgpu;
 
-use crate::frame_time::FrameTimeMonitor;
+use crate::frame_time::{FrameStats, FrameTimeMonitor};
 
 /// Set to `1` to make [`HeadlessUi::new_or_skip`] fail instead of skipping when there is
-/// no GPU (for CI runners that are known to have one).
+/// no GPU, or only a software rasteriser (for CI runners that are known to have one).
 pub const REQUIRE_GPU_ENV: &str = "GLASS_REQUIRE_GPU";
 
 const FRAMES_IN_FLIGHT: usize = 2;
@@ -65,6 +65,27 @@ impl Default for Viewport {
     }
 }
 
+/// Whether a frame budget can be judged on an adapter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BudgetCheck {
+    Enforce,
+    /// The frames still render (so the UI code is exercised), but their times say
+    /// nothing about a real GPU.
+    Skip(String),
+}
+
+impl BudgetCheck {
+    /// Software rasterisers (lavapipe, WARP, SwiftShader) report `DeviceType::Cpu`.
+    pub fn for_device(device_type: wgpu::DeviceType, adapter: &str) -> Self {
+        match device_type {
+            wgpu::DeviceType::Cpu => Self::Skip(format!(
+                "{adapter} is a software rasteriser, so frame times do not reflect a GPU"
+            )),
+            _ => Self::Enforce,
+        }
+    }
+}
+
 /// An egui context rendering into an offscreen wgpu texture.
 pub struct HeadlessUi {
     ctx: egui::Context,
@@ -76,6 +97,7 @@ pub struct HeadlessUi {
     viewport: Viewport,
     in_flight: VecDeque<wgpu::SubmissionIndex>,
     adapter: String,
+    device_type: wgpu::DeviceType,
     has_text: bool,
 }
 
@@ -131,20 +153,26 @@ impl HeadlessUi {
             viewport,
             in_flight: VecDeque::with_capacity(FRAMES_IN_FLIGHT),
             adapter: format!("wgpu {:?} on {}", info.backend, info.name),
+            device_type: info.device_type,
             has_text,
         })
     }
 
     /// Like [`new`](Self::new), but when there is no GPU it prints why the caller is
     /// skipped and returns `None`, unless `GLASS_REQUIRE_GPU=1`, in which case it
-    /// panics. Any other error panics.
+    /// panics. With `GLASS_REQUIRE_GPU=1` a software adapter panics too. Any other
+    /// error panics.
     #[track_caller]
     pub fn new_or_skip(what: &str, viewport: Viewport) -> Option<Self> {
+        let require = std::env::var(REQUIRE_GPU_ENV).as_deref() == Ok("1");
         match Self::new(viewport) {
-            Ok(ui) => Some(ui),
-            Err(HeadlessError::GpuUnavailable(reason))
-                if std::env::var(REQUIRE_GPU_ENV).as_deref() != Ok("1") =>
-            {
+            Ok(ui) => {
+                if require && let BudgetCheck::Skip(reason) = ui.budget_check() {
+                    panic!("{what}: {REQUIRE_GPU_ENV}=1 but {reason}");
+                }
+                Some(ui)
+            }
+            Err(HeadlessError::GpuUnavailable(reason)) if !require => {
                 eprintln!(
                     "SKIPPED {what}: no GPU available ({reason}); set {REQUIRE_GPU_ENV}=1 to fail instead"
                 );
@@ -166,6 +194,23 @@ impl HeadlessUi {
     /// The backend and adapter name, for test and benchmark output.
     pub fn adapter(&self) -> &str {
         &self.adapter
+    }
+
+    /// Whether this adapter's frame times can be held to a budget.
+    pub fn budget_check(&self) -> BudgetCheck {
+        BudgetCheck::for_device(self.device_type, &self.adapter)
+    }
+
+    /// Asserts the p99 budget on a hardware adapter; on a software one prints why the
+    /// budget is not judged and returns.
+    #[track_caller]
+    pub fn assert_p99_within_budget(&self, what: &str, stats: &FrameStats) {
+        match self.budget_check() {
+            BudgetCheck::Enforce => stats.assert_p99_within_budget(),
+            BudgetCheck::Skip(reason) => {
+                eprintln!("BUDGET NOT CHECKED {what}: {reason} (p99 {:?})", stats.p99);
+            }
+        }
     }
 
     /// Whether fonts were found, so the UI may draw text. Without fonts egui cannot lay
@@ -275,5 +320,30 @@ impl HeadlessUi {
             .poll(wgpu::PollType::wait_indefinitely())
             .map_err(|e| HeadlessError::Gpu(e.to_string()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn software_adapters_skip_only_the_budget() {
+        assert!(matches!(
+            BudgetCheck::for_device(wgpu::DeviceType::Cpu, "wgpu Vulkan on llvmpipe"),
+            BudgetCheck::Skip(reason) if reason.contains("llvmpipe")
+        ));
+        for hardware in [
+            wgpu::DeviceType::IntegratedGpu,
+            wgpu::DeviceType::DiscreteGpu,
+            wgpu::DeviceType::VirtualGpu,
+            wgpu::DeviceType::Other,
+        ] {
+            assert_eq!(
+                BudgetCheck::for_device(hardware, "gpu"),
+                BudgetCheck::Enforce,
+                "{hardware:?}"
+            );
+        }
     }
 }

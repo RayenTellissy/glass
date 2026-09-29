@@ -107,5 +107,5 @@ fn editor_frame_p99_is_within_budget() {
     let stats = monitor.stats();
     eprintln!("editor frame budget ({}): {stats}", headless.adapter());
     assert_eq!(stats.frames_in_window, FRAMES);
-    stats.assert_p99_within_budget();
+    headless.assert_p99_within_budget("editor frame budget", &stats);
 }
