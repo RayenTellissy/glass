@@ -30,9 +30,20 @@ JOBS="${CARGO_BUILD_JOBS:-4}"
 FORCE=0
 KEEP_BUILD=0
 FETCH_ONLY=0
+usage() {
+    sed -n "2,22p" "$0" | sed "s/^# \{0,1\}//"
+}
+
+usage_error() {
+    echo "build.sh: $*" >&2
+    usage >&2
+    exit 2
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --jobs)
+            [ $# -ge 2 ] && [[ "$2" =~ ^[1-9][0-9]*$ ]] || usage_error "--jobs needs a positive number"
             JOBS="$2"
             shift
             ;;
@@ -40,13 +51,10 @@ while [ $# -gt 0 ]; do
         --keep-build) KEEP_BUILD=1 ;;
         --fetch-only) FETCH_ONLY=1 ;;
         -h | --help)
-            sed -n "2,22p" "$0" | sed "s/^# \{0,1\}//"
+            usage
             exit 0
             ;;
-        *)
-            echo "unknown argument: $1" >&2
-            exit 2
-            ;;
+        *) usage_error "unknown argument: $1" ;;
     esac
     shift
 done

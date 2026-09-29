@@ -4,7 +4,9 @@
 # and the build scripts, into one folder ready to attach to a release.
 #
 # Usage: scripts/ffmpeg/package-sources.sh [--out DIR] [--archive]
-#   --out DIR    output folder (default .glass-cache/ffmpeg/release-sources)
+#   --out DIR    output folder (default .glass-cache/ffmpeg/release-sources); it is
+#                replaced on every run, so an existing non-empty DIR must be one this
+#                script wrote (it holds a .glass-release-sources marker)
 #   --archive    also write DIR.tar.gz next to the folder
 #
 # Archives are taken from the source cache when present (and fetched otherwise), and
@@ -20,23 +22,34 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/versions.env"
 
 CACHE="${GLASS_FFMPEG_CACHE:-$REPO_ROOT/.glass-cache/ffmpeg}"
-OUT="$CACHE/release-sources"
+DEFAULT_OUT="$CACHE/release-sources"
+OUT="$DEFAULT_OUT"
 ARCHIVE=0
+MARKER=".glass-release-sources"
+
+usage() {
+    sed -n "2,16p" "$0" | sed "s/^# \{0,1\}//"
+}
+
+usage_error() {
+    echo "package-sources.sh: $*" >&2
+    usage >&2
+    exit 2
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --out)
+            [ $# -ge 2 ] && [ -n "$2" ] && [ "${2#-}" = "$2" ] || usage_error "--out needs a folder"
             OUT="$2"
             shift
             ;;
         --archive) ARCHIVE=1 ;;
         -h | --help)
-            sed -n "2,14p" "$0" | sed "s/^# \{0,1\}//"
+            usage
             exit 0
             ;;
-        *)
-            echo "unknown argument: $1" >&2
-            exit 2
-            ;;
+        *) usage_error "unknown argument: $1" ;;
     esac
     shift
 done
@@ -63,8 +76,17 @@ SHIPPED=(FFMPEG X264 X265 NVCODEC ZLIB)
 SRC_DIR="$CACHE/src"
 mkdir -p "$SRC_DIR"
 
+# OUT is replaced wholesale, so only ever delete a folder this script made.
+if [ -e "$OUT" ] || [ -L "$OUT" ]; then
+    [ -d "$OUT" ] && [ ! -L "$OUT" ] || die "$OUT exists and is not a folder; refusing to replace it"
+    # The default folder predates the marker and is always this script's own.
+    if [ "$OUT" != "$DEFAULT_OUT" ] && [ -n "$(ls -A "$OUT")" ] && [ ! -f "$OUT/$MARKER" ]; then
+        die "$OUT is not empty and was not written by this script (no $MARKER); refusing to delete it"
+    fi
+fi
 rm -rf "${OUT:?}"
 mkdir -p "$OUT/sources" "$OUT/LICENSES" "$OUT/build-scripts"
+echo "Written by scripts/ffmpeg/package-sources.sh; the folder is replaced on every run." >"$OUT/$MARKER"
 
 for name in "${SHIPPED[@]}"; do
     archive="$(field "$name" ARCHIVE)"

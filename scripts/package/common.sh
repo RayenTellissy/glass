@@ -5,6 +5,22 @@ die() {
     exit 1
 }
 
+# The script's help text: the comment lines HELP_LINES (for example "2,24") of $0.
+usage() {
+    sed -n "${HELP_LINES}p" "$0" | sed "s/^# \{0,1\}//"
+}
+
+usage_error() {
+    echo "$(basename "$0"): $*" >&2
+    usage >&2
+    exit 2
+}
+
+# need_value OPTION [VALUE ...]: exits with usage (status 2) unless OPTION has a value.
+need_value() {
+    [ $# -ge 2 ] && [ -n "$2" ] && [ "${2#-}" = "$2" ] || usage_error "$1 needs a value"
+}
+
 # The version in [workspace.package] of the root Cargo.toml.
 workspace_version() {
     local v

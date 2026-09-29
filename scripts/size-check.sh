@@ -14,17 +14,28 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUDGET_FILE="$REPO_ROOT/size-budget.toml"
 FILES=()
 
+usage() {
+    sed -n "2,9p" "$0" | sed "s/^# \{0,1\}//"
+}
+
+usage_error() {
+    echo "size-check: $*" >&2
+    usage >&2
+    exit 2
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
-        --budget) BUDGET_FILE="$2"; shift ;;
+        --budget)
+            [ $# -ge 2 ] && [ -n "$2" ] && [ "${2#-}" = "$2" ] || usage_error "--budget needs a file"
+            BUDGET_FILE="$2"
+            shift
+            ;;
         -h | --help)
-            sed -n "2,9p" "$0" | sed "s/^# \{0,1\}//"
+            usage
             exit 0
             ;;
-        -*)
-            echo "size-check: unknown option: $1" >&2
-            exit 2
-            ;;
+        -*) usage_error "unknown option: $1" ;;
         *) FILES+=("$1") ;;
     esac
     shift

@@ -25,17 +25,18 @@ OUT=""
 VERSION=""
 APPIMAGETOOL="${APPIMAGETOOL:-appimagetool}"
 
+HELP_LINES="2,12"
 while [ $# -gt 0 ]; do
     case "$1" in
-        --binary) BINARY="$2"; shift ;;
-        --ffmpeg) FFMPEG="$2"; shift ;;
-        --out) OUT="$2"; shift ;;
-        --version) VERSION="$2"; shift ;;
+        --binary) need_value "$@"; BINARY="$2"; shift ;;
+        --ffmpeg) need_value "$@"; FFMPEG="$2"; shift ;;
+        --out) need_value "$@"; OUT="$2"; shift ;;
+        --version) need_value "$@"; VERSION="$2"; shift ;;
         -h | --help)
-            sed -n "2,12p" "$0" | sed "s/^# \{0,1\}//"
+            usage
             exit 0
             ;;
-        *) die "unknown argument: $1" ;;
+        *) usage_error "unknown argument: $1" ;;
     esac
     shift
 done
