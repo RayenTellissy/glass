@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "glass/assets/theme/schema.json",
+  "title": "Glass theme",
+  "description": "One colour theme. Every theme file carries the same colour roles so the loader needs no per-theme cases.",
+  "type": "object",
+  "required": ["name", "mode", "colors"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "name": { "type": "string", "enum": ["dark", "light", "high-contrast"] },
+    "mode": { "description": "Base visuals the theme builds on.", "type": "string", "enum": ["dark", "light"] },
+    "description": { "type": "string" },
+    "colors": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z]+(/[a-z0-9]+)?$" },
+      "required": [
+        "bg/0", "bg/1", "bg/2", "bg/3",
+        "border/subtle", "border/strong",
+        "text/primary", "text/secondary", "text/muted", "text/inverse",
+        "accent", "accent/soft",
+        "state/success", "state/warning", "state/error", "state/info",
+        "clip/video", "clip/audio", "clip/title", "clip/adjustment", "clip/subtitle", "clip/offline",
+        "scope/red", "scope/green", "scope/blue", "scope/luma",
+        "glass/top", "glass/bottom", "glass/edge", "glass/highlight", "glass/shadow"
+      ],
+      "additionalProperties": { "$ref": "#/$defs/color" }
+    }
+  },
+  "$defs": {
+    "color": {
+      "type": "object",
+      "required": ["value", "paper"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "description": "Resolved colour, #RRGGBB or #RRGGBBAA (sRGB, straight alpha).",
+          "type": "string",
+          "pattern": "^#([0-9A-F]{6}|[0-9A-F]{8})$"
+        },
+        "paper": {
+          "description": "Paper token the value was read from, or null when the value has no token (derived high-contrast values).",
+          "type": ["string", "null"],
+          "pattern": "^--color-[a-z0-9-]+$"
+        },
+        "alias": { "description": "Paper token this token references (value is resolved).", "type": "string", "pattern": "^--color-[a-z0-9-]+$" },
+        "source": { "description": "Original Paper value when it was not a plain hex colour.", "type": "string" },
+        "derived_from": { "description": "High contrast only: the dark role whose value is reused, or \"none\" for a cleared (transparent) role.", "type": "string" },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}
