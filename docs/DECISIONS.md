@@ -86,3 +86,12 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** The mark's slice count follows its own drawn size: 4 slices at 32 pt and up, 3 below. Glow is a tile rule: simplified at 128 px, none at 64 px and below.
 - **Reason:** The Brand page text said a slice drops "at 32 px" on one board and "below 32 px" on another; the drawn size ramps on both boards agree once the rule is read as the mark's size, not the icon's.
 - **Consequences:** The Windows `.ico` uses the 3-slice mark at 16 and 24 px only. Details per output size are in `assets/icons/README.md`.
+
+## 11. egui without its default fonts
+
+- **Date:** 2026-09-29
+- **Decision:** `egui` is used with its `default_fonts` feature off (workspace dependency `egui = { version = "0.36", default-features = false }`; `eframe` likewise). Glass ships its own fonts, Geist and Geist Mono (OFL), from `assets/fonts/` and installs them into the egui context.
+- **Reason:** `default_fonts` bundles the Ubuntu font, whose licence has no FSF compatibility ruling, so `deny.toml` does not allow it. The design uses Geist and Geist Mono anyway (section 8 of `docs/ARCHITECTURE.md`).
+- **Evidence:** Without any font, egui 0.36 lays out text with zero width and draws nothing, so the fonts are required, not optional. `cargo tree -e features -i epaint` shows no `default_fonts` feature enabled.
+- **Consequences:** Until the Geist files are added to `assets/fonts/` (400, 500, 600 and Mono 400, 500, from the official vercel/geist-font release, with the OFL text), the headless test harness in `ui::headless` loads a system font at test time (never bundled) and draws shapes only when none exists.
+

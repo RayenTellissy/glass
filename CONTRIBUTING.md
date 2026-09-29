@@ -56,6 +56,10 @@ scripts/bench-report.py --baseline before                # the same comparison a
 
 In CI the `bench` job in `ci.yml` saves a `main` baseline on every push to `main` and, on pull requests, compares against it with `--baseline-lenient main` and posts the `scripts/bench-report.py` table as a PR comment (updated in place on later pushes). Shared runners are noisy, so the report treats changes within 10% as noise; budgets that matter (UI frame time, scrub latency) are enforced by tests, not by this comparison.
 
+## UI frame budget
+
+UI code is checked headless: `ui::headless::HeadlessUi` renders egui into an offscreen wgpu texture (a locked screen or a CI runner has no visible window) and records each frame into a `ui::frame_time::FrameTimeMonitor`. A UI test runs its screen for a few hundred frames and calls `monitor.stats().assert_p99_within_budget()`, which fails with p50, p95, p99, max and the over-budget count when the p99 is not under 8 ms; `crates/ui/tests/frame_budget.rs` is the example to copy. Keep each such test under a few seconds. Without a GPU the test prints `SKIPPED ...` and returns; set `GLASS_REQUIRE_GPU=1` where a GPU is expected so a missing one fails instead.
+
 ## Licences and advisories
 
 Glass is distributed linked against a GPL build of FFmpeg, so every dependency must use a licence compatible with GPLv3. `deny.toml` holds the allow-list (with the reasoning for borderline entries), checks the RustSec advisory database, warns on duplicate crate versions and only accepts crates from crates.io. Run it before adding a dependency:

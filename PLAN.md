@@ -482,6 +482,7 @@ Append one line per decision: date, decision, reason. Add the same entry to `doc
 - 2026-09-29 — FFmpeg pinned to 9.0.x instead of 7.x, still a GPL shared build with x264 and x265, used through ffmpeg-next 9. Reason: the maintained ffmpeg-next 9 bindings build against it, and local development and release builds should use the same FFmpeg.
 - 2026-09-29 — Phase 0 is closed with the UI, GPU, and macOS decode defaults confirmed by prototypes. Defaults without a Phase 0 prototype (cpal, im and serde_json, wasmtime, whisper-rs, cargo-dist, Vulkan, NVDEC and VAAPI, min targets) are adopted and confirmed by the tests and benchmarks of the phase that builds them. The GTX 1660 and Windows D3D11VA checks stay open as needs-human. Reason: Phase 0 only defines prototypes for UI, GPU, and decode, and the missing hardware should not block the engine work that follows.
 - 2026-09-29 — App icon small-size rule: the slice count follows the mark's own drawn size (4 slices at 32 pt and up, 3 below), and glow is a tile rule (simplified at 128, none at 64 and below), following the drawn size ramps on the Brand page. Reason: the Brand page text said both "at 32 px" and "below 32 px"; the drawn ramps agree once read this way.
+- 2026-09-29 — egui and eframe are used with the `default_fonts` feature off; Glass ships Geist and Geist Mono (OFL) from `assets/fonts/`. Reason: `default_fonts` bundles the Ubuntu font, which `deny.toml` rejects, and the design uses Geist.
 
 ## Progress Log
 
