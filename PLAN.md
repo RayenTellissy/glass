@@ -138,7 +138,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 
 ### Decode
 - [x] Safe wrapper over `ffmpeg-next`: `Demuxer`, `Decoder`, `Frame`, `Packet`, with error types and no `unsafe` outside `media::ffi`
-- [ ] Probe: streams, codecs, duration, frame rate, colour metadata, rotation, timecode
+- [~] Probe: streams, codecs, duration, frame rate, colour metadata, rotation, timecode
 - [ ] Software decode path for video and audio, tested against every fixture
 - [ ] Hardware decode: VideoToolbox. Done when: zero-copy `IOSurface` → Metal texture
 - [ ] Hardware decode: D3D11VA. Done when: shared handle → DX12 texture without CPU copy (needs-human: needs a Windows PC with a D3D11 GPU to implement and verify)
