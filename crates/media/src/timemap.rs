@@ -4,8 +4,9 @@
 //! closed form for constant-rate streams (start, rate, frame count) and the sorted list
 //! of presentation timestamps for variable-rate ones. It is built from the container's
 //! index when that lists presentation times for every frame, or from a packet scan (no
-//! decoding), and is serialisable for the disk cache. [`TimelineCache`] keeps them in
-//! memory per file.
+//! decoding), and is cached on disk per file content ([`SourceTimeline::load_or_scan`],
+//! `<cache>/analysis/<hash>/timeline-<params>-v1.json`); [`TimelineCache`] also keeps them
+//! in memory.
 //!
 //! A [`TimestampMap`] puts a timeline on a sequence's frame rate. Sequence frame `n` is
 //! the instant `n / rate` seconds after the clip's first frame, and it shows the source
@@ -16,12 +17,12 @@
 //! every sequence frame whose instant falls inside the clip maps to a frame.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
+use crate::cache::{CacheDir, ContentHash, SourceFile};
 use crate::demux::Demuxer;
 use crate::error::{MediaError, Result};
 use crate::ffi;
@@ -419,79 +420,97 @@ impl TimestampMap {
     }
 }
 
-/// What identifies a file for [`TimelineCache`]: its path, size and modification time.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct FileKey {
-    path: PathBuf,
-    stream: StreamKey,
-    size: u64,
-    modified: Option<SystemTime>,
-}
-
+/// What identifies a timeline in [`TimelineCache`]: the file's content and the stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum StreamKey {
-    Best,
-    Index(usize),
+struct TimelineKey {
+    hash: ContentHash,
+    stream: Option<usize>,
 }
 
-fn file_key(path: &Path, select: StreamSelect) -> Result<FileKey> {
-    let meta = std::fs::metadata(path).map_err(|e| MediaError::Open {
-        path: path.to_path_buf(),
-        source: crate::error::FfmpegError {
-            code: -e.raw_os_error().unwrap_or(2),
-            message: e.to_string(),
-        },
-    })?;
-    Ok(FileKey {
-        path: path.to_path_buf(),
-        stream: match select {
-            StreamSelect::Index(i) => StreamKey::Index(i),
-            _ => StreamKey::Best,
-        },
-        size: meta.len(),
-        modified: meta.modified().ok(),
-    })
+/// Cache entry kind and format version of a [`SourceTimeline`] on disk.
+pub const TIMELINE_CACHE_KIND: &str = "timeline";
+/// Bumped when [`SourceTimeline`] or [`SourceTimeline::scan`] changes.
+pub const TIMELINE_CACHE_VERSION: u32 = 1;
+
+/// The cache parameters of a timeline: which stream.
+pub fn timeline_cache_params(select: StreamSelect) -> String {
+    match select {
+        StreamSelect::Index(i) => format!("stream={i}"),
+        _ => "stream=video".to_string(),
+    }
 }
 
-/// Source timelines per file, in memory. A file whose size or modification time changed
-/// is scanned again. Shared between threads.
+impl SourceTimeline {
+    /// The timeline from the project cache folder (`timeline-<params>-v1.json`), or
+    /// scanned and written there. A cache that cannot be written is logged and skipped.
+    pub fn load_or_scan(
+        cache: &CacheDir,
+        source: &SourceFile,
+        select: StreamSelect,
+    ) -> Result<(Self, Option<TimelineSource>)> {
+        let entry = cache.entry(
+            &source.hash,
+            TIMELINE_CACHE_KIND,
+            &timeline_cache_params(select),
+            TIMELINE_CACHE_VERSION,
+        );
+        if let Some(timeline) = entry.read_json::<SourceTimeline>("json") {
+            return Ok((timeline, None));
+        }
+        let (timeline, how) = Self::scan(&source.path, select)?;
+        if let Err(error) = entry.write_json("json", &timeline) {
+            tracing::warn!(path = %source.path.display(), %error, "could not write the timeline to the cache");
+        }
+        Ok((timeline, Some(how)))
+    }
+}
+
+/// Source timelines per file content, in memory and optionally on disk under the project
+/// cache folder ([`SourceTimeline::load_or_scan`]). Keyed by [`ContentHash`], so a moved or
+/// renamed file keeps its entry and a changed one is scanned again. Shared between threads.
 #[derive(Debug, Default)]
 pub struct TimelineCache {
-    entries: Mutex<HashMap<FileKey, Arc<SourceTimeline>>>,
+    disk: Option<CacheDir>,
+    entries: Mutex<HashMap<TimelineKey, Arc<SourceTimeline>>>,
 }
 
 impl TimelineCache {
+    /// In memory only.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// The cached timeline of a file's video stream, scanning it on the first request.
+    /// In memory, backed by the project cache folder.
+    pub fn with_disk(cache: CacheDir) -> Self {
+        Self {
+            disk: Some(cache),
+            entries: Mutex::default(),
+        }
+    }
+
+    /// The cached timeline of a file's video stream: from memory, else from disk, else
+    /// scanned (and written to disk).
     pub fn get_or_scan(
         &self,
-        path: impl AsRef<Path>,
+        source: &SourceFile,
         select: StreamSelect,
     ) -> Result<Arc<SourceTimeline>> {
-        let path = path.as_ref();
-        let key = file_key(path, select)?;
+        let key = timeline_key(source, select);
         if let Some(hit) = self.lock().get(&key) {
             return Ok(hit.clone());
         }
-        let (timeline, _) = SourceTimeline::scan(path, select)?;
+        let timeline = match &self.disk {
+            Some(cache) => SourceTimeline::load_or_scan(cache, source, select)?.0,
+            None => SourceTimeline::scan(&source.path, select)?.0,
+        };
         let timeline = Arc::new(timeline);
         self.lock().insert(key, timeline.clone());
         Ok(timeline)
     }
 
-    /// Adds a timeline loaded elsewhere (the disk cache) for the file as it is now.
-    pub fn insert(
-        &self,
-        path: impl AsRef<Path>,
-        select: StreamSelect,
-        timeline: Arc<SourceTimeline>,
-    ) -> Result<()> {
-        let key = file_key(path.as_ref(), select)?;
-        self.lock().insert(key, timeline);
-        Ok(())
+    /// Adds a timeline obtained elsewhere (an analysis job) for this file content.
+    pub fn insert(&self, source: &SourceFile, select: StreamSelect, timeline: Arc<SourceTimeline>) {
+        self.lock().insert(timeline_key(source, select), timeline);
     }
 
     pub fn len(&self) -> usize {
@@ -502,12 +521,22 @@ impl TimelineCache {
         self.lock().is_empty()
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<FileKey, Arc<SourceTimeline>>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<TimelineKey, Arc<SourceTimeline>>> {
         // A panic while holding the lock cannot leave the map half-updated (inserts are
         // single calls), so a poisoned lock is still usable.
         self.entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+fn timeline_key(source: &SourceFile, select: StreamSelect) -> TimelineKey {
+    TimelineKey {
+        hash: source.hash,
+        stream: match select {
+            StreamSelect::Index(i) => Some(i),
+            _ => None,
+        },
     }
 }
 

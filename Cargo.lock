@@ -618,6 +618,9 @@ dependencies = [
  "pollster",
  "project",
  "render",
+ "serde",
+ "serde_json",
+ "thiserror",
  "tracing",
  "tracing-subscriber",
 ]

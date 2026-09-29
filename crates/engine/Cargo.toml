@@ -25,6 +25,9 @@ render.workspace = true
 audio.workspace = true
 plugins.workspace = true
 assets.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

@@ -11,9 +11,11 @@
 //! indexes (MP4 `moov` at either end) are always sampled.
 //!
 //! **Layout** (see docs/ARCHITECTURE.md, Cache design): `<cache>/analysis/<hash hex>/`
-//! holds one file per analysis, named by kind (for example `gop-0.json` for the GOP index
-//! of stream 0). Files are written to a temporary name and renamed, so a reader never
-//! sees a partial file. Everything under `analysis/` is regenerable.
+//! holds the analyses of one source. The GOP index is `gop-video.json` (or `gop-<stream>.json`);
+//! everything else goes through [`CacheEntry`]: `<kind>-<params hash>-v<version>.<suffix>`,
+//! so a change of settings or format version never reads an old result. Files are
+//! written to a temporary name and renamed, so a reader never sees a partial file.
+//! Everything under `analysis/` is regenerable.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -135,19 +137,176 @@ impl CacheDir {
         name: &str,
         value: &T,
     ) -> std::io::Result<PathBuf> {
-        let dir = self.analysis_dir(hash);
-        std::fs::create_dir_all(&dir)?;
-        let path = dir.join(name);
-        let tmp = dir.join(format!(".{name}.{}.partial", std::process::id()));
         let data = serde_json::to_vec(value).map_err(std::io::Error::other)?;
-        {
-            let mut file = File::create(&tmp)?;
-            file.write_all(&data)?;
-            file.sync_all()?;
-        }
-        std::fs::rename(&tmp, &path)?;
-        Ok(path)
+        write_atomic(&self.analysis_dir(hash), name, &data)
     }
+
+    /// The files of one analysis result: `kind` names the analysis, `params` its settings
+    /// (hashed into the name, so different settings live side by side) and `version` its
+    /// format (bumping it makes older files miss). See [`CacheEntry`].
+    pub fn entry(&self, hash: &ContentHash, kind: &str, params: &str, version: u32) -> CacheEntry {
+        self.entry_hashed(hash, kind, &params_hash(params), version)
+    }
+
+    /// [`Self::entry`] with the parameters already hashed ([`params_hash`]).
+    pub fn entry_hashed(
+        &self,
+        hash: &ContentHash,
+        kind: &str,
+        params_hash: &str,
+        version: u32,
+    ) -> CacheEntry {
+        CacheEntry {
+            dir: self.analysis_dir(hash),
+            kind: kind.to_string(),
+            stem: format!("{kind}-{params_hash}-v{version}"),
+        }
+    }
+}
+
+/// The first 8 bytes of BLAKE3 over an analysis's canonical parameter string, as hex.
+pub fn params_hash(params: &str) -> String {
+    blake3::hash(params.as_bytes()).as_bytes()[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// A source file and its [`ContentHash`], which callers compute once (off the UI
+/// thread: hashing reads up to 2.5 MiB) and pass to analyses.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SourceFile {
+    pub path: PathBuf,
+    pub hash: ContentHash,
+}
+
+impl SourceFile {
+    /// Hashes `path`.
+    pub fn open(path: impl Into<PathBuf>) -> std::io::Result<Self> {
+        let path = path.into();
+        let hash = ContentHash::of_file(&path)?;
+        Ok(Self { path, hash })
+    }
+}
+
+/// One analysis result on disk: `<cache>/analysis/<hash>/<kind>-<params hash>-v<version>`
+/// followed by `.` and an extension for the main file (`.json`, `.bin`), or by `.` and a
+/// suffix for side files (thumbnail atlases). The main file is written last, so its
+/// presence means the result is complete. Every write is atomic (temporary name, then
+/// rename).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CacheEntry {
+    dir: PathBuf,
+    kind: String,
+    stem: String,
+}
+
+impl CacheEntry {
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// `<kind>-<params hash>-v<version>`.
+    pub fn stem(&self) -> &str {
+        &self.stem
+    }
+
+    /// Name of the file with this suffix (`json`, `l0.c3.jpg`, ...).
+    pub fn file_name(&self, suffix: &str) -> String {
+        format!("{}.{suffix}", self.stem)
+    }
+
+    pub fn path(&self, suffix: &str) -> PathBuf {
+        self.dir.join(self.file_name(suffix))
+    }
+
+    /// The file's bytes, or `Ok(None)` when it does not exist.
+    pub fn read(&self, suffix: &str) -> std::io::Result<Option<Vec<u8>>> {
+        match std::fs::read(self.path(suffix)) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn write(&self, suffix: &str, bytes: &[u8]) -> std::io::Result<PathBuf> {
+        write_atomic(&self.dir, &self.file_name(suffix), bytes)
+    }
+
+    /// Reads a JSON file; `None` when it is missing or does not parse.
+    pub fn read_json<T: DeserializeOwned>(&self, suffix: &str) -> Option<T> {
+        let bytes = match self.read(suffix) {
+            Ok(bytes) => bytes?,
+            Err(error) => {
+                tracing::warn!(entry = %self.stem, %error, "unreadable cache file");
+                return None;
+            }
+        };
+        serde_json::from_slice(&bytes)
+            .inspect_err(|error| {
+                tracing::warn!(entry = %self.stem, %error, "ignoring an unparsable cache file");
+            })
+            .ok()
+    }
+
+    pub fn write_json<T: Serialize>(&self, suffix: &str, value: &T) -> std::io::Result<PathBuf> {
+        let data = serde_json::to_vec(value).map_err(std::io::Error::other)?;
+        self.write(suffix, &data)
+    }
+
+    /// Deletes files of the same kind written by other format versions (any parameters),
+    /// which can never match again. Returns how many were removed.
+    pub fn remove_other_versions(&self) -> std::io::Result<usize> {
+        let Some(version) = self.stem.rsplit('-').next() else {
+            return Ok(0);
+        };
+        let prefix = format!("{}-", self.kind);
+        let entries = match std::fs::read_dir(&self.dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(e) => return Err(e),
+        };
+        let mut removed = 0;
+        for item in entries {
+            let item = item?;
+            let name = item.file_name();
+            let Some(name) = name.to_str() else { continue };
+            // <kind>-<16 hex>-v<n>.<suffix>
+            let Some(rest) = name.strip_prefix(&prefix) else {
+                continue;
+            };
+            let Some((stem_rest, _)) = rest.split_once('.') else {
+                continue;
+            };
+            let mut parts = stem_rest.splitn(2, '-');
+            let (Some(hash), Some(other)) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            let is_ours = hash.len() == 16
+                && other.starts_with('v')
+                && other[1..].bytes().all(|b| b.is_ascii_digit());
+            if is_ours && other != version {
+                std::fs::remove_file(item.path())?;
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+}
+
+fn write_atomic(dir: &Path, name: &str, data: &[u8]) -> std::io::Result<PathBuf> {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(name);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{name}.{}-{n}.partial", std::process::id()));
+    {
+        let mut file = File::create(&tmp)?;
+        file.write_all(data)?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&tmp, &path)?;
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -216,6 +375,32 @@ mod tests {
             CacheDir::for_project("/work/film.glass").root(),
             Path::new("/work/.glass-cache")
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn entries_are_named_by_kind_params_and_version() {
+        let dir = temp_dir("entry");
+        let cache = CacheDir::new(&dir);
+        let hash = ContentHash([3; 32]);
+        let v1 = cache.entry(&hash, "peaks", "rate=48000", 1);
+        let other_params = cache.entry(&hash, "peaks", "rate=44100", 1);
+        let v2 = cache.entry(&hash, "peaks", "rate=48000", 2);
+        let thumbs = cache.entry(&hash, "thumbs", "h=108", 1);
+        assert_ne!(v1.stem(), other_params.stem());
+        assert!(v1.stem().starts_with("peaks-") && v1.stem().ends_with("-v1"));
+        assert_eq!(v1.stem().len(), "peaks-".len() + 16 + "-v1".len());
+        v1.write("bin", b"one").expect("write");
+        v1.write("l0.c0.jpg", b"side").expect("write");
+        other_params.write("bin", b"two").expect("write");
+        thumbs.write("json", b"{}").expect("write");
+        assert_eq!(v1.read("bin").expect("read"), Some(b"one".to_vec()));
+        assert_eq!(v2.read("bin").expect("read"), None);
+        // Version 2 removes both version-1 peaks results, and nothing else.
+        assert_eq!(v2.remove_other_versions().expect("remove"), 3);
+        assert_eq!(v1.read("bin").expect("read"), None);
+        assert!(thumbs.read("json").expect("read").is_some());
+        assert_eq!(v2.remove_other_versions().expect("remove"), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

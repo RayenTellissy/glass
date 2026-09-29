@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use media::timemap::{FrameTimes, TimelineSource};
 use media::{
-    FrameReader, Rational, SourceTimeline, StreamSelect, TimelineCache, Timestamp, TimestampMap,
+    CacheDir, FrameReader, Rational, SourceFile, SourceTimeline, StreamSelect, TimelineCache,
+    Timestamp, TimestampMap,
 };
 use proptest::prelude::*;
 
@@ -160,15 +161,44 @@ fn cache_scans_each_file_once() {
     let Some(path) = common::fixture("vfr_h264_720p.mp4") else {
         return;
     };
+    let source = SourceFile::open(&path).expect("hash");
     let cache = TimelineCache::new();
     let a = cache
-        .get_or_scan(&path, StreamSelect::BestVideo)
+        .get_or_scan(&source, StreamSelect::BestVideo)
         .expect("scan");
     let b = cache
-        .get_or_scan(&path, StreamSelect::BestVideo)
+        .get_or_scan(&source, StreamSelect::BestVideo)
         .expect("cached");
     assert!(Arc::ptr_eq(&a, &b));
     assert_eq!(cache.len(), 1);
+}
+
+#[test]
+fn timelines_persist_in_the_cache_folder_by_content() {
+    let Some(path) = common::fixture("vfr_h264_720p.mp4") else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("glass-timeline-cache-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let cache = CacheDir::new(&dir);
+    let source = SourceFile::open(&path).expect("hash");
+    let (first, how) =
+        SourceTimeline::load_or_scan(&cache, &source, StreamSelect::BestVideo).expect("scan");
+    assert_eq!(how, Some(TimelineSource::PacketScan));
+    // A copy under another name hits the same entry.
+    let copy = dir.join("renamed.mp4");
+    std::fs::copy(&path, &copy).expect("copy");
+    let moved = SourceFile::open(&copy).expect("hash");
+    let (second, how) =
+        SourceTimeline::load_or_scan(&cache, &moved, StreamSelect::BestVideo).expect("load");
+    assert_eq!(how, None, "loaded from disk");
+    assert_eq!(first, second);
+    let memory = TimelineCache::with_disk(cache);
+    let timeline = memory
+        .get_or_scan(&moved, StreamSelect::BestVideo)
+        .expect("load");
+    assert_eq!(*timeline, first);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 fn arb_timeline() -> impl Strategy<Value = SourceTimeline> {

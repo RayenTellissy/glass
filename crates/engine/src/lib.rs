@@ -2,6 +2,7 @@
 //! dirty-range invalidation, rendered-frame cache policy, look-ahead, background render,
 //! the export pipeline and the analysis job system, plus logging setup for every binary.
 
+pub mod analysis;
 pub mod logging;
 pub mod media_check;
 

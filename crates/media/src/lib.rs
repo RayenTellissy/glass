@@ -34,7 +34,7 @@ mod time;
 pub mod timemap;
 
 pub use audio::{AudioOptions, AudioReader, ChannelLayout};
-pub use cache::{CacheDir, ContentHash};
+pub use cache::{CacheDir, CacheEntry, ContentHash, SourceFile};
 pub use colour::{ChromaSiting, ColourSpace, Matrix, Primaries, Range, TransferFn};
 pub use convert::RgbaImage;
 pub use decode::{
