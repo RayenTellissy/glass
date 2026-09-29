@@ -6,6 +6,7 @@ pub mod fonts;
 pub mod frame_time;
 pub mod headless;
 pub mod panels;
+pub mod snapshot;
 pub mod theme;
 
 /// `t!("key")` looks up a user-facing string; see [`assets::i18n`].

@@ -2469,6 +2469,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "engine",
+ "image",
  "pollster",
  "project",
  "render",
