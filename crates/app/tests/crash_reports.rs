@@ -51,7 +51,10 @@ fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
 }
 
 #[test]
-#[cfg_attr(not(debug_assertions), ignore = "GLASS_DEBUG_CRASH works in debug builds only")]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "GLASS_DEBUG_CRASH works in debug builds only"
+)]
 fn native_crash_with_reports_on_writes_a_minidump_and_a_report() {
     let dir = fresh_dir("native-on");
     let status = run_glass(&dir, "segfault", Some("1"));
@@ -84,7 +87,10 @@ fn native_crash_with_reports_on_writes_a_minidump_and_a_report() {
 }
 
 #[test]
-#[cfg_attr(not(debug_assertions), ignore = "GLASS_DEBUG_CRASH works in debug builds only")]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "GLASS_DEBUG_CRASH works in debug builds only"
+)]
 fn native_crash_with_reports_off_writes_nothing() {
     let dir = fresh_dir("native-off");
     let status = run_glass(&dir, "segfault", Some("0"));
@@ -99,7 +105,10 @@ fn native_crash_with_reports_off_writes_nothing() {
 }
 
 #[test]
-#[cfg_attr(not(debug_assertions), ignore = "GLASS_DEBUG_CRASH works in debug builds only")]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "GLASS_DEBUG_CRASH works in debug builds only"
+)]
 fn reports_are_off_by_default() {
     let dir = fresh_dir("default");
     let status = run_glass(&dir, "panic", None);
@@ -109,7 +118,10 @@ fn reports_are_off_by_default() {
 }
 
 #[test]
-#[cfg_attr(not(debug_assertions), ignore = "GLASS_DEBUG_CRASH works in debug builds only")]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "GLASS_DEBUG_CRASH works in debug builds only"
+)]
 fn panic_with_the_setting_on_writes_a_text_report_only() {
     let dir = fresh_dir("panic-settings");
     std::fs::write(dir.join("settings.json"), r#"{ "crash_reports": true }"#)
