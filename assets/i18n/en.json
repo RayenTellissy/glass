@@ -109,6 +109,27 @@
     "sample.clip.broll": "B-roll street",
     "sample.clip.lower_third": "Lower third",
     "sample.clip.missing": "Drone 04",
-    "sample.clip.music": "Music bed"
+    "sample.clip.music": "Music bed",
+    "sample.bin.interviews": "Interviews",
+    "sample.bin.selects": "Selects",
+    "sample.folder.card": "Card B",
+    "sample.folder.path": "/Volumes/CARD_B",
+    "sample.folder.a_cam": "A-cam",
+    "sample.folder.a_cam_day1": "Day 1",
+    "sample.folder.a_cam_day2": "Day 2",
+    "sample.folder.b_cam": "B-cam",
+    "sample.folder.sound": "Sound",
+    "sample.folder.stills": "Stills",
+    "sample.folder.misc": "Paperwork",
+    "sample.file.a_cam": "A001_C004_0912.mov",
+    "sample.file.b_cam": "B002_C011_0912.mov",
+    "sample.file.drone": "DJI_0042.mp4",
+    "sample.file.phone": "IMG_4471.mov",
+    "sample.column.name": "Name",
+    "sample.column.duration": "Duration",
+    "sample.column.timecode": "Timecode",
+    "sample.column.fps": "FPS",
+    "sample.column.resolution": "Res",
+    "sample.column.size": "Size"
   }
 }
