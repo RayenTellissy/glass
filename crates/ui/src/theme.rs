@@ -16,6 +16,10 @@ use egui::{Color32, CornerRadius, FontFamily, FontId, Margin, Shadow, Stroke, Te
 
 pub use assets::theme::{FontRole, Mode, Role, ThemeKind};
 
+/// The vertex tint that shows a textured mesh (thumbnails, patterns) unchanged. It
+/// multiplies the texture; it is not a colour the design uses.
+pub const TEXTURE_TINT: Color32 = Color32::WHITE;
+
 /// Named text styles for the type-scale steps egui has no built-in style for.
 pub const DISPLAY: &str = "display";
 pub const TITLE: &str = "title";

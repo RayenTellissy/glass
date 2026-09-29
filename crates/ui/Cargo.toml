@@ -19,6 +19,7 @@ assets.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true
 pollster.workspace = true
+rfd.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

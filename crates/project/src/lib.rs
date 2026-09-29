@@ -7,6 +7,7 @@ pub mod edit;
 pub mod error;
 pub mod history;
 pub mod id;
+pub mod media_pool;
 pub mod model;
 pub mod time;
 

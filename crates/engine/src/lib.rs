@@ -5,6 +5,7 @@
 pub mod analysis;
 pub mod logging;
 pub mod media_check;
+pub mod media_mgmt;
 
 /// Names of the optional codec and AI features compiled into this build.
 pub fn enabled_features() -> Vec<&'static str> {
