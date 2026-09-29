@@ -122,7 +122,7 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
   - [ ] Tagged release in CI producing the DMGs, MSI, MSIX and AppImage (needs-human: no GitHub remote yet; Windows MSI/MSIX and Linux AppImage can only be built in CI. Set `repository` in `Cargo.toml`, run `dist generate`, push a `v*` tag and check every installer; MSIX and notarised DMG also need signing certificates)
 - [x] App icons exported from the Brand page: macOS icon with the graphite, light, and clear appearances, Windows `.ico` and Linux PNGs using the bare mark, with the small-size variants the page defines (glow drops out at 64 px, a slice at 32 px)
 - [x] Size check in CI: fails when an installer grows past the stored budget (starting at 30 MB). Raising the budget is allowed with a Decision Log entry
-- [ ] Benchmark harness with `criterion` and a `bench` CI job that posts results as a PR comment
+- [~] Benchmark harness with `criterion` and a `bench` CI job that posts results as a PR comment
 - [ ] Logging with `tracing`, per-crate filters, in-memory ring buffer exposed to the UI later
 - [ ] Frame-time monitor: records UI frame durations, exposes p50 and p99, fails tests that exceed budget
 - [ ] i18n: `assets/i18n/en.json`, a `t!()` macro, and a CI check that every key used exists and no literal strings appear in UI code
