@@ -137,7 +137,7 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
 Done when: every fixture file decodes to GPU textures and f32 audio through the same API, with hardware decode active on both platforms, and `smoke` plays the reference project.
 
 ### Decode
-- [~] Safe wrapper over `ffmpeg-next`: `Demuxer`, `Decoder`, `Frame`, `Packet`, with error types and no `unsafe` outside `media::ffi`
+- [x] Safe wrapper over `ffmpeg-next`: `Demuxer`, `Decoder`, `Frame`, `Packet`, with error types and no `unsafe` outside `media::ffi`
 - [ ] Probe: streams, codecs, duration, frame rate, colour metadata, rotation, timecode
 - [ ] Software decode path for video and audio, tested against every fixture
 - [ ] Hardware decode: VideoToolbox. Done when: zero-copy `IOSurface` → Metal texture
@@ -528,3 +528,4 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 1 — review fixes — 62a3608..420d50a — CI runners match dist plan (macos-15-intel), UI source check scans if/match blocks and more egui label APIs and palettes, frame budgets judged only on hardware GPUs (lavapipe on Linux, GPU required on macOS arm64), log ring cursor stops at unfilled slots, i18n placeholder warnings deduped and mismatched translations fall back to English, crash socket in a private 0700 folder, GLASS_DEBUG_CRASH debug-only, package-sources guards --out and scripts reject options without values
 - 2026-09-29 — Phase 2 — hardware decode D3D11VA — needs-human: no Windows PC
 - 2026-09-29 — Phase 2 — hardware decode NVDEC and VAAPI — needs-human: no NVIDIA or Linux GPU hardware
+- 2026-09-29 — Phase 2 — safe ffmpeg wrapper — abd7bda — ffmpeg-next 9.0.0 and thiserror 2 in `media`; `Demuxer`, `Packet`, `Decoder` (send/receive, flush, EOF), `VideoFrame`/`AudioFrame` in native formats, `MediaError` with path, stream and FFmpeg code, `Rational`/`Timestamp`, FFmpeg log into `tracing` target `ffmpeg`; all unsafe in `media::ffi`; 11 unit and 6 fixture tests, `cargo deny check` passes
