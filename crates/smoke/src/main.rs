@@ -93,5 +93,14 @@ fn decode_check() -> Result<(), String> {
             .map_or_else(Default::default, |n| n.to_string_lossy()),
         check.elapsed.as_millis()
     );
+    match &check.video_decode_path {
+        Some(engine::media_check::DecodePath::Hardware { api }) => {
+            println!("smoke: video decoded in hardware ({})", api.name());
+        }
+        Some(engine::media_check::DecodePath::Software { reason }) => {
+            println!("smoke: video decoded in software: {}", reason.message());
+        }
+        None => {}
+    }
     Ok(())
 }

@@ -65,6 +65,9 @@ pub struct Decoder {
     codec: &'static str,
     path: PathBuf,
     eof_sent: bool,
+    frames_out: u64,
+    /// Test hook: fail like a broken hardware decoder after this many frames.
+    fail_after: Option<u64>,
 }
 
 /// What [`Decoder::receive_frame`] produced.
@@ -140,6 +143,8 @@ impl Decoder {
                         codec: summary.codec,
                         path,
                         eof_sent: false,
+                        frames_out: 0,
+                        fail_after: None,
                     });
                 }
                 Err(reason) if options.hw == HwPreference::Require => {
@@ -207,6 +212,8 @@ impl Decoder {
             codec: summary.codec,
             path,
             eof_sent: false,
+            frames_out: 0,
+            fail_after: None,
         })
     }
 
@@ -227,6 +234,26 @@ impl Decoder {
 
     pub(crate) fn set_fallback(&mut self, reason: FallbackReason) {
         self.decode_path = DecodePath::Software { reason };
+    }
+
+    pub(crate) fn fail_hardware_after(&mut self, frames: u64) {
+        self.fail_after = Some(frames);
+    }
+
+    /// The injected failure of [`Self::fail_hardware_after`], once it is due.
+    fn injected_failure(&self) -> Result<()> {
+        if self.decode_path.is_hardware() && self.fail_after.is_some_and(|n| self.frames_out >= n) {
+            return Err(MediaError::Codec {
+                path: self.path.clone(),
+                index: self.index,
+                action: "decoding in hardware",
+                source: crate::error::FfmpegError {
+                    code: ffmpeg::ffi::AVERROR_EXTERNAL,
+                    message: "injected hardware decoder failure".to_string(),
+                },
+            });
+        }
+        Ok(())
     }
 
     pub fn stream_index(&self) -> usize {
@@ -272,6 +299,7 @@ impl Decoder {
         if packet.stream_index() != self.index {
             return Ok(());
         }
+        self.injected_failure()?;
         match self.opened().send_packet(packet.raw()) {
             Ok(()) => Ok(()),
             // Invalid data in one packet is recoverable: FFmpeg logs it and the next
@@ -308,6 +336,7 @@ impl Decoder {
     /// take), the frame is a CPU frame and [`decode_path`](Self::decode_path) says why;
     /// with [`HwPreference::Require`] that is a [`MediaError::Hardware`] instead.
     pub fn receive_frame(&mut self) -> Result<Received> {
+        self.injected_failure()?;
         let time_base = self.time_base;
         let result = match &mut self.inner {
             Inner::Video(d) => {
@@ -330,6 +359,9 @@ impl Decoder {
                 })
             }
         };
+        if result.is_ok() {
+            self.frames_out += 1;
+        }
         match result {
             Ok(Frame::Video(mut frame)) if self.hw.is_some() && self.decode_path.is_hardware() => {
                 frame.hw = self.hardware_frame(&frame.inner)?;

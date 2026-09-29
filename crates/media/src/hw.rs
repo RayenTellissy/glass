@@ -72,7 +72,7 @@ pub enum FallbackReason {
     /// FFmpeg cannot drive it.
     CodecUnsupported { codec: String },
     /// The hardware decoder does not take this profile, chroma format or bit depth
-    /// (4:2:2 or 10-bit H.264, for example). `format` is FFmpeg's pixel format name of
+    /// (RGB-coded H.264, for example). `format` is FFmpeg's pixel format name of
     /// the software output, or the platform's surface format.
     FormatUnsupported { codec: String, format: String },
     /// The hardware device could not be created.
@@ -84,6 +84,95 @@ pub enum FallbackReason {
         detail: String,
         at: Option<Timestamp>,
     },
+}
+
+impl FallbackReason {
+    /// The `assets/i18n` key of the message the UI shows for this reason.
+    pub fn i18n_key(&self) -> &'static str {
+        match self {
+            Self::NotRequested => "decode.fallback.not_requested",
+            Self::NoHardwareApi => "decode.fallback.no_hardware_api",
+            Self::CodecUnsupported { .. } => "decode.fallback.codec_unsupported",
+            Self::FormatUnsupported { .. } => "decode.fallback.format_unsupported",
+            Self::DeviceFailed { .. } => "decode.fallback.device_failed",
+            Self::DecodeFailed { .. } => "decode.fallback.decode_failed",
+        }
+    }
+
+    /// The placeholder values of the message: `codec` as people name it (`H.264`),
+    /// `format` as bit depth and chroma format (`10-bit 4:2:2`), `time` as `m:ss.cc`.
+    pub fn i18n_args(&self) -> Vec<(&'static str, String)> {
+        match self {
+            Self::NotRequested | Self::NoHardwareApi | Self::DeviceFailed { .. } => Vec::new(),
+            Self::CodecUnsupported { codec } => vec![("codec", codec_display_name(codec))],
+            Self::FormatUnsupported { codec, format } => vec![
+                ("format", format_display_name(format)),
+                ("codec", codec_display_name(codec)),
+            ],
+            Self::DecodeFailed { codec, at, .. } => vec![
+                ("time", at.map_or_else(|| "0:00.00".to_string(), clock_time)),
+                ("codec", codec_display_name(codec)),
+            ],
+        }
+    }
+
+    /// The message in the current locale, for the UI and the log.
+    pub fn message(&self) -> String {
+        let args = self.i18n_args();
+        let refs: Vec<(&str, &dyn fmt::Display)> = args
+            .iter()
+            .map(|(name, value)| (*name, value as &dyn fmt::Display))
+            .collect();
+        assets::i18n::text_with(self.i18n_key(), &refs)
+    }
+}
+
+/// How people name a codec, from FFmpeg's name.
+fn codec_display_name(codec: &str) -> String {
+    match codec {
+        "h264" => "H.264",
+        "hevc" => "HEVC",
+        "vp8" => "VP8",
+        "vp9" => "VP9",
+        "av1" => "AV1",
+        "prores" => "ProRes",
+        "mpeg1video" => "MPEG-1",
+        "mpeg2video" => "MPEG-2",
+        "mpeg4" => "MPEG-4",
+        "h263" => "H.263",
+        "dnxhd" => "DNxHD",
+        other => return other.to_uppercase(),
+    }
+    .to_string()
+}
+
+/// `10-bit 4:2:2` for an FFmpeg pixel format name; other names (a platform surface code)
+/// are returned as they are.
+fn format_display_name(format: &str) -> String {
+    let Some(pixel) = crate::format::PixelFormat::from_name(format) else {
+        return format.to_string();
+    };
+    if pixel.is_rgb() {
+        return format!("{}-bit RGB", pixel.bit_depth());
+    }
+    let chroma = match pixel.chroma_shift() {
+        (1, 1) => "4:2:0",
+        (1, 0) => "4:2:2",
+        (0, 0) => "4:4:4",
+        (2, 0) => "4:1:1",
+        _ => return format!("{}-bit", pixel.bit_depth()),
+    };
+    format!("{}-bit {chroma}", pixel.bit_depth())
+}
+
+fn clock_time(at: Timestamp) -> String {
+    let centis = (at.seconds().max(0.0) * 100.0).round() as u64;
+    format!(
+        "{}:{:02}.{:02}",
+        centis / 6000,
+        centis / 100 % 60,
+        centis % 100
+    )
 }
 
 impl fmt::Display for FallbackReason {
@@ -387,6 +476,54 @@ mod tests {
         assert_eq!(videotoolbox_codec_type("prores", tag), Some(*b"apch"));
         assert_eq!(videotoolbox_codec_type("prores", 0), Some(*b"apcn"));
         assert_eq!(videotoolbox_codec_type("png", 0), None);
+    }
+
+    #[test]
+    fn reasons_have_english_messages() {
+        use crate::time::Rational;
+        let reasons = [
+            FallbackReason::NotRequested,
+            FallbackReason::NoHardwareApi,
+            FallbackReason::CodecUnsupported {
+                codec: "vp9".into(),
+            },
+            FallbackReason::FormatUnsupported {
+                codec: "h264".into(),
+                format: "yuv422p10le".into(),
+            },
+            FallbackReason::DeviceFailed {
+                detail: "no device".into(),
+            },
+            FallbackReason::DecodeFailed {
+                codec: "hevc".into(),
+                detail: "error".into(),
+                at: Some(Timestamp::new(12_345, Rational::new(1, 1000))),
+            },
+        ];
+        let english = assets::i18n::Locale::english();
+        for reason in &reasons {
+            let template = english
+                .get(reason.i18n_key())
+                .unwrap_or_else(|| panic!("{} missing from en.json", reason.i18n_key()));
+            let mut placeholders = assets::i18n::placeholders(template).expect("balanced");
+            placeholders.sort_unstable();
+            let mut names: Vec<&str> = reason.i18n_args().iter().map(|(n, _)| *n).collect();
+            names.sort_unstable();
+            assert_eq!(placeholders, names, "{}", reason.i18n_key());
+        }
+        assert_eq!(
+            reasons[2].message(),
+            "Hardware decoding isn't available for VP9 on this Mac, so Glass is decoding it in software"
+        );
+        assert_eq!(
+            reasons[3].message(),
+            "Hardware decoding doesn't support 10-bit 4:2:2 H.264 on this Mac, so Glass is decoding it in software"
+        );
+        assert!(
+            reasons[5].message().contains("0:12.35"),
+            "{}",
+            reasons[5].message()
+        );
     }
 
     #[test]
