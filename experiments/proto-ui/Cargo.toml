@@ -10,6 +10,11 @@ publish = false
 [dependencies]
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu"] }
 egui = "0.36"
+# Routes egui-wgpu's profiling scopes to a tiny subscriber that times Queue::submit,
+# acquire and present on the UI thread (eframe's cpu_usage leaves them out).
+profiling = { version = "1", features = ["profile-with-tracing"] }
+tracing = "0.1"
+pollster = "0.4"
 
 [profile.release]
 debug = false

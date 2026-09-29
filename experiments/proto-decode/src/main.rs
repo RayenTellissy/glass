@@ -29,7 +29,27 @@ struct InFlight {
     _pixel_buffer: objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>,
     _planes: Option<(ffi::PlaneTexture, ffi::PlaneTexture)>,
 }
-/// Frames the paced run may decode ahead of display, like a player's look-ahead queue.
+
+/// Owns the in-flight conversions and waits for the GPU before releasing them,
+/// so an early return never frees a pixel buffer or texture the GPU still reads.
+struct Slots<'a> {
+    device: &'a wgpu::Device,
+    slots: Vec<Option<InFlight>>,
+}
+
+impl Drop for Slots<'_> {
+    fn drop(&mut self) {
+        if self.slots.iter().any(Option::is_some) {
+            let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        }
+    }
+}
+
+/// Depth of the paced run's look-ahead queue, in frames. Display starts
+/// PACE_LOOKAHEAD slots after decoding does; the decoder may start frame m no
+/// earlier than slot m, and frame m is late if it is ready after its display
+/// time, slot m + PACE_LOOKAHEAD. That gives each frame a window of exactly
+/// PACE_LOOKAHEAD slots.
 const PACE_LOOKAHEAD: u32 = 3;
 
 enum Wrapper {
@@ -354,7 +374,10 @@ fn run_stream(
         .iter()
         .map(|t| t.create_view(&Default::default()))
         .collect();
-    let mut slots: Vec<Option<InFlight>> = (0..views.len()).map(|_| None).collect();
+    let mut slots = Slots {
+        device: &gpu.device,
+        slots: (0..views.len()).map(|_| None).collect(),
+    };
     let mut slot_waits = 0usize;
 
     let mut res = StreamResult::default();
@@ -378,7 +401,7 @@ fn run_stream(
             &mut wrap,
             frame,
             &views[n % views.len()],
-            &mut slots[n % views.len()],
+            &mut slots.slots[n % views.len()],
             &mut slot_waits,
         )?;
         let upload = t0.elapsed();
@@ -391,7 +414,7 @@ fn run_stream(
             if now > start + slot * (n as u32 + PACE_LOOKAHEAD) {
                 res.late += 1;
             }
-            let next = start + slot * (n as u32 + 1).saturating_sub(PACE_LOOKAHEAD);
+            let next = start + slot * (n as u32 + 1);
             if next > now {
                 thread::sleep(next - now);
             }
@@ -745,17 +768,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .min_by(|a, b| machine(a).total_cmp(&machine(b)));
     let pass = judged.is_some_and(|r| r.late == 0 && machine(r) < 5.0 && r.fps_per_stream >= 59.5);
     let mut md = format!(
-        "# proto-decode results\n\n\
+        "# proto-decode generated results\n\nWritten by the prototype on each run; hand-written notes live in RESULTS.md.\n\n\
          4K60 H.264 (High, GOP 120, 1200 frames, about 31.6 Mbit/s, `scripts/make-media.sh`) decoded with FFmpeg's VideoToolbox hwaccel. Each frame's NV12 planes are wrapped zero-copy as wgpu textures and converted to `Rgba8Unorm` by a WGSL BT.709 limited-range pass. Release build, headless. Up to {IN_FLIGHT} conversions are in flight per stream, each with its own output texture; the stream never waits on the GPU unless the slot it is about to reuse is still busy.\n\n\
          Wrapping paths (both zero-copy, no CPU copy of pixel data):\n\n\
          - *CVMetalTextureCache per frame*: `CVMetalTextureCacheCreateTextureFromImage` per plane -> `MTLTexture` -> `texture_from_raw` / `create_texture_from_hal`, new wgpu textures and bind group every frame.\n\
          - *IOSurface textures cached*: `newTextureWithDescriptor:iosurface:plane:` per plane of each IOSurface VideoToolbox hands out, wrapped the same way, with the bind group cached by IOSurface ID (VideoToolbox recycles a small pool).\n\n\
-         - FFmpeg: libavutil {} via `ffmpeg-next` 9 against the Homebrew shared FFmpeg 9.0.1 build\n\
+         - FFmpeg: libavutil {} via `ffmpeg-next` 9 against the shared FFmpeg that `FFMPEG_DIR` pointed at when building\n\
          - GPU: {}\n\
          - Logical CPU cores: {cores}\n\
          - Decoder output pixel format: `{}`\n\
          - Decoder threads: {threads}\n\
-         - Paced runs let the decoder run up to {PACE_LOOKAHEAD} frames ahead of display (a player's look-ahead queue); a frame is late if it is ready after its display slot.\n\n\
+         - Paced runs model a {PACE_LOOKAHEAD}-frame look-ahead queue: display starts {PACE_LOOKAHEAD} slots after decoding, the decoder starts frame m no earlier than slot m, and frame m is late if it is ready after slot m + {PACE_LOOKAHEAD}.\n\n\
          Verdict: **{}**. Budget: 60 fps sustained with under 5% CPU per stream, judged as whole-machine utilisation, (process CPU + VTDecoderXPCService CPU) / {cores} logical cores, on the best paced single-stream run (see the Decision Log in PLAN.md). Judged run: {}\n\n\
          | Run | frames | fps per stream (slowest) | late frames | decode ms median / p99 / max | wrap + submit ms median / p99 / max | decode + wrap + submit ms median / p99 / max | waits for a busy slot | process CPU % of one core, per stream | VTDecoderXPCService CPU % of one core, per stream | whole machine %, per stream | IOSurfaces seen |\n\
          | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n",
@@ -820,7 +843,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ));
         }
     }
-    std::fs::write(root.join("RESULTS.md"), &md)?;
+    std::fs::write(root.join("RESULTS.generated.md"), &md)?;
     println!("{md}");
     Ok(())
 }
