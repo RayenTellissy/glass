@@ -144,7 +144,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [ ] Hardware decode: D3D11VA. Done when: shared handle → DX12 texture without CPU copy (needs-human: needs a Windows PC with a D3D11 GPU to implement and verify)
 - [ ] Hardware decode: NVDEC and VAAPI (parallel) (needs-human: needs NVIDIA and Intel or AMD Linux hardware to implement and verify)
 - [x] Automatic fallback to software per file with a reason string surfaced in the UI
-- [ ] Colour space plumbing: BT.709, BT.2020, sRGB, limited and full range, 8/10/12-bit, PQ and HLG flags carried on every frame
+- [~] Colour space plumbing: BT.709, BT.2020, sRGB, limited and full range, 8/10/12-bit, PQ and HLG flags carried on every frame
 - [ ] VFR normalisation to the sequence frame rate with a per-clip timestamp map
 - [ ] Accurate seek: nearest keyframe then decode forward, GOP index cached per file on disk
 - [ ] Still images, image sequences, GIF, WebP, HEIC via `image` and platform decoders
