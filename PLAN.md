@@ -126,7 +126,7 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
   - [x] `criterion` harness: workspace dev-dependency, `benches/` targets, `cargo bench --workspace --bench "*"` with short settings and baselines documented in `CONTRIBUTING.md`, and `scripts/bench-report.py` formatting a baseline comparison as Markdown
   - [ ] `bench` job in `ci.yml`: saves a `main` baseline on pushes to main, compares pull requests against it and posts the report as a PR comment (needs-human: no GitHub remote yet; push, merge once to main to seed the baseline, then open a PR and confirm the comment appears)
 - [x] Logging with `tracing`, per-crate filters, in-memory ring buffer exposed to the UI later
-- [ ] Frame-time monitor: records UI frame durations, exposes p50 and p99, fails tests that exceed budget
+- [~] Frame-time monitor: records UI frame durations, exposes p50 and p99, fails tests that exceed budget
 - [ ] i18n: `assets/i18n/en.json`, a `t!()` macro, and a CI check that every key used exists and no literal strings appear in UI code
 - [ ] Theme: tokens in `assets/theme/` (colour, type, spacing, radius, for the default, opposite, and high-contrast themes) loaded into the egui style, and a CI check that no literal colours appear in UI code. Values come from the `00 Foundations` page of the Paper file
 - [ ] Opt-in crash minidumps written locally, never uploaded automatically
