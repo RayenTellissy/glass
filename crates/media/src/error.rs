@@ -42,11 +42,14 @@ pub enum MediaError {
         kind: MediaKind,
     },
 
-    #[error("{}: stream {index}: no decoder for codec {codec}", path.display())]
+    /// This FFmpeg build has no software decoder for the codec. `reason` says what is
+    /// missing.
+    #[error("{}: stream {index}: no software decoder for {codec}: {reason}", path.display())]
     NoDecoder {
         path: PathBuf,
         index: usize,
         codec: String,
+        reason: &'static str,
     },
 
     /// Opening, feeding or draining a decoder failed. `action` says which.

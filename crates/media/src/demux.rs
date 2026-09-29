@@ -191,6 +191,10 @@ impl Demuxer {
     pub(crate) fn input(&self) -> &ffmpeg::format::context::Input {
         &self.input
     }
+
+    pub(crate) fn input_mut(&mut self) -> &mut ffmpeg::format::context::Input {
+        &mut self.input
+    }
 }
 
 fn summarize(stream: &ffmpeg::format::stream::Stream) -> StreamSummary {

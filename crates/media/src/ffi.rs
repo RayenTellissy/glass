@@ -317,3 +317,50 @@ pub(crate) fn index_timestamps(stream: &ffmpeg::format::stream::Stream, limit: u
             .collect()
     }
 }
+
+/// Tells the demuxer to drop every packet of streams not in `keep` before returning them,
+/// so reading one stream does not pay for the others.
+pub(crate) fn keep_only_streams(input: &mut ffmpeg::format::context::Input, keep: &[usize]) {
+    for index in 0..input.nb_streams() as usize {
+        let discard = if keep.contains(&index) {
+            sys::AVDiscard::AVDISCARD_DEFAULT
+        } else {
+            sys::AVDiscard::AVDISCARD_ALL
+        };
+        if let Some(mut stream) = input.stream_mut(index) {
+            // SAFETY: the StreamMut borrows the Input mutably; `discard` is a plain field
+            // the demuxer reads on the next av_read_frame.
+            unsafe { (*stream.as_mut_ptr()).discard = discard };
+        }
+    }
+}
+
+/// Sets the YUV to RGB matrix (an `AVColorSpace` value, which swscale's `SWS_CS_*`
+/// constants share) and the input range of a scaler; the output is full-range RGB.
+pub(crate) fn set_scaler_colourspace(
+    scaler: &mut ffmpeg::software::scaling::Context,
+    matrix: ffmpeg::color::Space,
+    full_range_input: bool,
+) -> Result<(), ffmpeg::Error> {
+    let space: sys::AVColorSpace = matrix.into();
+    // SAFETY: sws_getCoefficients returns a pointer to a static table (falling back to
+    // the default for unknown values); the scaler is a live context borrowed mutably.
+    let ret = unsafe {
+        let table = sys::sws_getCoefficients(space as c_int);
+        sys::sws_setColorspaceDetails(
+            scaler.as_mut_ptr(),
+            table,
+            c_int::from(full_range_input),
+            table,
+            1,
+            0,
+            1 << 16,
+            1 << 16,
+        )
+    };
+    if ret < 0 {
+        Err(ffmpeg::Error::from(ret))
+    } else {
+        Ok(())
+    }
+}

@@ -94,13 +94,13 @@ impl Decoder {
                 kind: summary.kind,
             });
         }
-        let Some(codec) = ffmpeg::decoder::find(stream.parameters().id()) else {
-            return Err(MediaError::NoDecoder {
+        let codec =
+            software_decoder(stream.parameters().id()).map_err(|reason| MediaError::NoDecoder {
                 path: path.clone(),
                 index,
                 codec: summary.codec.to_string(),
-            });
-        };
+                reason,
+            })?;
         let context = ffmpeg::codec::Context::from_parameters(stream.parameters())
             .map_err(|e| codec_error("reading codec parameters", e))?;
         let mut decoder = context.decoder();
@@ -254,6 +254,19 @@ impl Decoder {
     }
 }
 
+/// The software decoder for a codec, or why there is none.
+fn software_decoder(id: ffmpeg::codec::Id) -> std::result::Result<ffmpeg::Codec, &'static str> {
+    if id == ffmpeg::codec::Id::AV1 {
+        // FFmpeg's own "av1" decoder only drives hardware decoders; software AV1 comes
+        // from libdav1d (or libaom) when FFmpeg is built with it.
+        return ["libdav1d", "libaom-av1"]
+            .into_iter()
+            .find_map(ffmpeg::decoder::find_by_name)
+            .ok_or("FFmpeg was built without libdav1d or libaom");
+    }
+    ffmpeg::decoder::find(id).ok_or("FFmpeg was built without a decoder for it")
+}
+
 /// A decoded frame of either kind.
 #[derive(Debug)]
 pub enum Frame {
@@ -402,6 +415,10 @@ impl VideoFrame {
         (0..self.plane_count())
             .filter_map(|i| self.plane(i))
             .collect()
+    }
+
+    pub(crate) fn raw(&self) -> &ffmpeg::frame::Video {
+        &self.inner
     }
 }
 

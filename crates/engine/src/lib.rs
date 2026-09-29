@@ -3,6 +3,7 @@
 //! the export pipeline and the analysis job system, plus logging setup for every binary.
 
 pub mod logging;
+pub mod media_check;
 
 /// Names of the optional codec and AI features compiled into this build.
 pub fn enabled_features() -> Vec<&'static str> {

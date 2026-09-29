@@ -11,6 +11,7 @@
 //! decode-pool thread at a time; [`Packet`] and the frame types are `Send + Sync` and can
 //! be handed to other threads without copying.
 
+mod convert;
 mod decode;
 mod demux;
 mod error;
@@ -19,8 +20,10 @@ mod ffi;
 mod format;
 pub mod log;
 mod probe;
+mod reader;
 mod time;
 
+pub use convert::RgbaImage;
 pub use decode::{AudioFrame, Decoder, DecoderOptions, Frame, Plane, Received, VideoFrame};
 pub use demux::{Demuxer, Packet, StreamSummary};
 pub use error::{FfmpegError, MediaError, Result};
@@ -28,6 +31,7 @@ pub use format::{ColourInfo, ColourRange, Hdr, MediaKind, PixelFormat, SampleFor
 pub use probe::{
     AudioInfo, CodecInfo, MediaInfo, StreamDetail, StreamInfo, VfrScan, VfrSource, VideoInfo, probe,
 };
+pub use reader::{FrameReader, StreamSelect};
 pub use time::{Rational, Timestamp};
 
 /// Initialises FFmpeg once per process and routes its log into `tracing` (see
