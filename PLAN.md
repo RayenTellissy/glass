@@ -156,7 +156,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [x] Analysis job system: priority queue, cancellation, progress, disk cache keyed by content hash
 - [x] Thumbnail strips at 3 zoom levels
 - [x] Waveform peaks at 5 zoom levels
-- [ ] Proxy generation: ProRes Proxy on macOS, H.264 720p on Windows, user-selectable, resumable
+- [~] Proxy generation: ProRes Proxy on macOS, H.264 720p on Windows, user-selectable, resumable
 - [ ] Scene cut detection
 - [ ] Silence detection with threshold and minimum length
 - [ ] Beat and tempo detection
