@@ -94,7 +94,7 @@ Size target: installers around 30 MB, not counting asset packs and models, which
   - [x] `proto-gpu` on Apple silicon
   - [ ] `proto-gpu` on a GTX 1660 class GPU (needs-human: no NVIDIA hardware available locally)
 - [x] Prototype `proto-decode`: FFmpeg hardware decode of 4K H.264 to a `wgpu` texture on macOS. Done when: 60 fps sustained with under 5% CPU per stream
-- [ ] Same prototype on Windows via D3D11VA. Done when: same budget
+- [ ] Same prototype on Windows via D3D11VA. Done when: same budget (needs-human: no Windows PC available locally; port proto-decode to D3D11VA on one)
 - [ ] Write `docs/ARCHITECTURE.md`: threading model, data flow diagram, crate layout, cache design, the defaults table above
 - [ ] Write `docs/DECISIONS.md` (Decision Log) with the entries created so far
 - [ ] Delete the prototypes or move them to `experiments/`
@@ -482,3 +482,4 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 0 — proto-gpu on Apple silicon — f8adadb — M2 (stands in for M1), Metal, 4K Rgba8UnormSrgb: total GPU median 0.72 ms, p99 0.77 ms
 - 2026-09-29 — Phase 0 — proto-gpu on a GTX 1660 class GPU — needs-human: no NVIDIA hardware available locally; run `cargo run --release` in `proto-gpu/` on one
 - 2026-09-29 — Phase 0 — proto-decode on macOS — e94e902 — VideoToolbox zero-copy to wgpu, 4K60 H.264 paced 60 fps, 0 late: 2.18% of machine (9.20% process + 8.26% decoder service, % of one core)
+- 2026-09-29 — Phase 0 — proto-decode on Windows via D3D11VA — needs-human: no Windows PC available locally
