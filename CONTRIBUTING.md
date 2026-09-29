@@ -12,7 +12,7 @@ The easiest way to set up a shell is to source the development environment scrip
 source scripts/dev-env.sh
 ```
 
-It exports `CARGO_BUILD_JOBS=4` and, when `FFMPEG_DIR` is not already set and Homebrew is installed, points `FFMPEG_DIR` at Homebrew's FFmpeg (`brew install ffmpeg`), which the FFmpeg bindings build against. No machine-specific path is committed to the repo.
+It exports `CARGO_BUILD_JOBS=4` and, when `FFMPEG_DIR` is not already set, points it at the FFmpeg the bindings build against: the pinned build in `.glass-cache/ffmpeg/<host-triple>/` when `scripts/ffmpeg/build.sh` has produced one (see [FFmpeg](#ffmpeg)), otherwise Homebrew's FFmpeg (`brew install ffmpeg`). No machine-specific path is committed to the repo.
 
 ### Feature flags
 
