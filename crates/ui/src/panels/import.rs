@@ -253,8 +253,9 @@ pub fn drop_area(ui: &mut Ui, rect: Rect, bin: &str, state: &DropArea) -> DropAr
                 Role::TextPrimary,
                 width,
             );
+            // A centred layout puts the text around x = 0, so it is drawn at the centre.
             painter.galley(
-                pos2(rect.center().x - width / 2.0, top + 18.0),
+                pos2(rect.center().x, top + 18.0),
                 detail_galley,
                 paint.c(Role::TextSecondary),
             );
