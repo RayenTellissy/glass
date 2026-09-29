@@ -78,7 +78,7 @@ pub fn definitions(fonts: &'static Fonts) -> Option<FontDefinitions> {
 /// Installs the fonts into `ctx` once; later calls do nothing. Returns whether any font
 /// was found (without one egui cannot lay out text).
 pub fn install(ctx: &egui::Context) -> bool {
-    let id = egui::Id::new("glass.fonts.installed");
+    let id = installed_id();
     if let Some(installed) = ctx.data(|d| d.get_temp::<bool>(id)) {
         return installed;
     }
@@ -91,4 +91,15 @@ pub fn install(ctx: &egui::Context) -> bool {
     };
     ctx.data_mut(|d| d.insert_temp(id, installed));
     installed
+}
+
+fn installed_id() -> egui::Id {
+    egui::Id::new("glass.fonts.installed")
+}
+
+/// Installs `defs` instead of the runtime choice, and makes later [`install`] calls
+/// keep them (snapshots pin their fonts this way).
+pub(crate) fn install_definitions(ctx: &egui::Context, defs: FontDefinitions) {
+    ctx.set_fonts(defs);
+    ctx.data_mut(|d| d.insert_temp(installed_id(), true));
 }

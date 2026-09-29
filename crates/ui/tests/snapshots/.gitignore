@@ -1,0 +1,3 @@
+# Written by ui_snapshots when an image differs from its golden.
+*.actual.png
+*.diff.png

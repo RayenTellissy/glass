@@ -70,6 +70,7 @@ Every task passes the full check. Depending on what it touched, also run:
 | UI text | `cargo test -p app --test ui_source -- --nocapture` (fails on missing keys, warns on unused ones) | [User-facing strings](#user-facing-strings) |
 | Theme tokens or colours | `python3 assets/theme/check.py` and the same `ui_source` test | [Colours and theme](#colours-and-theme) |
 | A UI screen | its headless frame-budget test (p99 under 8 ms) | [UI frame budget](#ui-frame-budget) |
+| A panel, dialog, parameter widget or theme | `cargo test -p ui --test ui_snapshots -- --nocapture`; a new module adds a snapshot case | [UI snapshots](#ui-snapshots) |
 | Performance-sensitive code | `cargo bench -p <crate> --bench "*"` against a saved baseline, alone on the machine | [Benchmarks](#benchmarks) |
 | Media decoding or tests that read media | `tests/fixtures/generate.sh --verify` | [Test media](#test-media) |
 | `scripts/ffmpeg/` or `versions.env` | `scripts/ffmpeg/build.sh`, then the full check against the new build | [FFmpeg](#ffmpeg) |
@@ -181,6 +182,18 @@ In CI the `bench` job in `ci.yml` saves a `main` baseline on every push to `main
 ## UI frame budget
 
 UI code is checked headless: `ui::headless::HeadlessUi` renders egui into an offscreen wgpu texture (a locked screen or a CI runner has no visible window) and records each frame into a `ui::frame_time::FrameTimeMonitor`. A UI test runs its screen for a few hundred frames and calls `headless.assert_p99_within_budget(what, &monitor.stats())`, which fails with p50, p95, p99, max and the over-budget count when the p99 is not under 8 ms; `crates/ui/tests/frame_budget.rs` is the example to copy. Keep each such test under a few seconds. Without a GPU the test prints `SKIPPED ...` and returns. On a software rasteriser (lavapipe, WARP; wgpu's `DeviceType::Cpu`) the frames still render but the budget is not judged, and the test prints `BUDGET NOT CHECKED ...`. Set `GLASS_REQUIRE_GPU=1` where a GPU is expected so a missing GPU or a software one fails instead; CI sets it on the macOS arm64 job and installs lavapipe on Linux.
+
+## UI snapshots
+
+Every panel, dialog and parameter widget has golden images: `crates/ui/tests/ui_snapshots.rs` renders each case registered in `crates/ui/src/snapshot/cases.rs` headless (`HeadlessUi::capture`) in the dark, light and high-contrast themes at 1x and 2x, and compares it with `crates/ui/tests/snapshots/<case>/<theme>@<scale>x.png`.
+
+- **Adding a case.** Add a `SnapshotCase` to the list in `crates/ui/src/snapshot/cases.rs`: a name (the golden folder), the module it covers (`"panels/media_pool"`), a size in points cropped to the piece, and a draw function with realistic sample content through `t!()` strings and theme roles. Then write its goldens with `GLASS_UPDATE_SNAPSHOTS=1 cargo test -p ui --test ui_snapshots` and look at every new PNG before committing it. `every_panel_dialog_and_param_module_has_a_snapshot_case` fails when a `.rs` file or folder under `crates/ui/src/panels/`, `dialogs/` or `params/` has no case, when a case names a module that does not exist, and when a golden folder has no case.
+- **Updating goldens.** After an intended visual change, rerun with `GLASS_UPDATE_SNAPSHOTS=1`, review the changed PNGs in the diff, and commit them with the change.
+- **Tolerance.** A pixel differs when any RGBA channel is more than 16 levels (of 255) off; an image fails when more than 0.002% of its pixels differ (3 pixels of a 480 x 320 point case at 1x, 12 at 2x), or its size changed (`Tolerance::GPU`). egui rasterises text on the CPU, so GPUs differ only in filtering and blending rounding, which the channel threshold absorbs; a single changed letter (15 pixels at 1x, 56 at 2x) still fails, as does any colour, border or layout change. On a software rasteriser (`DeviceType::Cpu`) the looser `Tolerance::SOFTWARE` applies: 48 levels on up to 0.1% of the pixels, which catches a moved control or a wrong theme but not a single letter. The test prints every image that matched with some pixels over the threshold.
+- **Failures.** A failing image writes `<theme>@<scale>x.actual.png` and `<theme>@<scale>x.diff.png` (differing pixels in magenta over a faded golden) next to the golden; both are git-ignored, and CI uploads them as the `ui-snapshot-differences` artifact.
+- **Fonts and platforms.** The runtime font fallback depends on the machine, so snapshots pin their fonts (`ui::snapshot::fonts`): Arial and Courier New from `/System/Library/Fonts/Supplemental/`, which every macOS ships, until the Geist fonts are bundled. `crates/ui/tests/snapshots/FONTS.txt` records the files the goldens were made with, and a failure says so when the fonts differ. Until Geist is bundled the goldens are macOS-only: elsewhere the test prints `SKIPPED ui snapshots: ...`. When the Geist fonts land in `assets/fonts/` the snapshots switch to them automatically; regenerate every golden with `GLASS_UPDATE_SNAPSHOTS=1` in the same change (the other platforms can then compare too).
+- **No GPU.** Like the frame-budget tests, the snapshot test prints `SKIPPED ...` without a GPU and fails instead under `GLASS_REQUIRE_GPU=1`. CI runs it as its own step on the macOS arm64 job.
+- **Size.** Keep cases cropped to the piece; goldens are RGB PNGs at maximum compression. The whole folder should stay under a few MB.
 
 ## User-facing strings
 
