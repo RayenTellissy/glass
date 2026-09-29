@@ -544,3 +544,72 @@ pub fn unused_keys<'a>(strings: &'a BTreeMap<String, String>, uses: &[KeyUse]) -
         .filter(|k| !used.contains(k))
         .collect()
 }
+
+/// A comment containing this marker, followed by a reason, allows a literal colour on
+/// its own line and the next one.
+pub const ALLOW_COLOUR: &str = "allow-literal-colour:";
+
+/// Colour types whose constructors and constants make a colour from numbers.
+pub const COLOUR_TYPES: &[&str] = &["Color32", "Rgba", "Hsva", "HsvaGamma", "Rgba8"];
+
+/// Constants that are not colours in the design sense: no fill, and egui's
+/// "use the default text colour" marker.
+pub const COLOUR_CONSTANTS_ALLOWED: &[&str] = &["TRANSPARENT", "PLACEHOLDER"];
+
+/// `#RGB`, `#RGBA`, `#RRGGBB` or `#RRGGBBAA`.
+pub fn is_hex_colour(literal: &str) -> bool {
+    literal.strip_prefix('#').is_some_and(|digits| {
+        matches!(digits.len(), 3 | 4 | 6 | 8) && digits.bytes().all(|b| b.is_ascii_hexdigit())
+    })
+}
+
+/// Checks one file for literal colours: `Color32::from_rgb(..)` and the other `from_*`
+/// constructors, `Color32::RED`-style constants, `hex_color!`, and hex colour strings.
+pub fn check_colours(src: &str) -> Vec<Violation> {
+    let lexed = lex(src);
+    let tokens = without_test_items(&lexed.tokens);
+    let mut violations = Vec::new();
+    let mut flag = |line: usize, what: String| {
+        if !lexed.allowed(line, ALLOW_COLOUR) {
+            violations.push(Violation {
+                line,
+                message: format!(
+                    "literal colour {what}: use a theme role (`ui::theme::current(ctx).color(Role::..)`), or mark a debug-only colour with `// {ALLOW_COLOUR} <reason>`"
+                ),
+            });
+        }
+    };
+    for i in 0..tokens.len() {
+        match &tokens[i].tok {
+            Tok::Ident(ty)
+                if COLOUR_TYPES.contains(&ty.as_str())
+                    && tokens.get(i + 1).is_some_and(|t| t.tok == Tok::Punct(':'))
+                    && tokens.get(i + 2).is_some_and(|t| t.tok == Tok::Punct(':')) =>
+            {
+                if let Some(Tok::Ident(name)) = tokens.get(i + 3).map(|t| &t.tok) {
+                    let constant = name.len() > 1
+                        && name
+                            .chars()
+                            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+                    let literal = name.starts_with("from_")
+                        || name == "new"
+                        || (constant && !COLOUR_CONSTANTS_ALLOWED.contains(&name.as_str()));
+                    if literal {
+                        flag(tokens[i].line, format!("`{ty}::{name}`"));
+                    }
+                }
+            }
+            Tok::Ident(name)
+                if (name == "hex_color" || name == "color_hex")
+                    && tokens.get(i + 1).is_some_and(|t| t.tok == Tok::Punct('!')) =>
+            {
+                flag(tokens[i].line, format!("`{name}!`"));
+            }
+            Tok::Str(text) if is_hex_colour(text) => {
+                flag(tokens[i].line, format!("{text:?}"));
+            }
+            _ => {}
+        }
+    }
+    violations
+}

@@ -11,6 +11,10 @@ The design tokens for the Glass UI, taken from the Paper file "Inspiration 2", p
 | `schema.json` | JSON Schema (2020-12) for the three theme files |
 | `check.py` | Validator and contrast report, Python stdlib only: `python3 assets/theme/check.py` |
 
+## In code
+
+`assets::theme` embeds these files and parses them (`ThemeColors`, `Tokens`, `Role`); `ui::theme` applies them to egui (`Theme::apply`, `ui::theme::set` to switch at run time, `ui::theme::current(ctx).color(Role::..)` for custom painting). `crates/ui/src/theme.rs` is the only UI module that may build a colour from numbers; `cargo test -p app --test ui_source` enforces it, and CI runs `check.py`. A role added here must be added to the `roles!` list in `crates/assets/src/theme.rs` in the same change; loading fails on unknown or missing roles.
+
 ## Dark is the default
 
 The design brief says "Dark by default". `dark.json` is the default, and `light.json` is the opposite theme drawn on page `11 Platform, theme, RTL`. Each theme sets `mode` (`dark` or `light`) so the loader knows which base egui visuals to start from.

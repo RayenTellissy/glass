@@ -1504,6 +1504,7 @@ dependencies = [
  "pollster",
  "project",
  "render",
+ "tracing",
 ]
 
 [[package]]

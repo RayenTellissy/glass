@@ -3,6 +3,9 @@
   "name": "English",
   "direction": "ltr",
   "strings": {
-    "app.name": "Glass"
+    "app.name": "Glass",
+    "theme.dark": "Dark",
+    "theme.light": "Light",
+    "theme.high_contrast": "High contrast"
   }
 }

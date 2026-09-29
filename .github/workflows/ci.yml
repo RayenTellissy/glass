@@ -119,7 +119,14 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # i18n keys exist and UI code passes no literal text to egui (see assets/i18n/README.md).
+      # Theme token files: schema, every role in every theme, WCAG contrast pairs. The
+      # files are the same on every platform, so Windows (no python3 on PATH) skips it.
+      - name: Theme tokens
+        if: runner.os != 'Windows'
+        run: python3 assets/theme/check.py
+
+      # i18n keys exist, and UI code passes no literal text to egui and builds no colour
+      # outside the theme module (assets/i18n/README.md, assets/theme/README.md).
       - name: UI source rules
         run: cargo test -p app --test ui_source -- --nocapture
 

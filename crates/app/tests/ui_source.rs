@@ -5,7 +5,10 @@
 //!   placeholders; keys nothing uses are printed as warnings;
 //! - no literal user-facing text goes to an egui text API (`label`, `button`,
 //!   `RichText::new`, `on_hover_text`, ...) unless wrapped in `t!()` or marked with
-//!   `// allow-literal-text: <reason>` for debug-only strings.
+//!   `// allow-literal-text: <reason>` for debug-only strings;
+//! - no literal colour (`Color32::from_rgb`, `Color32::RED`, `"#F2F2F2"`, ...) appears
+//!   outside the theme module (`crates/ui/src/theme.rs`) unless marked with
+//!   `// allow-literal-colour: <reason>`.
 
 #[path = "support/source_scan.rs"]
 mod source_scan;
@@ -13,9 +16,14 @@ mod source_scan;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use source_scan::{ALLOW_TEXT, Violation, check_keys, check_text, lex, unused_keys};
+use source_scan::{
+    ALLOW_COLOUR, ALLOW_TEXT, Violation, check_colours, check_keys, check_text, lex, unused_keys,
+};
 
 const SCANNED: &[&str] = &["ui/src", "app/src"];
+
+/// The one module that turns token values into colours.
+const THEME_MODULE: &str = "crates/ui/src/theme.rs";
 
 fn crates_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
@@ -98,6 +106,25 @@ fn ui_text_uses_existing_i18n_keys_and_no_literals() {
     assert!(
         problems.is_empty(),
         "UI text rules failed:\n{}",
+        report(&problems)
+    );
+}
+
+#[test]
+fn ui_code_has_no_literal_colours_outside_the_theme() {
+    let mut problems = Vec::new();
+    let mut theme_seen = false;
+    for (file, src) in scanned_files() {
+        if file == THEME_MODULE {
+            theme_seen = true;
+            continue;
+        }
+        problems.extend(check_colours(&src).into_iter().map(|v| (file.clone(), v)));
+    }
+    assert!(theme_seen, "{THEME_MODULE} moved; update THEME_MODULE");
+    assert!(
+        problems.is_empty(),
+        "UI colour rules failed:\n{}",
         report(&problems)
     );
 }
@@ -218,4 +245,34 @@ fn lexer_handles_strings_chars_lifetimes_and_comments() {
         .collect();
     assert_eq!(strings, vec!["bytes", "r\"#"]);
     assert_eq!(lexed.comments.len(), 1);
+}
+
+#[test]
+fn literal_colours_are_caught() {
+    let src = format!(
+        r##"
+fn paint(p: &egui::Painter, theme: &Theme) {{
+    p.rect_filled(r, 4.0, egui::Color32::from_rgb(76, 127, 234));
+    p.rect_filled(r, 4.0, Color32::RED);
+    p.rect_filled(r, 4.0, Color32::from_hex("#4C7FEA").unwrap_or_default());
+    let accent = "#F2F2F2";
+    let soft = egui::Rgba::from_rgba_unmultiplied(1.0, 1.0, 1.0, 0.1);
+    let c = ecolor::hex_color!("#123456");
+    p.rect_filled(r, 4.0, theme.color(Role::ClipVideo));
+    p.rect_filled(r, 4.0, Color32::TRANSPARENT);
+    let issue = "#123"; // hex-looking but three digits is still a colour
+    let debug = Color32::from_gray(40); // {ALLOW_COLOUR} frame-time overlay, developers only
+    let id = "#tag-name";
+}}
+
+#[cfg(test)]
+mod tests {{
+    const RED: Color32 = Color32::from_rgb(255, 0, 0);
+}}
+"##
+    );
+    let lines: Vec<usize> = check_colours(&src).into_iter().map(|v| v.line).collect();
+    // Line 5 holds both the constructor and the hex string; line 8 the macro and its
+    // string.
+    assert_eq!(lines, vec![3, 4, 5, 5, 6, 7, 8, 8, 11]);
 }

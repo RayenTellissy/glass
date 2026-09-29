@@ -70,6 +70,16 @@ cargo test -p app --test ui_source -- --nocapture
 
 It fails on a missing key, a wrong placeholder, or literal text passed to an egui text API, and prints keys nothing uses yet as warnings. A debug-only string can carry `// allow-literal-text: <reason>`.
 
+## Colours and theme
+
+UI code never writes a colour. Widgets get theirs from the egui style, which `ui::theme` builds from the tokens in `assets/theme/`; custom painting asks for a role: `ui::theme::current(ctx).color(Role::ClipVideo)`. The same `ui_source` test fails on `Color32::from_rgb` and the other constructors, `Color32::RED`-style constants, and hex colour strings outside `crates/ui/src/theme.rs`; a debug-only colour can carry `// allow-literal-colour: <reason>`. After editing a token file, run its validator and contrast report:
+
+```sh
+python3 assets/theme/check.py
+```
+
+Fonts: see [`assets/fonts/README.md`](assets/fonts/README.md). Until the Geist files are added there, builds and tests use a system font and log which one.
+
 ## Licences and advisories
 
 Glass is distributed linked against a GPL build of FFmpeg, so every dependency must use a licence compatible with GPLv3. `deny.toml` holds the allow-list (with the reasoning for borderline entries), checks the RustSec advisory database, warns on duplicate crate versions and only accepts crates from crates.io. Run it before adding a dependency:

@@ -14,10 +14,9 @@
 
 use std::collections::VecDeque;
 use std::fmt;
-use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use egui::{FontData, FontDefinitions, FontFamily, Pos2, Rect, vec2};
+use egui::{Pos2, Rect, vec2};
 use egui_wgpu::wgpu;
 
 use crate::frame_time::FrameTimeMonitor;
@@ -81,8 +80,8 @@ pub struct HeadlessUi {
 }
 
 impl HeadlessUi {
-    /// Creates the device, the target and the renderer, and installs fonts from
-    /// [`test_fonts`] when any are found.
+    /// Creates the device, the target and the renderer, and installs the fonts from
+    /// [`crate::fonts`] (bundled Geist, else a system font) when any are found.
     pub fn new(viewport: Viewport) -> Result<Self, HeadlessError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -117,11 +116,7 @@ impl HeadlessUi {
             egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
 
         let ctx = egui::Context::default();
-        let fonts = test_fonts();
-        let has_text = fonts.is_some();
-        if let Some(fonts) = fonts {
-            ctx.set_fonts(fonts);
-        }
+        let has_text = crate::fonts::install(&ctx);
 
         Ok(Self {
             ctx,
@@ -161,6 +156,11 @@ impl HeadlessUi {
 
     pub fn context(&self) -> &egui::Context {
         &self.ctx
+    }
+
+    /// Where the fonts came from, for test and benchmark output.
+    pub fn font_source(&self) -> String {
+        crate::fonts::loaded().summary()
     }
 
     /// The backend and adapter name, for test and benchmark output.
@@ -277,88 +277,3 @@ impl HeadlessUi {
         Ok(())
     }
 }
-
-/// Fonts for headless runs: the bundled fonts in `assets/fonts/` when present, otherwise
-/// a common system font (never bundled, only read at test time), otherwise `None`.
-pub fn test_fonts() -> Option<FontDefinitions> {
-    let bundled = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts");
-    let mut files: Vec<PathBuf> = std::fs::read_dir(&bundled)
-        .map(|dir| {
-            dir.filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .filter(|p| {
-                    p.extension().is_some_and(|e| {
-                        e.eq_ignore_ascii_case("ttf") || e.eq_ignore_ascii_case("otf")
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    files.sort();
-    if files.is_empty() {
-        files = SYSTEM_FONTS
-            .iter()
-            .map(PathBuf::from)
-            .find(|p| p.is_file())
-            .into_iter()
-            .collect();
-    }
-
-    let mut fonts = FontDefinitions::empty();
-    for path in files {
-        let Ok(bytes) = std::fs::read(&path) else {
-            continue;
-        };
-        let name = path.file_stem().map_or_else(
-            || path.display().to_string(),
-            |s| s.to_string_lossy().into_owned(),
-        );
-        let mono = name.to_ascii_lowercase().contains("mono");
-        fonts
-            .font_data
-            .insert(name.clone(), FontData::from_owned(bytes).into());
-        fonts
-            .families
-            .entry(if mono {
-                FontFamily::Monospace
-            } else {
-                FontFamily::Proportional
-            })
-            .or_default()
-            .push(name);
-    }
-    // Each family falls back to the other so both render with a single font file.
-    let proportional = fonts
-        .families
-        .get(&FontFamily::Proportional)
-        .cloned()
-        .unwrap_or_default();
-    let monospace = fonts
-        .families
-        .get(&FontFamily::Monospace)
-        .cloned()
-        .unwrap_or_default();
-    if proportional.is_empty() && monospace.is_empty() {
-        return None;
-    }
-    fonts
-        .families
-        .entry(FontFamily::Proportional)
-        .or_default()
-        .extend(monospace);
-    fonts
-        .families
-        .entry(FontFamily::Monospace)
-        .or_default()
-        .extend(proportional);
-    Some(fonts)
-}
-
-const SYSTEM_FONTS: &[&str] = &[
-    "/System/Library/Fonts/Geneva.ttf",
-    "/System/Library/Fonts/Supplemental/Arial.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    "C:\\Windows\\Fonts\\segoeui.ttf",
-    "C:\\Windows\\Fonts\\arial.ttf",
-];
