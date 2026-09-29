@@ -153,7 +153,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [x] Audio decode to f32 planar at the project rate using a high-quality resampler (`rubato`)
 
 ### Analysis (background, cancellable, results cached under the project's cache folder)
-- [ ] Analysis job system: priority queue, cancellation, progress, disk cache keyed by content hash
+- [~] Analysis job system: priority queue, cancellation, progress, disk cache keyed by content hash
 - [ ] Thumbnail strips at 3 zoom levels
 - [ ] Waveform peaks at 5 zoom levels
 - [ ] Proxy generation: ProRes Proxy on macOS, H.264 720p on Windows, user-selectable, resumable
