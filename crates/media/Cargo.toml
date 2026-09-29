@@ -14,5 +14,8 @@ codec-prores-sw = []
 [dependencies]
 assets.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true
