@@ -13,6 +13,11 @@ codec-prores-sw = ["media/codec-prores-sw"]
 ai-whisper = []
 ai-segmentation = []
 
+# Criterion benches take their own command-line flags, which the libtest harness of the
+# library target would reject under `cargo bench`.
+[lib]
+bench = false
+
 [dependencies]
 project.workspace = true
 media.workspace = true
@@ -20,6 +25,13 @@ render.workspace = true
 audio.workspace = true
 plugins.workspace = true
 assets.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "engine"
+harness = false
 
 [lints]
 workspace = true

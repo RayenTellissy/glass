@@ -34,6 +34,24 @@ tests/fixtures/generate.sh --verify
 
 It writes H.264 (8-bit 1080p, 10-bit 720p, 4K), 10-bit HEVC, ProRes 422, VP9, AV1, a VFR clip, PNG and JPEG stills, a PNG image sequence and a 48 kHz stereo WAV into `tests/fixtures/generated/` (git-ignored, about 25 MB), plus `MANIFEST.json` describing each file's codec, size, frame rate, duration, pixel format and whether it is VFR. Existing files are kept unless you pass `--force`; `--verify` checks every file with `ffprobe` against the manifest. Tests that need the media skip when the manifest is missing.
 
+## Benchmarks
+
+Micro-benchmarks use `criterion` and live in each crate's `benches/` folder (a `[[bench]]` target with `harness = false`, plus `[lib] bench = false` so the library's test harness does not receive criterion's flags). Benchmarks are timing measurements, so run them serially and alone: no other build, test or benchmark on the machine at the same time, and no other agent or heavy app running. They build with the release profile.
+
+```sh
+source scripts/dev-env.sh
+cargo bench --workspace --bench "*"                      # every benchmark, full settings
+cargo bench -p engine --bench "*" -- --quick             # short local run, a few seconds
+cargo bench --workspace --bench "*" -- --save-baseline before
+# ... change something ...
+cargo bench --workspace --bench "*" -- --baseline before # compare with the saved run
+scripts/bench-report.py --baseline before                # the same comparison as Markdown
+```
+
+`--bench "*"` selects only the benchmark targets; a plain `cargo bench --workspace` would also pass criterion's flags to the test harnesses of the libraries and binaries, which reject them. Each benchmark group sets short warm-up and measurement times so the full suite stays quick; `--quick` shortens it further for a sanity check. Results go to `target/criterion/`.
+
+In CI the `bench` job in `ci.yml` saves a `main` baseline on every push to `main` and, on pull requests, compares against it with `--baseline-lenient main` and posts the `scripts/bench-report.py` table as a PR comment (updated in place on later pushes). Shared runners are noisy, so the report treats changes within 10% as noise; budgets that matter (UI frame time, scrub latency) are enforced by tests, not by this comparison.
+
 ## Licences and advisories
 
 Glass is distributed linked against a GPL build of FFmpeg, so every dependency must use a licence compatible with GPLv3. `deny.toml` holds the allow-list (with the reasoning for borderline entries), checks the RustSec advisory database, warns on duplicate crate versions and only accepts crates from crates.io. Run it before adding a dependency:

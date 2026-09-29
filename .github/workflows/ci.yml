@@ -142,5 +142,99 @@ jobs:
         with:
           command: check all
 
+  # Criterion benchmarks. Pushes to main save the `main` baseline in the Actions cache;
+  # pull requests compare against the newest one and post the table as a PR comment.
+  # Runs alone on its own runner, one benchmark at a time (criterion is serial).
+  bench:
+    name: bench
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bench
+
+      # Same FFmpeg steps as the check job, Linux only.
+      - name: Cache FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: |
+            .glass-cache/ffmpeg/src
+            .glass-cache/ffmpeg/${{ env.TARGET }}
+          key: ffmpeg-${{ env.TARGET }}-${{ hashFiles('scripts/ffmpeg/versions.env', 'scripts/ffmpeg/build.sh') }}
+
+      - name: Build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nasm cmake libva-dev zlib1g-dev clang libclang-dev
+
+      - name: Build FFmpeg
+        run: scripts/ffmpeg/build.sh --jobs 4
+
+      - name: Use the pinned FFmpeg
+        run: |
+          prefix="$GITHUB_WORKSPACE/.glass-cache/ffmpeg/$TARGET"
+          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$prefix/lib" >> "$GITHUB_ENV"
+
+      - name: Restore the main baseline
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: target/criterion
+          key: criterion-main-${{ github.event.pull_request.base.sha }}
+          restore-keys: criterion-main-
+
+      # `--bench "*"` runs only criterion targets; library and binary test harnesses
+      # would reject criterion's flags.
+      - name: Bench and save the main baseline
+        if: github.event_name == 'push'
+        run: cargo bench --locked --workspace --bench "*" -- --save-baseline main
+
+      - name: Save the main baseline
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: target/criterion
+          key: criterion-main-${{ github.sha }}
+
+      - name: Bench against the main baseline
+        if: github.event_name == 'pull_request'
+        run: cargo bench --locked --workspace --bench "*" -- --baseline-lenient main
+
+      - name: Report
+        run: |
+          python3 scripts/bench-report.py --baseline main > bench-report.md
+          cat bench-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Updates one comment per PR instead of adding a new one on every push. Pull
+      # requests from forks get a read-only token, so they only get the job summary.
+      - name: Comment on the pull request
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs")
+            const marker = "<!-- glass-bench -->"
+            const body = `${marker}\n${fs.readFileSync("bench-report.md", "utf8")}`
+            const { owner, repo } = context.repo
+            const issue_number = context.issue.number
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number })
+            const existing = comments.find((c) => c.body && c.body.startsWith(marker))
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body })
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body })
+            }
+
 # Tagged releases (installers and the GPL source bundle) are built by release.yml,
 # which dist generates, and package.yml.

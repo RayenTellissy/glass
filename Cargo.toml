@@ -25,6 +25,10 @@ ui = { path = "crates/ui" }
 
 serde_json = "1"
 
+# Benchmarks only (dev-dependency). Plots and rayon are left out: CI reads the JSON
+# estimates, and benchmarks run one at a time anyway.
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
 # Line tables keep backtraces useful while saving disk; dependencies carry no debug info.
 [profile.dev]
 debug = "line-tables-only"
