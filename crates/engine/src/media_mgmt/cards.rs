@@ -220,14 +220,11 @@ fn avchd(dir: &Path, options: &CardOptions) -> Option<Card> {
     for file in files {
         let number = stem(&file).parse::<u64>().ok();
         let size = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
-        let continues = match (previous, number, clips.last_mut()) {
-            (Some((prev_number, prev_size)), Some(n), Some(_))
-                if n == prev_number + 1 && prev_size >= options.avchd_span_bytes =>
-            {
-                true
-            }
-            _ => false,
-        };
+        let continues = matches!(
+            (previous, number),
+            (Some((prev_number, prev_size)), Some(n))
+                if n == prev_number + 1 && prev_size >= options.avchd_span_bytes
+        );
         if continues && let Some(clip) = clips.last_mut() {
             clip.files.push(file);
         } else {

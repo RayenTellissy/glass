@@ -151,6 +151,7 @@ impl Paint {
 
     /// Draws one line of text with `align` at `pos`, cut at `max_width`; returns its
     /// rectangle.
+    #[allow(clippy::too_many_arguments)]
     pub fn text(
         &self,
         painter: &Painter,
