@@ -8,6 +8,7 @@
 //! ```
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use ffmpeg_next as ffmpeg;
 
@@ -15,6 +16,7 @@ use crate::demux::{Demuxer, Packet};
 use crate::error::{MediaError, Result};
 use crate::ffi;
 use crate::format::{ColourInfo, MediaKind, PixelFormat, SampleFormat};
+use crate::hw::{self, DecodePath, FallbackReason, HwApi, HwFrame, HwPreference};
 use crate::time::{Rational, Timestamp};
 
 /// Decoder settings.
@@ -22,8 +24,26 @@ use crate::time::{Rational, Timestamp};
 pub struct DecoderOptions {
     /// Decoder worker threads (frame and slice threading). Zero lets FFmpeg pick one per
     /// core, which suits a single stream; the decode pool lowers it when many streams
-    /// decode at once.
+    /// decode at once. A hardware decoder always uses one.
     pub threads: usize,
+    /// Hardware decode for video streams; audio always decodes in software. Software
+    /// ([`HwPreference::Off`]) unless asked, so CPU consumers (thumbnails, analysis) get
+    /// planes; playback asks for [`HwPreference::Auto`].
+    pub hw: HwPreference,
+}
+
+impl DecoderOptions {
+    /// Default threading with the given hardware preference.
+    pub fn with_hw(hw: HwPreference) -> Self {
+        Self { threads: 0, hw }
+    }
+}
+
+/// A hardware decoder's device and `get_format` state. The codec context points at
+/// `negotiation`, so a `Decoder` declares this after `inner` and drops it last.
+struct HwState {
+    negotiation: Arc<ffi::HwNegotiation>,
+    _device: ffi::HwDevice,
 }
 
 enum Inner {
@@ -37,6 +57,9 @@ enum Inner {
 /// (`glass-decode-<n>` or `glass-audio-decode`) and may move between threads between calls.
 pub struct Decoder {
     inner: Inner,
+    hw: Option<HwState>,
+    decode_path: DecodePath,
+    preference: HwPreference,
     index: usize,
     time_base: Rational,
     codec: &'static str,
@@ -61,6 +84,7 @@ impl std::fmt::Debug for Decoder {
             .field("stream", &self.index)
             .field("codec", &self.codec)
             .field("kind", &self.kind())
+            .field("decode_path", &self.decode_path)
             .finish()
     }
 }
@@ -93,6 +117,48 @@ impl Decoder {
                 index,
                 kind: summary.kind,
             });
+        }
+        let mut fallback = FallbackReason::NotRequested;
+        if summary.kind == MediaKind::Video && options.hw != HwPreference::Off {
+            let codec_tag = ffi::stream_params(&stream).codec_tag;
+            match open_hardware(&stream, summary.codec, codec_tag) {
+                Ok((decoder, state, api)) => {
+                    tracing::debug!(
+                        path = %path.display(),
+                        stream = index,
+                        codec = summary.codec,
+                        api = api.name(),
+                        "decoding in hardware"
+                    );
+                    return Ok(Self {
+                        inner: Inner::Video(decoder),
+                        hw: Some(state),
+                        decode_path: DecodePath::Hardware { api },
+                        preference: options.hw,
+                        index,
+                        time_base: summary.time_base,
+                        codec: summary.codec,
+                        path,
+                        eof_sent: false,
+                    });
+                }
+                Err(reason) if options.hw == HwPreference::Require => {
+                    return Err(MediaError::Hardware {
+                        path: path.clone(),
+                        index,
+                        reason,
+                    });
+                }
+                Err(reason) => {
+                    tracing::info!(
+                        path = %path.display(),
+                        stream = index,
+                        %reason,
+                        "decoding in software"
+                    );
+                    fallback = reason;
+                }
+            }
         }
         let codec =
             software_decoder(stream.parameters().id()).map_err(|reason| MediaError::NoDecoder {
@@ -133,12 +199,34 @@ impl Decoder {
         };
         Ok(Self {
             inner,
+            hw: None,
+            decode_path: DecodePath::Software { reason: fallback },
+            preference: options.hw,
             index,
             time_base: summary.time_base,
             codec: summary.codec,
             path,
             eof_sent: false,
         })
+    }
+
+    /// How this decoder decodes: hardware, or software and why.
+    pub fn decode_path(&self) -> &DecodePath {
+        &self.decode_path
+    }
+
+    /// True while frames come out as hardware surfaces ([`VideoFrame::hardware`]).
+    pub fn is_hardware(&self) -> bool {
+        self.decode_path.is_hardware()
+    }
+
+    /// The preference the decoder was opened with.
+    pub fn hw_preference(&self) -> HwPreference {
+        self.preference
+    }
+
+    pub(crate) fn set_fallback(&mut self, reason: FallbackReason) {
+        self.decode_path = DecodePath::Software { reason };
     }
 
     pub fn stream_index(&self) -> usize {
@@ -214,6 +302,11 @@ impl Decoder {
     }
 
     /// The next decoded frame, if the decoder has one ready.
+    ///
+    /// A hardware decoder returns frames whose [`VideoFrame::hardware`] surface holds the
+    /// picture. If FFmpeg drops to software on its own (a profile the hardware does not
+    /// take), the frame is a CPU frame and [`decode_path`](Self::decode_path) says why;
+    /// with [`HwPreference::Require`] that is a [`MediaError::Hardware`] instead.
     pub fn receive_frame(&mut self) -> Result<Received> {
         let time_base = self.time_base;
         let result = match &mut self.inner {
@@ -223,6 +316,7 @@ impl Decoder {
                     Frame::Video(VideoFrame {
                         inner: frame,
                         time_base,
+                        hw: None,
                     })
                 })
             }
@@ -237,6 +331,10 @@ impl Decoder {
             }
         };
         match result {
+            Ok(Frame::Video(mut frame)) if self.hw.is_some() && self.decode_path.is_hardware() => {
+                frame.hw = self.hardware_frame(&frame.inner)?;
+                Ok(Received::Frame(Frame::Video(frame)))
+            }
             Ok(frame) => Ok(Received::Frame(frame)),
             Err(ffmpeg::Error::Other { errno }) if errno == ffmpeg::error::EAGAIN => {
                 Ok(Received::NeedsInput)
@@ -246,12 +344,120 @@ impl Decoder {
         }
     }
 
+    /// The hardware surface of a frame from a hardware decoder, or `None` when FFmpeg fell
+    /// back to software on its own (the frame is then a CPU frame).
+    fn hardware_frame(&mut self, frame: &ffmpeg::frame::Video) -> Result<Option<HwFrame>> {
+        #[cfg(target_os = "macos")]
+        if let Some(buffer) = ffi::PixelBuffer::from_frame(frame) {
+            return match HwFrame::from_videotoolbox(buffer, colour_of(frame)) {
+                Ok(hw) => Ok(Some(hw)),
+                Err(fourcc) => {
+                    let reason = FallbackReason::FormatUnsupported {
+                        codec: self.codec.to_string(),
+                        format: String::from_utf8_lossy(&fourcc).into_owned(),
+                    };
+                    self.set_fallback(reason.clone());
+                    Err(MediaError::Hardware {
+                        path: self.path.clone(),
+                        index: self.index,
+                        reason,
+                    })
+                }
+            };
+        }
+        let offered = self.hw.as_ref().is_some_and(|h| {
+            h.negotiation
+                .offered
+                .load(std::sync::atomic::Ordering::Relaxed)
+        });
+        let reason = FallbackReason::FormatUnsupported {
+            codec: self.codec.to_string(),
+            format: PixelFormat::from_ffmpeg(frame.format()).name().to_string(),
+        };
+        tracing::info!(
+            path = %self.path.display(),
+            stream = self.index,
+            offered,
+            %reason,
+            "the hardware decoder returned a software frame"
+        );
+        self.set_fallback(reason.clone());
+        if self.preference == HwPreference::Require {
+            return Err(MediaError::Hardware {
+                path: self.path.clone(),
+                index: self.index,
+                reason,
+            });
+        }
+        Ok(None)
+    }
+
     /// Drops buffered packets and frames and clears the end-of-stream state. Call after
     /// seeking the demuxer.
     pub fn flush(&mut self) {
         self.opened().flush();
         self.eof_sent = false;
     }
+}
+
+/// Opens a decoder for `stream` with the platform's hardware decoder attached, or says why
+/// it cannot.
+#[cfg(target_os = "macos")]
+fn open_hardware(
+    stream: &ffmpeg::format::stream::Stream,
+    codec_name: &'static str,
+    codec_tag: u32,
+) -> std::result::Result<(ffmpeg::decoder::Video, HwState, HwApi), FallbackReason> {
+    let api = hw::hardware_candidate(codec_name, codec_tag)?;
+    let id = stream.parameters().id();
+    let unsupported = || FallbackReason::CodecUnsupported {
+        codec: codec_name.to_string(),
+    };
+    // FFmpeg's native AV1 decoder drives hardware; libdav1d, the default, does not.
+    let codec = if id == ffmpeg::codec::Id::AV1 {
+        ffmpeg::decoder::find_by_name("av1")
+    } else {
+        ffmpeg::decoder::find(id)
+    }
+    .ok_or_else(unsupported)?;
+    let failed = |e: ffmpeg::Error| FallbackReason::DeviceFailed {
+        detail: e.to_string(),
+    };
+    let device = ffi::HwDevice::videotoolbox().map_err(failed)?;
+    let negotiation = Arc::new(ffi::HwNegotiation::default());
+    let mut context =
+        ffmpeg::codec::Context::from_parameters(stream.parameters()).map_err(failed)?;
+    ffi::attach_videotoolbox(&mut context, &device, &negotiation).map_err(failed)?;
+    let mut decoder = context.decoder();
+    decoder.set_packet_time_base(stream.time_base());
+    // The hardware does the work; frame threads would only add latency.
+    let mut dict = ffmpeg::Dictionary::new();
+    dict.set("threads", "1");
+    let opened = decoder
+        .open_as_with(codec, dict)
+        .and_then(|d| d.video())
+        .map_err(|e| FallbackReason::FormatUnsupported {
+            codec: codec_name.to_string(),
+            format: e.to_string(),
+        })?;
+    Ok((
+        opened,
+        HwState {
+            negotiation,
+            _device: device,
+        },
+        api,
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn open_hardware(
+    _stream: &ffmpeg::format::stream::Stream,
+    codec_name: &'static str,
+    codec_tag: u32,
+) -> std::result::Result<(ffmpeg::decoder::Video, HwState, HwApi), FallbackReason> {
+    hw::hardware_candidate(codec_name, codec_tag)?;
+    Err(FallbackReason::NoHardwareApi)
 }
 
 /// The software decoder for a codec, or why there is none.
@@ -323,13 +529,34 @@ pub struct Plane<'a> {
     pub height: u32,
 }
 
-/// A decoded video frame in its native pixel format, in CPU memory.
+/// Where a video frame's pixels are.
+#[derive(Debug)]
+pub enum FrameStorage<'a> {
+    /// CPU planes in the frame's native pixel format.
+    Cpu(Vec<Plane<'a>>),
+    /// A hardware surface, imported by `render::interop` without a copy.
+    Hardware(&'a HwFrame),
+}
+
+/// A decoded video frame: CPU planes in its native pixel format, or a hardware surface
+/// ([`VideoFrame::hardware`]) when a hardware decoder produced it.
 ///
-/// `Send` and `Sync`; the pixel buffers are reference counted by FFmpeg, so a frame can
-/// be handed from a decode thread to the render thread without a copy.
+/// `Send` and `Sync`; the pixel buffers are reference counted by FFmpeg (or CoreVideo),
+/// so a frame can be handed from a decode thread to the render thread without a copy.
 pub struct VideoFrame {
     inner: ffmpeg::frame::Video,
     time_base: Rational,
+    hw: Option<HwFrame>,
+}
+
+fn colour_of(frame: &ffmpeg::frame::Video) -> ColourInfo {
+    ColourInfo::from_ffmpeg(
+        frame.color_primaries(),
+        frame.color_transfer_characteristic(),
+        frame.color_space(),
+        frame.color_range(),
+        frame.chroma_location(),
+    )
 }
 
 impl std::fmt::Debug for VideoFrame {
@@ -339,11 +566,28 @@ impl std::fmt::Debug for VideoFrame {
             .field("height", &self.height())
             .field("format", &self.format())
             .field("pts", &self.pts())
+            .field("hardware", &self.hw)
             .finish()
     }
 }
 
 impl VideoFrame {
+    /// The hardware surface holding the picture, for a frame from a hardware decoder.
+    pub fn hardware(&self) -> Option<&HwFrame> {
+        self.hw.as_ref()
+    }
+
+    pub fn is_hardware(&self) -> bool {
+        self.hw.is_some()
+    }
+
+    pub fn storage(&self) -> FrameStorage<'_> {
+        match &self.hw {
+            Some(hw) => FrameStorage::Hardware(hw),
+            None => FrameStorage::Cpu(self.planes()),
+        }
+    }
+
     pub fn width(&self) -> u32 {
         self.inner.width()
     }
@@ -383,13 +627,7 @@ impl VideoFrame {
     }
 
     pub fn colour(&self) -> ColourInfo {
-        ColourInfo::from_ffmpeg(
-            self.inner.color_primaries(),
-            self.inner.color_transfer_characteristic(),
-            self.inner.color_space(),
-            self.inner.color_range(),
-            self.inner.chroma_location(),
-        )
+        colour_of(&self.inner)
     }
 
     /// Number of CPU planes (0 for a hardware surface).

@@ -141,8 +141,15 @@ fn seek_then_flush_resumes_at_a_keyframe() {
     };
     let mut demuxer = Demuxer::open(&path).expect("open");
     let index = demuxer.best_stream(MediaKind::Video).expect("video");
-    let mut decoder =
-        Decoder::open_with(&demuxer, index, DecoderOptions { threads: 2 }).expect("decoder");
+    let mut decoder = Decoder::open_with(
+        &demuxer,
+        index,
+        DecoderOptions {
+            threads: 2,
+            ..Default::default()
+        },
+    )
+    .expect("decoder");
     // Decode a few frames, then jump.
     let mut got = 0;
     while got < 5 {

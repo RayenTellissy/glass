@@ -527,6 +527,7 @@ dependencies = [
  "criterion",
  "media",
  "plugins",
+ "pollster",
  "project",
  "render",
  "tracing",
@@ -1011,6 +1012,9 @@ dependencies = [
  "assets",
  "criterion",
  "ffmpeg-next",
+ "objc2-core-foundation",
+ "objc2-core-video",
+ "objc2-io-surface",
  "serde_json",
  "thiserror",
  "tracing",
@@ -1233,6 +1237,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-core-video"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d425caf1df73233f29fd8a5c3e5edbc30d2d4307870f802d18f00d83dc5141a6"
+dependencies = [
+ "bitflags",
+ "objc2-core-foundation",
+ "objc2-io-surface",
+]
+
+[[package]]
 name = "objc2-encode"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1270,6 +1285,7 @@ dependencies = [
  "block2",
  "objc2",
  "objc2-foundation",
+ "objc2-io-surface",
 ]
 
 [[package]]
@@ -1594,6 +1610,14 @@ version = "0.1.0"
 dependencies = [
  "assets",
  "media",
+ "objc2",
+ "objc2-core-foundation",
+ "objc2-io-surface",
+ "objc2-metal",
+ "pollster",
+ "thiserror",
+ "tracing",
+ "wgpu",
 ]
 
 [[package]]

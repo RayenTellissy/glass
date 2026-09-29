@@ -5,7 +5,9 @@
 //!
 //! The building blocks are [`Demuxer`] (open a file, read [`Packet`]s, seek), [`Decoder`]
 //! (packets in, [`Frame`]s out) and the exact time types [`Rational`] and [`Timestamp`].
-//! None of the public types expose `ffmpeg-next`.
+//! None of the public types expose `ffmpeg-next`. Hardware decode ([`HwPreference`])
+//! hands out [`HwFrame`] surfaces (a retained `CVPixelBuffer` on macOS) instead of CPU
+//! planes; their platform calls live in `media::ffi` too.
 //!
 //! Threads: [`Demuxer`] and [`Decoder`] are `Send` (not `Sync`) and are driven from one
 //! decode-pool thread at a time; [`Packet`] and the frame types are `Send + Sync` and can
@@ -18,16 +20,23 @@ mod error;
 #[allow(unsafe_code)]
 mod ffi;
 mod format;
+mod hw;
 pub mod log;
 mod probe;
 mod reader;
 mod time;
 
 pub use convert::RgbaImage;
-pub use decode::{AudioFrame, Decoder, DecoderOptions, Frame, Plane, Received, VideoFrame};
+pub use decode::{
+    AudioFrame, Decoder, DecoderOptions, Frame, FrameStorage, Plane, Received, VideoFrame,
+};
 pub use demux::{Demuxer, Packet, StreamSummary};
 pub use error::{FfmpegError, MediaError, Result};
 pub use format::{ColourInfo, ColourRange, Hdr, MediaKind, PixelFormat, SampleFormat, SampleType};
+pub use hw::{
+    DecodePath, FallbackReason, HwApi, HwFrame, HwPreference, HwSurfaceFormat,
+    hardware_decoder_available,
+};
 pub use probe::{
     AudioInfo, CodecInfo, MediaInfo, StreamDetail, StreamInfo, VfrScan, VfrSource, VideoInfo, probe,
 };

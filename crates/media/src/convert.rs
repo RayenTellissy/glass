@@ -37,6 +37,16 @@ impl VideoFrame {
         let frame = self.raw();
         let (width, height) = (frame.width(), frame.height());
         let format = self.format();
+        if self.is_hardware() {
+            // Hardware surfaces convert on the GPU (render::interop); there is no CPU copy.
+            return Err(MediaError::Convert {
+                format: format.name(),
+                width,
+                height,
+                to: "rgba",
+                source: ffmpeg::Error::InvalidData.into(),
+            });
+        }
         let error = |e: ffmpeg::Error| MediaError::Convert {
             format: format.name(),
             width,

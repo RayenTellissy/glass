@@ -31,6 +31,16 @@ thiserror = "2"
 ffmpeg-next = { version = "9", default-features = false, features = ["codec", "format", "software-scaling"] }
 serde_json = "1"
 
+# GPU: the wgpu version egui-wgpu 0.36 uses, so `render` shares eframe's device.
+wgpu = "30"
+# macOS platform bindings for hardware decode (`media::ffi`) and IOSurface import into
+# Metal (`render::interop`); the same versions wgpu-hal uses.
+objc2 = "0.6"
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std"] }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVReturn", "objc2-io-surface"] }
+objc2-io-surface = { version = "0.3", default-features = false, features = ["std", "IOSurfaceRef", "IOSurfaceTypes", "objc2-core-foundation"] }
+objc2-metal = { version = "0.3", default-features = false, features = ["std", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "MTLTypes", "objc2-io-surface"] }
+
 # UI: egui on wgpu, the versions proto-ui measured. `default_fonts` stays off because
 # it bundles the Ubuntu font, which deny.toml rejects; Glass ships Geist and Geist Mono
 # (OFL) from assets/fonts/ instead. eframe joins `app` with the window.

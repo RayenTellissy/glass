@@ -1,5 +1,5 @@
-//! The software decode path: one stream of one file in, frames out in decode order of
-//! presentation, with seek to start. Hardware decoders will sit behind the same API.
+//! The decode path: one stream of one file in, frames out in presentation order, with
+//! seek to start. Hardware and software decoders sit behind the same API.
 
 use std::path::Path;
 
@@ -8,6 +8,7 @@ use crate::demux::{Demuxer, StreamSummary};
 use crate::error::{MediaError, Result};
 use crate::ffi;
 use crate::format::MediaKind;
+use crate::hw::DecodePath;
 
 /// Which stream of a file to decode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,7 +24,8 @@ pub enum StreamSelect {
 /// Decodes one video or audio stream of a file, frame by frame.
 ///
 /// Video frames come out in their native CPU pixel format (`yuv420p`, `yuv420p10le`,
-/// `yuv422p10le`, `rgb24`, ...) and audio frames in the decoder's native sample format
+/// `yuv422p10le`, `rgb24`, ...), or as hardware surfaces when the options ask for
+/// hardware decode ([`DecoderOptions::hw`]), and audio frames in the decoder's native sample format
 /// (`fltp` for AAC and Opus, `s16`/`s32` for PCM); conversion to RGB happens on the GPU
 /// and conversion to planar f32 at the project rate in the audio decode stage.
 ///
@@ -85,9 +87,14 @@ impl FrameReader {
         self.stream.kind
     }
 
-    /// Always false for now; hardware decode arrives behind this same reader.
+    /// True while video frames come out as hardware surfaces.
     pub fn is_hardware(&self) -> bool {
-        false
+        self.decoder.is_hardware()
+    }
+
+    /// How the stream is being decoded: hardware, or software and why.
+    pub fn decode_path(&self) -> &DecodePath {
+        self.decoder.decode_path()
     }
 
     /// The next frame in presentation order, or `None` once the stream is exhausted.

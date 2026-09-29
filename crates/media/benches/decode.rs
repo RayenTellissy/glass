@@ -28,7 +28,10 @@ fn decode(c: &mut Criterion) {
     group.sample_size(10);
     for &(file, frames, threads) in CASES {
         let path = dir.join(file);
-        let options = DecoderOptions { threads };
+        let options = DecoderOptions {
+            threads,
+            ..Default::default()
+        };
         let name = format!(
             "{file}/{}",
             if threads == 0 {

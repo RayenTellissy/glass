@@ -364,3 +364,184 @@ pub(crate) fn set_scaler_colourspace(
         Ok(())
     }
 }
+
+// ---- Hardware decode ----------------------------------------------------------------------
+
+/// What a hardware decoder's `get_format` callback saw, shared with the callback through
+/// `AVCodecContext.opaque`. FFmpeg may call the callback from its frame threads.
+#[derive(Debug, Default)]
+pub(crate) struct HwNegotiation {
+    /// The decoder offered the hardware format at least once.
+    pub offered: std::sync::atomic::AtomicBool,
+}
+
+/// A hardware device context (`AVHWDeviceContext`), reference counted by FFmpeg.
+pub(crate) struct HwDevice(std::ptr::NonNull<sys::AVBufferRef>);
+
+// SAFETY: the device context is created once, never mutated afterwards, and its reference
+// count is atomic, so the handle can move between threads.
+unsafe impl Send for HwDevice {}
+
+impl Drop for HwDevice {
+    fn drop(&mut self) {
+        let mut raw = self.0.as_ptr();
+        // SAFETY: `raw` is the reference this handle owns; av_buffer_unref releases it.
+        unsafe { sys::av_buffer_unref(&mut raw) };
+    }
+}
+
+impl HwDevice {
+    /// Creates a VideoToolbox device context.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn videotoolbox() -> Result<Self, ffmpeg::Error> {
+        let mut ctx: *mut sys::AVBufferRef = std::ptr::null_mut();
+        // SAFETY: plain out-pointer call; no device name or options.
+        let ret = unsafe {
+            sys::av_hwdevice_ctx_create(
+                &mut ctx,
+                sys::AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if ret < 0 {
+            return Err(ffmpeg::Error::from(ret));
+        }
+        std::ptr::NonNull::new(ctx)
+            .map(Self)
+            .ok_or(ffmpeg::Error::Bug)
+    }
+}
+
+/// Attaches `device` to a decoder context that is not open yet and installs a
+/// `get_format` callback choosing VideoToolbox surfaces whenever the decoder offers them.
+/// `negotiation` must outlive the codec context (the decoder owns both and drops the
+/// context first).
+#[cfg(target_os = "macos")]
+pub(crate) fn attach_videotoolbox(
+    ctx: &mut ffmpeg::codec::Context,
+    device: &HwDevice,
+    negotiation: &std::sync::Arc<HwNegotiation>,
+) -> Result<(), ffmpeg::Error> {
+    // SAFETY: the context is not open yet, so setting these fields is allowed; the new
+    // buffer reference is owned (and freed) by the codec context.
+    unsafe {
+        let raw = ctx.as_mut_ptr();
+        let reference = sys::av_buffer_ref(device.0.as_ptr());
+        if reference.is_null() {
+            return Err(ffmpeg::Error::Other {
+                errno: ffmpeg::error::ENOMEM,
+            });
+        }
+        (*raw).hw_device_ctx = reference;
+        (*raw).opaque = std::sync::Arc::as_ptr(negotiation) as *mut c_void;
+        (*raw).get_format = Some(pick_videotoolbox);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" fn pick_videotoolbox(
+    ctx: *mut sys::AVCodecContext,
+    formats: *const sys::AVPixelFormat,
+) -> sys::AVPixelFormat {
+    use sys::AVPixelFormat::{AV_PIX_FMT_NONE, AV_PIX_FMT_VIDEOTOOLBOX};
+    // SAFETY: FFmpeg passes a list terminated by AV_PIX_FMT_NONE, and `opaque` points to
+    // the HwNegotiation that `attach_videotoolbox` stored, which outlives the context.
+    unsafe {
+        let mut software = AV_PIX_FMT_NONE;
+        let mut at = formats;
+        while *at != AV_PIX_FMT_NONE {
+            if *at == AV_PIX_FMT_VIDEOTOOLBOX {
+                if let Some(negotiation) = ((*ctx).opaque as *const HwNegotiation).as_ref() {
+                    negotiation
+                        .offered
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                return AV_PIX_FMT_VIDEOTOOLBOX;
+            }
+            let hardware = sys::av_pix_fmt_desc_get(*at)
+                .as_ref()
+                .is_some_and(|d| d.flags & sys::AV_PIX_FMT_FLAG_HWACCEL as u64 != 0);
+            if !hardware && software == AV_PIX_FMT_NONE {
+                software = *at;
+            }
+            at = at.add(1);
+        }
+        // FFmpeg retries without VideoToolbox when its session could not start; the
+        // software format is then the one to take.
+        software
+    }
+}
+
+/// A retained `CVPixelBuffer` from a VideoToolbox frame.
+#[cfg(target_os = "macos")]
+#[derive(Clone)]
+pub(crate) struct PixelBuffer(objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>);
+
+// SAFETY: CoreVideo buffers are reference counted with atomic retain and release, and a
+// decoded buffer is only read after the decoder hands it out, so sharing it between
+// threads is sound.
+#[cfg(target_os = "macos")]
+unsafe impl Send for PixelBuffer {}
+// SAFETY: see above; every method only reads immutable properties.
+#[cfg(target_os = "macos")]
+unsafe impl Sync for PixelBuffer {}
+
+#[cfg(target_os = "macos")]
+impl PixelBuffer {
+    /// The pixel buffer behind a decoded VideoToolbox frame, retained, or `None` for any
+    /// other frame.
+    pub(crate) fn from_frame(frame: &ffmpeg::frame::Video) -> Option<Self> {
+        // SAFETY: the frame wrapper owns a valid AVFrame; for AV_PIX_FMT_VIDEOTOOLBOX
+        // frames FFmpeg stores the CVPixelBufferRef in data[3] and keeps it alive while
+        // the frame lives, so retaining it here is sound.
+        unsafe {
+            let raw = frame.as_ptr();
+            if (*raw).format != sys::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX as c_int {
+                return None;
+            }
+            let buffer = (*raw).data[3] as *mut objc2_core_video::CVPixelBuffer;
+            std::ptr::NonNull::new(buffer)
+                .map(|b| Self(objc2_core_foundation::CFRetained::retain(b)))
+        }
+    }
+
+    pub(crate) fn buffer(&self) -> &objc2_core_video::CVPixelBuffer {
+        &self.0
+    }
+
+    /// The CoreVideo pixel format as four characters (`420v`, `x420`).
+    pub(crate) fn fourcc(&self) -> [u8; 4] {
+        objc2_core_video::CVPixelBufferGetPixelFormatType(&self.0).to_be_bytes()
+    }
+
+    pub(crate) fn plane_count(&self) -> usize {
+        objc2_core_video::CVPixelBufferGetPlaneCount(&self.0)
+    }
+
+    pub(crate) fn plane_size(&self, plane: usize) -> (u32, u32) {
+        (
+            objc2_core_video::CVPixelBufferGetWidthOfPlane(&self.0, plane) as u32,
+            objc2_core_video::CVPixelBufferGetHeightOfPlane(&self.0, plane) as u32,
+        )
+    }
+
+    pub(crate) fn io_surface(
+        &self,
+    ) -> Option<objc2_core_foundation::CFRetained<objc2_io_surface::IOSurfaceRef>> {
+        objc2_core_video::CVPixelBufferGetIOSurface(Some(&self.0))
+    }
+}
+
+/// CoreMedia codec types (`kCMVideoCodecType_*`) are big-endian four-character codes.
+#[cfg(target_os = "macos")]
+pub(crate) fn videotoolbox_hardware_decode_supported(codec_type: [u8; 4]) -> bool {
+    #[link(name = "VideoToolbox", kind = "framework")]
+    unsafe extern "C" {
+        fn VTIsHardwareDecodeSupported(codec_type: u32) -> u8;
+    }
+    // SAFETY: a pure query taking a codec type by value (macOS 10.13 and later).
+    unsafe { VTIsHardwareDecodeSupported(u32::from_be_bytes(codec_type)) != 0 }
+}

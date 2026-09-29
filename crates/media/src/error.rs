@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use crate::format::MediaKind;
+use crate::hw::FallbackReason;
 use crate::time::Timestamp;
 
 /// An FFmpeg return code with its message (`av_strerror`).
@@ -52,6 +53,17 @@ pub enum MediaError {
         reason: &'static str,
     },
 
+    /// Hardware decoding was required ([`HwPreference::Require`]) but is not possible for
+    /// this stream, or stopped working.
+    ///
+    /// [`HwPreference::Require`]: crate::HwPreference::Require
+    #[error("{}: stream {index}: hardware decoding unavailable: {reason}", path.display())]
+    Hardware {
+        path: PathBuf,
+        index: usize,
+        reason: FallbackReason,
+    },
+
     /// Opening, feeding or draining a decoder failed. `action` says which.
     #[error("{}: stream {index}: {action}: {source}", path.display())]
     Codec {
@@ -94,7 +106,8 @@ impl MediaError {
             Self::NoStream { .. }
             | Self::NoSuchStream { .. }
             | Self::NotDecodable { .. }
-            | Self::NoDecoder { .. } => None,
+            | Self::NoDecoder { .. }
+            | Self::Hardware { .. } => None,
         }
     }
 }
