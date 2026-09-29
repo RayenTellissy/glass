@@ -19,6 +19,7 @@ bench = false
 [dependencies]
 assets.workspace = true
 ffmpeg-next.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
@@ -31,6 +32,7 @@ objc2-io-surface.workspace = true
 serde_json.workspace = true
 tracing-subscriber.workspace = true
 criterion.workspace = true
+proptest.workspace = true
 
 [[bench]]
 name = "probe"

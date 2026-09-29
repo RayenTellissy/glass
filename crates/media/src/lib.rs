@@ -25,7 +25,9 @@ mod hw;
 pub mod log;
 mod probe;
 mod reader;
+mod scan;
 mod time;
+pub mod timemap;
 
 pub use colour::{ChromaSiting, ColourSpace, Matrix, Primaries, Range, TransferFn};
 pub use convert::RgbaImage;
@@ -43,7 +45,9 @@ pub use probe::{
     AudioInfo, CodecInfo, MediaInfo, StreamDetail, StreamInfo, VfrScan, VfrSource, VideoInfo, probe,
 };
 pub use reader::{FrameReader, StreamSelect};
+pub use scan::PacketEntry;
 pub use time::{Rational, Timestamp};
+pub use timemap::{SourceTimeline, TimelineCache, TimestampMap};
 
 /// Initialises FFmpeg once per process and routes its log into `tracing` (see
 /// [`log`]). Called by [`Demuxer::open`]; calling it earlier is harmless.

@@ -61,6 +61,8 @@ dirs = "7"
 # Benchmarks only (dev-dependency). Plots and rayon are left out: CI reads the JSON
 # estimates, and benchmarks run one at a time anyway.
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+# Property tests only (dev-dependency).
+proptest = { version = "1", default-features = false, features = ["std"] }
 
 # Line tables keep backtraces useful while saving disk; dependencies carry no debug info.
 [profile.dev]

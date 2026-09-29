@@ -8,7 +8,7 @@ use std::fmt;
 
 /// A fraction `num / den`. Used for time bases (seconds per tick), frame rates (frames per
 /// second) and aspect ratios. A zero denominator means "unknown", as in FFmpeg.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Rational {
     pub num: i32,
     pub den: i32,
@@ -85,7 +85,7 @@ fn gcd(mut a: u64, mut b: u64) -> u64 {
 ///
 /// Equality is structural (same value and base); use [`Timestamp::cmp_time`] to compare
 /// timestamps in different bases.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Timestamp {
     pub value: i64,
     pub time_base: Rational,
@@ -136,6 +136,24 @@ impl Timestamp {
             (product - half) / den
         };
         Self::new(rounded.clamp(i64::MIN.into(), i64::MAX.into()) as i64, to)
+    }
+
+    /// The same instant in another base, rounded down to a whole tick (the last tick at
+    /// or before it). Saturates instead of overflowing.
+    pub fn rescale_floor(self, to: Rational) -> Self {
+        if self.time_base == to {
+            return self;
+        }
+        let (n1, d1) = positive_den(self.time_base);
+        let (n2, d2) = positive_den(to);
+        let num = i128::from(self.value) * n1 * d2;
+        let den = d1 * n2;
+        if den == 0 {
+            return Self::new(0, to);
+        }
+        let (num, den) = if den < 0 { (-num, -den) } else { (num, den) };
+        let v = num.div_euclid(den);
+        Self::new(v.clamp(i64::MIN.into(), i64::MAX.into()) as i64, to)
     }
 
     /// Exact ordering of two instants, whatever their bases.
@@ -219,6 +237,16 @@ mod tests {
         let c = Timestamp::new(2, Rational::new(1, 60));
         let d = Timestamp::new(1, Rational::new(1, 30));
         assert_eq!(c.cmp_time(d), Ordering::Equal);
+    }
+
+    #[test]
+    fn rescale_floor_rounds_down() {
+        let t = Timestamp::new(1001, Rational::new(1, 30000));
+        assert_eq!(t.rescale_floor(Rational::new(1, 1000)).value, 33);
+        let t = Timestamp::new(-1, Rational::new(1, 30000));
+        assert_eq!(t.rescale_floor(Rational::new(1, 1000)).value, -1);
+        let t = Timestamp::new(2, Rational::new(1, 30));
+        assert_eq!(t.rescale_floor(Rational::new(1, 60)).value, 4);
     }
 
     #[test]

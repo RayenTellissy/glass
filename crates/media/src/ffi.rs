@@ -241,6 +241,9 @@ pub(crate) struct StreamParams {
     pub mastering_display: bool,
     pub content_light_level: bool,
     pub dovi: bool,
+    /// Frames of reordering delay (B-frames); zero means presentation order equals
+    /// decode order.
+    pub video_delay: c_int,
 }
 
 pub(crate) fn stream_params(stream: &ffmpeg::format::stream::Stream) -> StreamParams {
@@ -298,6 +301,7 @@ pub(crate) fn stream_params(stream: &ffmpeg::format::stream::Stream) -> StreamPa
             content_light_level: side(sys::AVPacketSideDataType::AV_PKT_DATA_CONTENT_LIGHT_LEVEL)
                 .is_some(),
             dovi: side(sys::AVPacketSideDataType::AV_PKT_DATA_DOVI_CONF).is_some(),
+            video_delay: par.video_delay,
         }
     }
 }
@@ -314,6 +318,33 @@ pub(crate) fn index_timestamps(stream: &ffmpeg::format::stream::Stream, limit: u
         (0..count.min(limit))
             .filter_map(|i| sys::avformat_index_get_entry(st, i as c_int).as_ref())
             .map(|e| e.timestamp)
+            .collect()
+    }
+}
+
+/// One entry of a stream's seek index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct IndexEntry {
+    /// In stream time base; MOV and MP4 store decode times here, Matroska presentation
+    /// times.
+    pub timestamp: i64,
+    pub pos: i64,
+    pub key: bool,
+}
+
+/// Every entry of a stream's seek index.
+pub(crate) fn index_entries(stream: &ffmpeg::format::stream::Stream) -> Vec<IndexEntry> {
+    // SAFETY: as for `index_timestamps`.
+    unsafe {
+        let st = stream.as_ptr() as *mut sys::AVStream;
+        let count = sys::avformat_index_get_entries_count(st).max(0);
+        (0..count)
+            .filter_map(|i| sys::avformat_index_get_entry(st, i).as_ref())
+            .map(|e| IndexEntry {
+                timestamp: e.timestamp,
+                pos: e.pos,
+                key: e.flags() & sys::AVINDEX_KEYFRAME != 0,
+            })
             .collect()
     }
 }

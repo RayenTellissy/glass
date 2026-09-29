@@ -128,6 +128,15 @@ make h264_4k30.mp4 \
     -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 30 -movflags +faststart
 add_entry h264_4k30.mp4 video h264 3840 2160 30/1 2 yuv420p false null null null null
 
+# 60 fps with B-frames (b-pyramid), a 2 s open GOP and no scene cuts, so seeking has to
+# decode forward up to 119 frames through reordered pictures.
+make h264_bframes_gop120_720p60.mp4 \
+    -f lavfi -i "testsrc2=size=1280x720:rate=60:duration=3" \
+    -c:v libx264 -preset veryfast -pix_fmt yuv420p \
+    -x264-params "keyint=120:min-keyint=120:scenecut=0:bframes=3:b-pyramid=normal:open-gop=1" \
+    -movflags +faststart
+add_entry h264_bframes_gop120_720p60.mp4 video h264 1280 720 60/1 3 yuv420p false null null null null
+
 make h264_10bit_720p30.mp4 \
     -f lavfi -i "testsrc2=size=1280x720:rate=30:duration=2" \
     -c:v libx264 -preset veryfast -pix_fmt yuv420p10le -g 30 -movflags +faststart
@@ -203,6 +212,15 @@ make h264_fullrange_640x360.mp4 \
     -x264-params "colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=on" \
     -movflags +faststart
 add_entry h264_fullrange_640x360.mp4 video h264 640 360 25/1 1 yuvj420p false null null null null 0 null bt709,bt709,bt709,pc
+
+# VFR without B-frames: presentation order equals decode order, so the MP4 index gives
+# every presentation time without a packet scan.
+make vfr_h264_nob_640x360.mp4 \
+    -f lavfi -i "testsrc2=size=640x360:rate=30:duration=2" \
+    -vf "select='not(between(mod(n\,10)\,3\,5))'" -fps_mode vfr \
+    -c:v libx264 -preset veryfast -bf 0 -pix_fmt yuv420p -video_track_timescale 30000 \
+    -movflags +faststart
+add_entry vfr_h264_nob_640x360.mp4 video h264 640 360 30/1 2 yuv420p true null null null null
 
 make still_1080p.png \
     -f lavfi -i "smptehdbars=size=1920x1080" -frames:v 1 -pix_fmt rgb24
