@@ -90,7 +90,9 @@ Size target: installers around 30 MB, not counting asset packs and models, which
 
 - [x] Create the new repo with this file as `PLAN.md`, `DESIGN_HANDOFF.md`, and an MIT `LICENSE`
 - [x] Prototype `proto-ui`: 200 fake clips on 10 tracks in `egui`, measure frame time at 120 Hz. Done when: median under 4 ms, p99 under 8 ms, or switch default
-- [~] Prototype `proto-gpu`: two 4K textures, one dissolve WGSL shader, one text overlay via `wgpu`. Done when: under 2 ms GPU time on Apple M1 and a GTX 1660 class GPU
+- Prototype `proto-gpu`: two 4K textures, one dissolve WGSL shader, one text overlay via `wgpu`. Done when: under 2 ms GPU time on Apple M1 and a GTX 1660 class GPU (split; resolved by its sub-tasks)
+  - [x] `proto-gpu` on Apple silicon
+  - [ ] `proto-gpu` on a GTX 1660 class GPU
 - [ ] Prototype `proto-decode`: FFmpeg hardware decode of 4K H.264 to a `wgpu` texture on macOS. Done when: 60 fps sustained with under 5% CPU per stream
 - [ ] Same prototype on Windows via D3D11VA. Done when: same budget
 - [ ] Write `docs/ARCHITECTURE.md`: threading model, data flow diagram, crate layout, cache design, the defaults table above
@@ -475,3 +477,4 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Plan created.
 - 2026-09-29 — Phase 0 — create repository — ee8e233
 - 2026-09-29 — Phase 0 — proto-ui — ae8be32 — egui on wgpu/Metal, M2, 200 clips: full-frame CPU median 1.37 ms, p99 3.00 ms (no culling: 1.09 / 3.13); default kept
+- 2026-09-29 — Phase 0 — proto-gpu on Apple silicon — f8adadb — M2 (stands in for M1), Metal, 4K Rgba8UnormSrgb: total GPU median 0.72 ms, p99 0.77 ms
