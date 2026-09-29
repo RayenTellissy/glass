@@ -304,6 +304,7 @@ pub struct KeyUse {
 
 /// egui methods whose arguments are shown to the user.
 pub const TEXT_METHODS: &[&str] = &[
+    "alt_text",
     "button",
     "checkbox",
     "code",
@@ -313,6 +314,7 @@ pub const TEXT_METHODS: &[&str] = &[
     "hint_text",
     "hyperlink_to",
     "label",
+    "left_text",
     "link",
     "menu_button",
     "monospace",
@@ -322,9 +324,12 @@ pub const TEXT_METHODS: &[&str] = &[
     "prefix",
     "radio",
     "radio_value",
+    "right_text",
     "selectable_label",
     "selectable_value",
     "selected_text",
+    "shortcut_text",
+    "show_tooltip_text",
     "small",
     "small_button",
     "strong",
@@ -332,23 +337,47 @@ pub const TEXT_METHODS: &[&str] = &[
     "text",
     "toggle_value",
     "weak",
+    "with_title",
 ];
 
 /// egui constructors (`Type::function`) whose arguments are shown to the user.
 pub const TEXT_CONSTRUCTORS: &[(&str, &str)] = &[
-    ("Button", "new"),
+    ("AtomKind", "text"),
+    ("Atoms", "new"),
     ("Button", "image_and_text"),
+    ("Button", "new"),
+    ("Button", "selectable"),
     ("Checkbox", "new"),
     ("CollapsingHeader", "new"),
     ("ComboBox", "from_label"),
+    ("ComboBox", "new"),
     ("Hyperlink", "from_label_and_url"),
     ("Label", "new"),
     ("Link", "new"),
+    ("MenuButton", "new"),
     ("RadioButton", "new"),
     ("RichText", "new"),
     ("SelectableLabel", "new"),
+    ("SubMenuButton", "new"),
     ("Window", "new"),
 ];
+
+/// Text constructors whose first argument is an id, not text.
+pub const ID_FIRST_CONSTRUCTORS: &[&str] = &["ComboBox::new"];
+
+/// Index of the comma ending the first argument of the call opened at `open`, or `close`.
+fn first_argument_end(tokens: &[Token], open: usize, close: usize) -> usize {
+    let mut j = open + 1;
+    while j < close {
+        match tokens[j].tok {
+            Tok::Punct('(' | '[' | '{') => j = matching(tokens, j),
+            Tok::Punct(',') => return j,
+            _ => {}
+        }
+        j += 1;
+    }
+    close
+}
 
 /// Whether a string literal reads as words once `{...}` format placeholders are removed.
 pub fn is_wordy(literal: &str) -> bool {
@@ -439,15 +468,19 @@ pub fn check_text(src: &str) -> (Vec<KeyUse>, Vec<Violation>) {
         };
         let close = matching(&tokens, open);
         let mut j = open + 1;
+        if ID_FIRST_CONSTRUCTORS.contains(&name.as_str()) {
+            j = first_argument_end(&tokens, open, close) + 1;
+        }
         while j < close {
             if is_t_macro(&tokens, j) {
                 j = matching(&tokens, j + 2) + 1;
                 continue;
             }
             match &tokens[j].tok {
-                // Closure bodies and blocks are not the text argument; calls inside them
-                // are checked on their own.
-                Tok::Punct('{') => {
+                // Closure bodies are not the text argument; calls inside them are checked
+                // on their own. Other blocks (`if`, `match`, `{ .. }`) can yield the text,
+                // so they are scanned.
+                Tok::Punct('{') if opens_closure_body(&tokens, j) => {
                     j = matching(&tokens, j) + 1;
                     continue;
                 }
@@ -466,6 +499,33 @@ pub fn check_text(src: &str) -> (Vec<KeyUse>, Vec<Violation>) {
         }
     }
     (uses, violations.into_values().collect())
+}
+
+/// Whether the `{` at `open` starts a closure body: it follows a closure head (`|..|`,
+/// `||`, `move |..|`), optionally with a return type (`|..| -> T {`).
+pub fn opens_closure_body(tokens: &[Token], open: usize) -> bool {
+    let Some(mut k) = open.checked_sub(1) else {
+        return false;
+    };
+    if tokens[k].tok == Tok::Punct('|') {
+        return true;
+    }
+    // Walk back over a return type to its `->`.
+    loop {
+        match &tokens[k].tok {
+            Tok::Punct('>') if k > 0 && tokens[k - 1].tok == Tok::Punct('-') => {
+                return k >= 2 && tokens[k - 2].tok == Tok::Punct('|');
+            }
+            Tok::Ident(_)
+            | Tok::Lifetime
+            | Tok::Punct(':' | '<' | '>' | ',' | '&' | '(' | ')' | '[' | ']' | ';') => {}
+            _ => return false,
+        }
+        let Some(prev) = k.checked_sub(1) else {
+            return false;
+        };
+        k = prev;
+    }
 }
 
 /// At a text API call: its name and the index of its `(`.
@@ -556,6 +616,9 @@ pub const COLOUR_TYPES: &[&str] = &["Color32", "Rgba", "Hsva", "HsvaGamma", "Rgb
 /// "use the default text colour" marker.
 pub const COLOUR_CONSTANTS_ALLOWED: &[&str] = &["TRANSPARENT", "PLACEHOLDER"];
 
+/// Types whose `dark()`, `light()` and `default()` build egui's own palette.
+pub const VISUALS_TYPES: &[&str] = &["Visuals", "Widgets"];
+
 /// `#RGB`, `#RGBA`, `#RRGGBB` or `#RRGGBBAA`.
 pub fn is_hex_colour(literal: &str) -> bool {
     literal.strip_prefix('#').is_some_and(|digits| {
@@ -564,7 +627,9 @@ pub fn is_hex_colour(literal: &str) -> bool {
 }
 
 /// Checks one file for literal colours: `Color32::from_rgb(..)` and the other `from_*`
-/// constructors, `Color32::RED`-style constants, `hex_color!`, and hex colour strings.
+/// constructors (`from_gray`, `from_black_alpha`, `from_additive_luminance`, ...),
+/// `Color32::RED`-style constants, `Visuals::dark()`-style egui palettes, `hex_color!`,
+/// and hex colour strings.
 pub fn check_colours(src: &str) -> Vec<Violation> {
     let lexed = lex(src);
     let tokens = without_test_items(&lexed.tokens);
@@ -597,6 +662,20 @@ pub fn check_colours(src: &str) -> Vec<Violation> {
                     if literal {
                         flag(tokens[i].line, format!("`{ty}::{name}`"));
                     }
+                }
+            }
+            Tok::Ident(ty)
+                if VISUALS_TYPES.contains(&ty.as_str())
+                    && tokens.get(i + 1).is_some_and(|t| t.tok == Tok::Punct(':'))
+                    && tokens.get(i + 2).is_some_and(|t| t.tok == Tok::Punct(':')) =>
+            {
+                if let Some(Tok::Ident(name)) = tokens.get(i + 3).map(|t| &t.tok)
+                    && matches!(name.as_str(), "dark" | "light" | "default")
+                {
+                    flag(
+                        tokens[i].line,
+                        format!("`{ty}::{name}` (egui's own palette)"),
+                    );
                 }
             }
             Tok::Ident(name)

@@ -6,8 +6,8 @@
 //! - no literal user-facing text goes to an egui text API (`label`, `button`,
 //!   `RichText::new`, `on_hover_text`, ...) unless wrapped in `t!()` or marked with
 //!   `// allow-literal-text: <reason>` for debug-only strings;
-//! - no literal colour (`Color32::from_rgb`, `Color32::RED`, `"#F2F2F2"`, ...) appears
-//!   outside the theme module (`crates/ui/src/theme.rs`) unless marked with
+//! - no literal colour (`Color32::from_rgb`, `Color32::RED`, `Visuals::dark()`,
+//!   `"#F2F2F2"`, ...) appears outside the theme module (`crates/ui/src/theme.rs`) unless marked with
 //!   `// allow-literal-colour: <reason>`.
 
 #[path = "support/source_scan.rs"]
@@ -275,4 +275,77 @@ mod tests {{
     // Line 5 holds both the constructor and the hex string; line 8 the macro and its
     // string.
     assert_eq!(lines, vec![3, 4, 5, 5, 6, 7, 8, 8, 11]);
+}
+
+#[test]
+fn blocks_that_yield_text_are_scanned_but_closure_bodies_are_not() {
+    let src = r#"
+fn transport(ui: &mut egui::Ui, playing: bool, s: State) {
+    ui.button(if playing { "Pause" } else { "Play" });
+    ui.label(match s { State::Idle => "Idle", _ => "Busy" });
+    ui.label({ "Block" });
+    ui.button(if playing { t!("transport.pause") } else { t!("transport.play") });
+    ui.menu_button(t!("menu.file"), |ui| { tracing::info!("opened the menu"); });
+    ui.collapsing(t!("a.b"), move |ui| { let _ = "not the label"; });
+    ui.collapsing(t!("a.b"), |ui| -> Vec<u8> { let _ = "typed closure"; vec![] });
+    ui.collapsing(t!("a.b"), || { let _ = "no arguments"; });
+}
+"#;
+    assert_eq!(text_violations(src), vec![3, 3, 4, 4, 5]);
+}
+
+#[test]
+fn every_label_taking_egui_api_is_checked() {
+    let src = r#"
+fn widgets(ui: &mut egui::Ui, v: &mut Mode, on: &mut bool, response: egui::Response) {
+    egui::ComboBox::new("zoom-level", "Zoom").show_ui(ui, |_| {});
+    egui::ComboBox::new("zoom-level", t!("timeline.zoom")).show_ui(ui, |_| {});
+    egui::CollapsingHeader::new("Details").show(ui, |_| {});
+    egui::Window::new("Inspector");
+    ui.add(egui::SelectableLabel::new(true, "Clip"));
+    ui.add(egui::Checkbox::new(on, "Snap"));
+    ui.add(egui::RadioButton::new(true, "Ripple"));
+    ui.selectable_label(true, "Track");
+    ui.checkbox(on, "Loop");
+    ui.radio_value(v, Mode::A, "Mode A");
+    ui.hyperlink_to("Docs", DOCS_URL);
+    ui.menu_button("File", |_| {});
+    ui.collapsing("Effects", |_| {});
+    ui.small_button("More");
+    ui.toggle_value(on, "Solo");
+    response.clone().on_hover_text("Tip");
+    response.show_tooltip_text("Tip");
+    ui.add(egui::Button::selectable(true, "Mute"));
+    ui.add(egui::Button::new(t!("a.b")).shortcut_text("Ctrl+S"));
+    egui::containers::menu::MenuButton::new("Edit");
+    egui::ViewportBuilder::default().with_title("Glass");
+    ui.add(egui::Image::new(src).alt_text("Poster"));
+    ui.checkbox(on, t!("a.b"));
+    ui.radio_value(v, Mode::A, t!("a.b"));
+    egui::ComboBox::new(("zoom", 1), t!("timeline.zoom"));
+}
+"#;
+    let mut expected = vec![3];
+    expected.extend(5..=24);
+    assert_eq!(text_violations(src), expected);
+}
+
+#[test]
+fn egui_palette_constructors_are_caught() {
+    let src = r#"
+fn paint(ui: &mut egui::Ui, theme: &Theme) {
+    let a = egui::Color32::from_gray(40);
+    let b = Color32::from_black_alpha(80);
+    let c = Color32::from_white_alpha(20);
+    let d = Color32::from_additive_luminance(10);
+    ui.ctx().set_visuals(egui::Visuals::dark());
+    ui.ctx().set_visuals(Visuals::light());
+    let w = egui::style::Widgets::dark();
+    let v = Visuals::default();
+    ui.ctx().set_visuals(theme.visuals());
+    let faded = theme.color(Role::Text).gamma_multiply(0.5);
+}
+"#;
+    let lines: Vec<usize> = check_colours(src).into_iter().map(|v| v.line).collect();
+    assert_eq!(lines, (3..=10).collect::<Vec<_>>());
 }
