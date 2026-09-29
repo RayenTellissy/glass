@@ -70,6 +70,10 @@ impl PixelFormat {
         Self(p)
     }
 
+    pub(crate) fn to_ffmpeg(self) -> ffmpeg::format::Pixel {
+        self.0
+    }
+
     /// The format with this FFmpeg name, if FFmpeg knows it.
     pub fn from_name(name: &str) -> Option<Self> {
         name.parse::<ffmpeg::format::Pixel>()
@@ -206,8 +210,9 @@ impl fmt::Display for SampleFormat {
 }
 
 /// Signal range of the coded values.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ColourRange {
+    #[default]
     Unspecified,
     /// Limited ("TV", "MPEG") range: 16 to 235 for 8-bit luma.
     Limited,
@@ -227,7 +232,7 @@ pub enum Hdr {
 
 /// Colour metadata of a stream or frame, as FFmpeg names each value (`bt709`, `bt2020nc`,
 /// `smpte2084`, `left`). `None` means the file leaves it unspecified.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct ColourInfo {
     pub primaries: Option<&'static str>,
     pub transfer: Option<&'static str>,

@@ -399,6 +399,21 @@ impl ColourSpace {
         },
     };
 
+    /// These values as explicit tags (FFmpeg's names), for writing a file that must be
+    /// read the same way whatever its size (an untagged picture's defaults depend on it).
+    pub fn tags(&self) -> ColourInfo {
+        ColourInfo {
+            primaries: Some(self.primaries.name()),
+            transfer: Some(self.transfer.name()),
+            matrix: Some(self.matrix.name()),
+            range: match self.range {
+                Range::Limited => ColourRange::Limited,
+                Range::Full => ColourRange::Full,
+            },
+            chroma_location: Some(self.siting.name()),
+        }
+    }
+
     /// Fills in the untagged fields of `tags` for a picture laid out as `layout` (see the
     /// module docs for the rule).
     pub fn resolve(tags: &ColourInfo, layout: LayoutHint) -> Self {

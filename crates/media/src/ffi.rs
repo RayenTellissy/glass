@@ -553,6 +553,108 @@ pub(crate) fn scale_to_rgba(
     Ok(out)
 }
 
+// ---- Encoding and muxing -----------------------------------------------------------------
+
+/// FFmpeg's colour enums for tag names (`bt709`, `smpte2084`, `bt2020nc`); unknown or
+/// missing names stay unspecified.
+pub(crate) fn colour_enums(
+    primaries: Option<&str>,
+    transfer: Option<&str>,
+    matrix: Option<&str>,
+) -> (
+    ffmpeg::color::Primaries,
+    ffmpeg::color::TransferCharacteristic,
+    ffmpeg::color::Space,
+) {
+    let c = |name: Option<&str>| name.and_then(|n| std::ffi::CString::new(n).ok());
+    // SAFETY: each call reads a NUL-terminated string borrowed for the call and returns
+    // an enum value or a negative error; negative values are mapped to unspecified before
+    // they become Rust enums, and non-negative ones are valid FFmpeg enum values.
+    unsafe {
+        let p = c(primaries).map_or(-1, |n| sys::av_color_primaries_from_name(n.as_ptr()));
+        let t = c(transfer).map_or(-1, |n| sys::av_color_transfer_from_name(n.as_ptr()));
+        let m = c(matrix).map_or(-1, |n| sys::av_color_space_from_name(n.as_ptr()));
+        (
+            if p < 0 {
+                ffmpeg::color::Primaries::Unspecified
+            } else {
+                std::mem::transmute::<c_int, sys::AVColorPrimaries>(p).into()
+            },
+            if t < 0 {
+                ffmpeg::color::TransferCharacteristic::Unspecified
+            } else {
+                std::mem::transmute::<c_int, sys::AVColorTransferCharacteristic>(t).into()
+            },
+            if m < 0 {
+                ffmpeg::color::Space::Unspecified
+            } else {
+                std::mem::transmute::<c_int, sys::AVColorSpace>(m).into()
+            },
+        )
+    }
+}
+
+/// Lets an encoder use frame and slice threads, `count` of them (0: one per core).
+pub(crate) fn set_encoder_threads(context: &mut ffmpeg::codec::Context, count: usize) {
+    // SAFETY: the Context owns a valid, not yet opened AVCodecContext borrowed mutably;
+    // both fields are plain integers FFmpeg reads when the codec opens.
+    unsafe {
+        let ctx = context.as_mut_ptr();
+        (*ctx).thread_type = sys::FF_THREAD_FRAME as c_int | sys::FF_THREAD_SLICE as c_int;
+        (*ctx).thread_count = c_int::try_from(count).unwrap_or(0);
+    }
+}
+
+/// Sets the chroma sample location of an encoder before it opens (`ffmpeg-next` has no
+/// setter).
+pub(crate) fn set_chroma_location(
+    context: &mut ffmpeg::codec::Context,
+    location: ffmpeg::chroma::Location,
+) {
+    // SAFETY: the Context owns a valid, not yet opened AVCodecContext borrowed mutably.
+    unsafe {
+        (*context.as_mut_ptr()).chroma_sample_location = location.into();
+    }
+}
+
+/// Stores a display matrix (rotation and mirroring) as coded side data of an output
+/// stream, which the MOV/MP4 muxer writes into the track header.
+pub(crate) fn set_display_matrix(
+    output: &mut ffmpeg::format::context::Output,
+    stream: usize,
+    matrix: &[i32; 9],
+) -> Result<(), ffmpeg::Error> {
+    let mut st = output
+        .stream_mut(stream)
+        .ok_or(ffmpeg::Error::StreamNotFound)?;
+    // SAFETY: the StreamMut borrows the Output mutably, so its codecpar is valid and not
+    // shared; av_packet_side_data_new allocates `size` bytes (or returns null) owned by
+    // codecpar, and exactly that many bytes are written.
+    unsafe {
+        let par = &mut *(*st.as_mut_ptr()).codecpar;
+        let size = size_of::<[i32; 9]>();
+        let sd = sys::av_packet_side_data_new(
+            &mut par.coded_side_data,
+            &mut par.nb_coded_side_data,
+            sys::AVPacketSideDataType::AV_PKT_DATA_DISPLAYMATRIX,
+            size,
+            0,
+        );
+        if sd.is_null() || (*sd).data.is_null() {
+            return Err(ffmpeg::Error::Other {
+                errno: ffmpeg::error::ENOMEM,
+            });
+        }
+        std::ptr::copy_nonoverlapping(matrix.as_ptr().cast::<u8>(), (*sd).data, size);
+    }
+    Ok(())
+}
+
+/// The display matrix of an input stream, if it has one.
+pub(crate) fn display_matrix(stream: &ffmpeg::format::stream::Stream) -> Option<[i32; 9]> {
+    stream_params(stream).display_matrix
+}
+
 // ---- Hardware decode ----------------------------------------------------------------------
 
 /// What a hardware decoder's `get_format` callback saw, shared with the callback through

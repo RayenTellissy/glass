@@ -183,6 +183,13 @@ impl Demuxer {
         })
     }
 
+    /// The display matrix (rotation and mirroring) of a stream, as stored.
+    pub fn display_matrix(&self, stream: usize) -> Option<[i32; 9]> {
+        self.input
+            .stream(stream)
+            .and_then(|s| ffi::display_matrix(&s))
+    }
+
     /// Seeks back to the first packet of the file.
     pub fn rewind(&mut self) -> Result<()> {
         let start = self
@@ -251,6 +258,25 @@ impl std::fmt::Debug for Packet {
 }
 
 impl Packet {
+    pub(crate) fn from_encoder(inner: ffmpeg::Packet, time_base: Rational) -> Self {
+        Self { inner, time_base }
+    }
+
+    /// A reference to the same payload with its timestamps moved by `offset` (in the
+    /// packet's time base) and its stream index set to `stream`: for writing packets of
+    /// several files into one (stream copy, concatenation).
+    pub fn retimed(&self, stream: usize, offset: i64) -> Self {
+        let mut inner = self.inner.clone();
+        inner.set_stream(stream);
+        inner.set_pts(self.inner.pts().map(|t| t + offset));
+        inner.set_dts(self.inner.dts().map(|t| t + offset));
+        inner.set_position(-1);
+        Self {
+            inner,
+            time_base: self.time_base,
+        }
+    }
+
     pub fn stream_index(&self) -> usize {
         self.inner.stream()
     }
@@ -294,5 +320,9 @@ impl Packet {
 
     pub(crate) fn raw(&self) -> &ffmpeg::Packet {
         &self.inner
+    }
+
+    pub(crate) fn into_raw(self) -> ffmpeg::Packet {
+        self.inner
     }
 }

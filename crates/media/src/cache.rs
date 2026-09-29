@@ -106,6 +106,25 @@ impl std::fmt::Display for ContentHash {
     }
 }
 
+/// Top-level folders of a cache folder that hold per-source results.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CacheArea {
+    /// `<cache>/analysis/<hash>/`: thumbnails, peaks, GOP index, timelines, detections.
+    #[default]
+    Analysis,
+    /// `<cache>/proxies/<hash>/`: proxy media, reclaimed before analysis results.
+    Proxies,
+}
+
+impl CacheArea {
+    pub fn folder(self) -> &'static str {
+        match self {
+            Self::Analysis => "analysis",
+            Self::Proxies => "proxies",
+        }
+    }
+}
+
 /// A project cache folder (`.glass-cache/` beside the project file by default).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CacheDir {
@@ -132,7 +151,12 @@ impl CacheDir {
 
     /// The analysis folder of one source file.
     pub fn analysis_dir(&self, hash: &ContentHash) -> PathBuf {
-        self.root.join("analysis").join(hash.to_hex())
+        self.area_dir(CacheArea::Analysis, hash)
+    }
+
+    /// The folder of one source file in an area.
+    pub fn area_dir(&self, area: CacheArea, hash: &ContentHash) -> PathBuf {
+        self.root.join(area.folder()).join(hash.to_hex())
     }
 
     /// Path of one analysis file of a source.
@@ -188,8 +212,20 @@ impl CacheDir {
         params_hash: &str,
         version: u32,
     ) -> CacheEntry {
+        self.entry_hashed_in(CacheArea::Analysis, hash, kind, params_hash, version)
+    }
+
+    /// [`Self::entry_hashed`] in another area (proxies).
+    pub fn entry_hashed_in(
+        &self,
+        area: CacheArea,
+        hash: &ContentHash,
+        kind: &str,
+        params_hash: &str,
+        version: u32,
+    ) -> CacheEntry {
         CacheEntry {
-            dir: self.analysis_dir(hash),
+            dir: self.area_dir(area, hash),
             kind: kind.to_string(),
             stem: format!("{kind}-{params_hash}-v{version}"),
         }

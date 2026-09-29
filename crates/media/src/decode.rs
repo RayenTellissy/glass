@@ -669,6 +669,11 @@ impl VideoFrame {
 
     /// Another frame sharing this CPU frame's buffers (no pixel copy), with its own
     /// presentation time. `None` for hardware frames or when FFmpeg cannot allocate.
+    pub(crate) fn set_timing(&mut self, pts: Option<i64>, duration: i64) {
+        self.inner.set_pts(pts);
+        ffi::set_frame_duration(&mut self.inner, duration);
+    }
+
     pub(crate) fn share_at(&self, pts: i64, duration: Option<i64>) -> Option<Self> {
         if self.hw.is_some() {
             return None;
