@@ -96,7 +96,7 @@ Size target: installers around 30 MB, not counting asset packs and models, which
 - [x] Prototype `proto-decode`: FFmpeg hardware decode of 4K H.264 to a `wgpu` texture on macOS. Done when: 60 fps sustained with under 5% CPU per stream
 - [ ] Same prototype on Windows via D3D11VA. Done when: same budget (needs-human: no Windows PC available locally; port proto-decode to D3D11VA on one)
 - [x] Write `docs/ARCHITECTURE.md`: threading model, data flow diagram, crate layout, cache design, the defaults table above
-- [~] Write `docs/DECISIONS.md` (Decision Log) with the entries created so far
+- [x] Write `docs/DECISIONS.md` (Decision Log) with the entries created so far
 - [ ] Delete the prototypes or move them to `experiments/`
 
 ## Phase 1 — Project skeleton and CI
@@ -484,3 +484,4 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 0 — proto-decode on macOS — e94e902 — VideoToolbox zero-copy to wgpu, 4K60 H.264 paced 60 fps, 0 late: 2.18% of machine (9.20% process + 8.26% decoder service, % of one core)
 - 2026-09-29 — Phase 0 — proto-decode on Windows via D3D11VA — needs-human: no Windows PC available locally
 - 2026-09-29 — Phase 0 — architecture doc — 17b6897
+- 2026-09-29 — Phase 0 — decision log doc — 374a82f
