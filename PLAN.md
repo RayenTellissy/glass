@@ -113,8 +113,8 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
 - [x] `cargo-deny` for licences and advisories, allowing only licences compatible with GPLv3
 - [~] FFmpeg build script: pinned FFmpeg 9.0.x with x264 and x265, built as shared libraries for every target and cached in CI. Every release bundles the licence texts and attaches the exact source archives used
   - [x] `scripts/ffmpeg/build.sh` and pinned `scripts/ffmpeg/versions.env`: download and checksum the source archives, build pkgconf (and nasm on x86) as host tools, then x264, x265 and FFmpeg as shared libraries into `.glass-cache/ffmpeg/<target>/` with `lib/`, `include/`, `LICENSES/` and `SOURCES.txt`
-  - [~] Build locally for `aarch64-apple-darwin`, check the workspace and `experiments/proto-decode` against it, and make `scripts/dev-env.sh` prefer it over Homebrew
-  - [ ] `scripts/ffmpeg/package-sources.sh` gathering the exact source archives and licence texts for a release, plus GPL compliance notes in `CONTRIBUTING.md`
+  - [x] Build locally for `aarch64-apple-darwin`, check the workspace and `experiments/proto-decode` against it, and make `scripts/dev-env.sh` prefer it over Homebrew
+  - [~] `scripts/ffmpeg/package-sources.sh` gathering the exact source archives and licence texts for a release, plus GPL compliance notes in `CONTRIBUTING.md`
   - [ ] CI job building FFmpeg per target, cached on the `versions.env` hash, and release attachment of the sources
 - [ ] `cargo-dist` config producing DMG, MSI or MSIX, and AppImage on tags
 - [ ] App icons exported from the Brand page: macOS icon with the graphite, light, and clear appearances, Windows `.ico` and Linux PNGs using the bare mark, with the small-size variants the page defines (glow drops out at 64 px, a slice at 32 px)
@@ -500,3 +500,4 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 1 — GitHub Actions matrix — needs-human: no GitHub remote yet; `.github/workflows/ci.yml` added in 8392c3c, push the repo and confirm the workflow runs green
 - 2026-09-29 — Phase 1 — cargo-deny — a036b3f — `cargo deny check` passes locally (advisories, bans, licences, sources); CI job waits on the GitHub remote
 - 2026-09-29 — Phase 1 — FFmpeg build script — 749514b
+- 2026-09-29 — Phase 1 — local FFmpeg build — 1a04c31 — aarch64-apple-darwin on M2 (stands in for M1): 177 s with 4 jobs, prefix 32 MB (sources 17 MB); workspace checks and proto-decode build link against it, VideoToolbox decode and x265 Main10 work
