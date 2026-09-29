@@ -122,7 +122,9 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
   - [ ] Tagged release in CI producing the DMGs, MSI, MSIX and AppImage (needs-human: no GitHub remote yet; Windows MSI/MSIX and Linux AppImage can only be built in CI. Set `repository` in `Cargo.toml`, run `dist generate`, push a `v*` tag and check every installer; MSIX and notarised DMG also need signing certificates)
 - [x] App icons exported from the Brand page: macOS icon with the graphite, light, and clear appearances, Windows `.ico` and Linux PNGs using the bare mark, with the small-size variants the page defines (glow drops out at 64 px, a slice at 32 px)
 - [x] Size check in CI: fails when an installer grows past the stored budget (starting at 30 MB). Raising the budget is allowed with a Decision Log entry
-- [~] Benchmark harness with `criterion` and a `bench` CI job that posts results as a PR comment
+- [ ] Benchmark harness with `criterion` and a `bench` CI job that posts results as a PR comment (needs-human: blocked only on the sub-task below)
+  - [x] `criterion` harness: workspace dev-dependency, `benches/` targets, `cargo bench --workspace --bench "*"` with short settings and baselines documented in `CONTRIBUTING.md`, and `scripts/bench-report.py` formatting a baseline comparison as Markdown
+  - [ ] `bench` job in `ci.yml`: saves a `main` baseline on pushes to main, compares pull requests against it and posts the report as a PR comment (needs-human: no GitHub remote yet; push, merge once to main to seed the baseline, then open a PR and confirm the comment appears)
 - [ ] Logging with `tracing`, per-crate filters, in-memory ring buffer exposed to the UI later
 - [ ] Frame-time monitor: records UI frame durations, exposes p50 and p99, fails tests that exceed budget
 - [ ] i18n: `assets/i18n/en.json`, a `t!()` macro, and a CI check that every key used exists and no literal strings appear in UI code
@@ -513,3 +515,5 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 1 — cargo-dist tagged release in CI — needs-human: no GitHub remote yet; Windows MSI/MSIX and Linux AppImage can only be built in CI (scripts in 1b919d9, workflows in 53a888f)
 - 2026-09-29 — Phase 1 — app icons from the Brand page — 93de610 — icns, Icon Composer bundle and Assets.car (light, dark graphite, clear, tinted), Windows ico, Linux PNGs
 - 2026-09-29 — Phase 1 — size check — a054f90 — `scripts/size-check.sh` against `size-budget.toml` (30 MiB per DMG, MSI, MSIX, AppImage): local arm64 DMG with icons 11.99 MiB passes, a 30 MiB + 1 byte fake fails with exit 1; the CI run is covered by the needs-human tagged-release task, and the MSI is not checked yet because dist builds it with no step after the build
+- 2026-09-29 — Phase 1 — benchmark harness — 6577e1f — criterion 0.8.2 (no plots, no rayon); `engine` bench `enabled_features` 0.73 ns on M2 (stands in for M1) with `--quick`, baseline save and compare checked locally, report script output checked; real engine and UI benchmarks join as the code lands
+- 2026-09-29 — Phase 1 — bench CI job with PR comment — needs-human: no GitHub remote yet; job added to `.github/workflows/ci.yml` in 6577e1f
