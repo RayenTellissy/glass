@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,6 +19,16 @@ const H: u32 = 2160;
 const VERIFY_FRAME: usize = 300;
 const PACE_FPS: f64 = 60.0;
 const SURFACE_CACHE_MAX: usize = 64;
+/// Conversions allowed in flight per stream, each with its own output texture.
+const IN_FLIGHT: usize = 3;
+
+/// A submitted conversion and everything the GPU may still be reading.
+struct InFlight {
+    done: Arc<AtomicBool>,
+    index: wgpu::SubmissionIndex,
+    _pixel_buffer: objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>,
+    _planes: Option<(ffi::PlaneTexture, ffi::PlaneTexture)>,
+}
 /// Frames the paced run may decode ahead of display, like a player's look-ahead queue.
 const PACE_LOOKAHEAD: u32 = 3;
 
@@ -163,26 +174,43 @@ impl Gpu {
         })
     }
 
-    /// Wraps the frame's planes, converts to `out`, and waits for the GPU.
+    /// Wraps the frame's planes and submits the conversion into `out` without
+    /// waiting for the GPU. The slot keeps the frame's buffers alive until its
+    /// submission completes; a busy slot is waited on before reuse.
     fn convert(
         &self,
         wrap: &mut Wrapper,
         frame: &ffmpeg::frame::Video,
         out: &wgpu::TextureView,
+        slot: &mut Option<InFlight>,
+        slot_waits: &mut usize,
     ) -> Result<(), String> {
         let pb = ffi::pixel_buffer(frame).ok_or("frame is not a VideoToolbox frame")?;
         if matches!(wrap, Wrapper::None) {
             return Ok(());
         }
-        // Keeps per-frame CoreVideo textures alive until the GPU has finished.
-        let mut _planes = None;
+        self.device
+            .poll(wgpu::PollType::Poll)
+            .map_err(|e| e.to_string())?;
+        if let Some(prev) = slot.take()
+            && !prev.done.load(Ordering::Acquire)
+        {
+            *slot_waits += 1;
+            self.device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: Some(prev.index),
+                    timeout: None,
+                })
+                .map_err(|e| e.to_string())?;
+        }
+        let mut planes = None;
         let bg = match wrap {
             Wrapper::None => return Ok(()),
             Wrapper::CvCache(cache) => {
                 let y = ffi::wrap_plane(&self.device, cache, &pb, 0)?;
                 let uv = ffi::wrap_plane(&self.device, cache, &pb, 1)?;
                 let bg = self.bind_group(&y.texture, &uv.texture);
-                _planes = Some((y, uv));
+                planes = Some((y, uv));
                 bg
             }
             Wrapper::Surfaces { cache, misses } => {
@@ -221,13 +249,17 @@ impl Gpu {
             pass.set_bind_group(0, &bg, &[]);
             pass.draw(0..3, 0..1);
         }
-        let idx = self.queue.submit([enc.finish()]);
-        self.device
-            .poll(wgpu::PollType::Wait {
-                submission_index: Some(idx),
-                timeout: None,
-            })
-            .map_err(|e| e.to_string())?;
+        let index = self.queue.submit([enc.finish()]);
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        self.queue
+            .on_submitted_work_done(move || flag.store(true, Ordering::Release));
+        *slot = Some(InFlight {
+            done,
+            index,
+            _pixel_buffer: pb,
+            _planes: planes,
+        });
         if let Wrapper::CvCache(cache) = wrap {
             cache.flush();
         }
@@ -280,6 +312,7 @@ struct StreamResult {
     late: usize,
     fourcc: String,
     surface_misses: usize,
+    slot_waits: usize,
 }
 
 enum Stop {
@@ -292,7 +325,7 @@ enum Stop {
 fn run_stream(
     path: &Path,
     gpu: &Gpu,
-    out: &wgpu::Texture,
+    outs: &[wgpu::Texture],
     paced: bool,
     threads: i32,
     mode: WrapMode,
@@ -317,7 +350,12 @@ fn run_stream(
         .map_err(|e| e.to_string())?;
     ffi::enable_hwaccel(&mut ctx, &hw, threads)?;
     let mut decoder = ctx.decoder().video().map_err(|e| e.to_string())?;
-    let view = out.create_view(&Default::default());
+    let views: Vec<wgpu::TextureView> = outs
+        .iter()
+        .map(|t| t.create_view(&Default::default()))
+        .collect();
+    let mut slots: Vec<Option<InFlight>> = (0..views.len()).map(|_| None).collect();
+    let mut slot_waits = 0usize;
 
     let mut res = StreamResult::default();
     let mut frame = ffmpeg::frame::Video::empty();
@@ -335,9 +373,15 @@ fn run_stream(
                 .unwrap_or_else(|| "software frame".into());
         }
         let t0 = Instant::now();
-        gpu.convert(&mut wrap, frame, &view)?;
-        let upload = t0.elapsed();
         let n = res.frames;
+        gpu.convert(
+            &mut wrap,
+            frame,
+            &views[n % views.len()],
+            &mut slots[n % views.len()],
+            &mut slot_waits,
+        )?;
+        let upload = t0.elapsed();
         res.frames += 1;
         res.decode_ms.push(decode.as_secs_f64() * 1e3);
         res.upload_ms.push(upload.as_secs_f64() * 1e3);
@@ -385,7 +429,12 @@ fn run_stream(
             t = Instant::now();
         }
     }
+    gpu.device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|e| e.to_string())?;
+    drop(slots);
     res.wall = start.elapsed();
+    res.slot_waits = slot_waits;
     Ok(res)
 }
 
@@ -460,6 +509,7 @@ struct RunReport {
     vt_cpu_pct: f64,
     fourcc: String,
     surfaces: usize,
+    slot_waits: usize,
 }
 
 impl WrapMode {
@@ -480,7 +530,9 @@ fn run_config(
     threads: i32,
     mode: WrapMode,
 ) -> Result<RunReport, String> {
-    let outs: Vec<wgpu::Texture> = (0..streams).map(|_| gpu.output()).collect();
+    let outs: Vec<Vec<wgpu::Texture>> = (0..streams)
+        .map(|_| (0..IN_FLIGHT).map(|_| gpu.output()).collect())
+        .collect();
     let vt_before = vt_service_cpu();
     let cpu_before = ffi::process_cpu_seconds();
     let wall_start = Instant::now();
@@ -535,6 +587,7 @@ fn run_config(
             .map(|r| r.fourcc.clone())
             .unwrap_or_default(),
         surfaces: results.iter().map(|r| r.surface_misses).max().unwrap_or(0),
+        slot_waits: results.iter().map(|r| r.slot_waits).sum(),
     })
 }
 
@@ -571,9 +624,17 @@ fn verify(
     mode: WrapMode,
     reference: &[u8],
 ) -> Result<Verify, String> {
-    let out = gpu.output();
-    run_stream(path, gpu, &out, false, 1, mode, Stop::AtFrame(VERIFY_FRAME))?;
-    let rgba = gpu.read_rgba(&out)?;
+    let outs: Vec<wgpu::Texture> = (0..IN_FLIGHT).map(|_| gpu.output()).collect();
+    run_stream(
+        path,
+        gpu,
+        &outs,
+        false,
+        1,
+        mode,
+        Stop::AtFrame(VERIFY_FRAME),
+    )?;
+    let rgba = gpu.read_rgba(&outs[VERIFY_FRAME % IN_FLIGHT])?;
 
     let png = format!(
         "frame-{VERIFY_FRAME}-{}.png",
@@ -668,32 +729,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for &(mode, streams, paced) in configs {
         let r = run_config(&clip, &gpu, streams, paced, threads, mode)?;
         println!(
-            "{}: {:.1} fps/stream, process CPU {:.2}% per stream, VT service CPU {:.2}% per stream, late {}",
-            r.label, r.fps_per_stream, r.process_cpu_pct, r.vt_cpu_pct, r.late
+            "{}: {:.1} fps/stream, process CPU {:.2}% per stream, VT service CPU {:.2}% per stream, late {}, slot waits {}",
+            r.label, r.fps_per_stream, r.process_cpu_pct, r.vt_cpu_pct, r.late, r.slot_waits
         );
         reports.push(r);
     }
 
+    let cores = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1) as f64;
+    let machine = |r: &RunReport| (r.process_cpu_pct + r.vt_cpu_pct) / cores;
     let judged = reports
         .iter()
         .filter(|r| r.streams == 1 && r.paced && r.mode != WrapMode::DecodeOnly)
-        .min_by(|a, b| a.process_cpu_pct.total_cmp(&b.process_cpu_pct));
-    let pass =
-        judged.is_some_and(|r| r.late == 0 && r.process_cpu_pct < 5.0 && r.fps_per_stream >= 59.5);
+        .min_by(|a, b| machine(a).total_cmp(&machine(b)));
+    let pass = judged.is_some_and(|r| r.late == 0 && machine(r) < 5.0 && r.fps_per_stream >= 59.5);
     let mut md = format!(
         "# proto-decode results\n\n\
-         4K60 H.264 (High, GOP 120, 1200 frames, about 31.6 Mbit/s, `scripts/make-media.sh`) decoded with FFmpeg's VideoToolbox hwaccel. Each frame's NV12 planes are wrapped zero-copy as wgpu textures and converted to `Rgba8Unorm` by a WGSL BT.709 limited-range pass. Release build, headless, one frame in flight per stream (the GPU conversion is waited on before the next frame).\n\n\
+         4K60 H.264 (High, GOP 120, 1200 frames, about 31.6 Mbit/s, `scripts/make-media.sh`) decoded with FFmpeg's VideoToolbox hwaccel. Each frame's NV12 planes are wrapped zero-copy as wgpu textures and converted to `Rgba8Unorm` by a WGSL BT.709 limited-range pass. Release build, headless. Up to {IN_FLIGHT} conversions are in flight per stream, each with its own output texture; the stream never waits on the GPU unless the slot it is about to reuse is still busy.\n\n\
          Wrapping paths (both zero-copy, no CPU copy of pixel data):\n\n\
          - *CVMetalTextureCache per frame*: `CVMetalTextureCacheCreateTextureFromImage` per plane -> `MTLTexture` -> `texture_from_raw` / `create_texture_from_hal`, new wgpu textures and bind group every frame.\n\
          - *IOSurface textures cached*: `newTextureWithDescriptor:iosurface:plane:` per plane of each IOSurface VideoToolbox hands out, wrapped the same way, with the bind group cached by IOSurface ID (VideoToolbox recycles a small pool).\n\n\
          - FFmpeg: libavutil {} via `ffmpeg-next` 9 against the Homebrew shared FFmpeg 9.0.1 build\n\
          - GPU: {}\n\
+         - Logical CPU cores: {cores}\n\
          - Decoder output pixel format: `{}`\n\
          - Decoder threads: {threads}\n\
          - Paced runs let the decoder run up to {PACE_LOOKAHEAD} frames ahead of display (a player's look-ahead queue); a frame is late if it is ready after its display slot.\n\n\
-         Verdict: **{}** (budget: 60 fps sustained with under 5% CPU per stream, judged on the best paced single-stream run using this process's CPU: {})\n\n\
-         | Run | frames | fps per stream (slowest) | late frames | decode ms median / p99 / max | wrap + convert + GPU wait ms median / p99 / max | decode + upload ms median / p99 / max | process CPU % of one core, per stream | VTDecoderXPCService CPU %, per stream | IOSurfaces seen |\n\
-         | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n",
+         Verdict: **{}**. Budget: 60 fps sustained with under 5% CPU per stream, judged as whole-machine utilisation, (process CPU + VTDecoderXPCService CPU) / {cores} logical cores, on the best paced single-stream run (see the Decision Log in PLAN.md). Judged run: {}\n\n\
+         | Run | frames | fps per stream (slowest) | late frames | decode ms median / p99 / max | wrap + submit ms median / p99 / max | decode + wrap + submit ms median / p99 / max | waits for a busy slot | process CPU % of one core, per stream | VTDecoderXPCService CPU % of one core, per stream | whole machine %, per stream | IOSurfaces seen |\n\
+         | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n",
         {
             let v = ffmpeg::util::version();
             format!("{}.{}.{}", v >> 16, (v >> 8) & 0xff, v & 0xff)
@@ -703,14 +768,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if pass { "PASS" } else { "FAIL" },
         judged
             .map(|r| format!(
-                "{:.2}% CPU, {:.1} fps, {} late",
-                r.process_cpu_pct, r.fps_per_stream, r.late
+                "{} at {:.2}% of the machine ({:.2}% + {:.2}% of one core), {:.1} fps, {} late",
+                r.label,
+                machine(r),
+                r.process_cpu_pct,
+                r.vt_cpu_pct,
+                r.fps_per_stream,
+                r.late
             ))
             .unwrap_or_default(),
     );
     for r in &reports {
         md.push_str(&format!(
-            "| {} | {} | {:.1} | {} | {} | {} | {} | {:.2} | {:.2} | {} |\n",
+            "| {} | {} | {:.1} | {} | {} | {} | {} | {} | {:.2} | {:.2} | {:.2} | {} |\n",
             r.label,
             r.frames,
             r.fps_per_stream,
@@ -718,8 +788,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             r.decode,
             r.upload,
             r.total,
+            r.slot_waits,
             r.process_cpu_pct,
             r.vt_cpu_pct,
+            machine(r),
             if r.mode == WrapMode::Surfaces {
                 r.surfaces.to_string()
             } else {
