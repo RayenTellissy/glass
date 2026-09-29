@@ -2,6 +2,7 @@
 //! strips and waveform peaks. They take a [`Control`] for cancellation, pause and
 //! progress, and write their files through a [`CacheEntry`](crate::CacheEntry).
 
+pub mod peaks;
 pub mod thumbnails;
 
 use crate::error::MediaError;

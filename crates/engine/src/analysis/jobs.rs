@@ -1,5 +1,6 @@
 //! The analysis kinds: each is a type implementing [`AnalysisJob`].
 
+use media::analysis::peaks::{self, PEAKS_VERSION, PeakSettings, Peaks};
 use media::analysis::thumbnails::{self, THUMBNAILS_VERSION, ThumbnailSettings, ThumbnailStrips};
 use media::analysis::{AnalysisError, Control, Stopped};
 use media::timemap::{TIMELINE_CACHE_KIND, TIMELINE_CACHE_VERSION, timeline_cache_params};
@@ -123,5 +124,42 @@ impl AnalysisJob for ThumbnailJob {
             Some(ctx.cache()),
             ctx,
         )?)
+    }
+}
+
+/// Waveform peaks at five zoom levels ([`media::analysis::peaks`]), one binary file.
+#[derive(Clone, Debug)]
+pub struct PeaksJob {
+    pub source: SourceFile,
+    pub settings: PeakSettings,
+}
+
+impl Artifact for Peaks {
+    const EXTENSION: &'static str = "bin";
+
+    fn encode(&self) -> std::io::Result<Vec<u8>> {
+        Ok(self.to_bytes())
+    }
+
+    fn decode(bytes: &[u8], _: &CacheEntry) -> Option<Self> {
+        Peaks::from_bytes(bytes)
+    }
+}
+
+impl AnalysisJob for PeaksJob {
+    type Output = Peaks;
+    const KIND: &'static str = "peaks";
+    const VERSION: u32 = PEAKS_VERSION;
+
+    fn source_hash(&self) -> ContentHash {
+        self.source.hash
+    }
+
+    fn params(&self) -> String {
+        self.settings.params()
+    }
+
+    fn run(&self, ctx: &JobContext) -> Result<Peaks, JobError> {
+        Ok(peaks::generate(&self.source.path, &self.settings, ctx)?)
     }
 }
