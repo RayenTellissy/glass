@@ -1,0 +1,13 @@
+[package]
+name = "proto-gpu"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace]
+
+[dependencies]
+wgpu = "30"
+glyphon = "0.12"
+pollster = "0.4"
