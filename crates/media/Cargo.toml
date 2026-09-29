@@ -66,5 +66,9 @@ harness = false
 name = "peaks"
 harness = false
 
+[[bench]]
+name = "proxy"
+harness = false
+
 [lints]
 workspace = true

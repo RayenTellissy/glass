@@ -8,7 +8,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use media::{CacheDir, CacheEntry, ContentHash};
+use media::{CacheArea, CacheDir, CacheEntry, ContentHash};
 
 /// Threads the rest of the app keeps busy: UI, render, audio (decode and callback share
 /// a core's worth of work) and two for video decode during playback.
@@ -39,6 +39,8 @@ pub enum Priority {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct JobKey {
     pub hash: ContentHash,
+    /// Where the result lives: `analysis/` or `proxies/`.
+    pub area: CacheArea,
     pub kind: &'static str,
     /// [`media::cache::params_hash`] of the parameter string.
     pub params: String,
@@ -47,8 +49,19 @@ pub struct JobKey {
 
 impl JobKey {
     pub fn new(hash: ContentHash, kind: &'static str, params: &str, version: u32) -> Self {
+        Self::in_area(CacheArea::Analysis, hash, kind, params, version)
+    }
+
+    pub fn in_area(
+        area: CacheArea,
+        hash: ContentHash,
+        kind: &'static str,
+        params: &str,
+        version: u32,
+    ) -> Self {
         Self {
             hash,
+            area,
             kind,
             params: media::cache::params_hash(params),
             version,
@@ -109,6 +122,8 @@ pub trait AnalysisJob: Send + 'static {
     /// Bumped whenever the output format or the algorithm changes; results of other
     /// versions stop matching and are deleted when the new one is written.
     const VERSION: u32;
+    /// The cache area of the result (proxies are reclaimed separately).
+    const AREA: CacheArea = CacheArea::Analysis;
 
     fn source_hash(&self) -> ContentHash;
 
@@ -118,7 +133,8 @@ pub trait AnalysisJob: Send + 'static {
     fn run(&self, ctx: &JobContext) -> Result<Self::Output, JobError>;
 
     fn key(&self) -> JobKey {
-        JobKey::new(
+        JobKey::in_area(
+            Self::AREA,
             self.source_hash(),
             Self::KIND,
             &self.params(),
@@ -758,5 +774,5 @@ fn worker(shared: &Arc<Shared>) {
 
 /// The cache entry of a key (its params are already hashed).
 fn entry_for(cache: &CacheDir, key: &JobKey) -> CacheEntry {
-    cache.entry_hashed(&key.hash, key.kind, &key.params, key.version)
+    cache.entry_hashed_in(key.area, &key.hash, key.kind, &key.params, key.version)
 }
