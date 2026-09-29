@@ -124,7 +124,7 @@ jobs:
             target/package/${{ matrix.target }}/*.AppImage
           if-no-files-found: error
 
-  # GPL: every release carries the exact FFmpeg, x264 and x265 sources it was built from.
+  # GPL: every release carries the exact FFmpeg, x264, x265 and dav1d sources it was built from.
   ffmpeg-sources:
     name: FFmpeg release sources
     runs-on: ubuntu-22.04

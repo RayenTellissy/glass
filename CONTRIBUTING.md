@@ -198,17 +198,17 @@ scripts/ffmpeg/build.sh          # about 3 minutes on an M2, once per version bu
 source scripts/dev-env.sh        # now prefers .glass-cache/ffmpeg/<host-triple>
 ```
 
-`scripts/ffmpeg/versions.env` pins FFmpeg 9.0.x, x264 and x265 (and, per target, nv-codec-headers and zlib) by URL and SHA-256. The script downloads the archives into `.glass-cache/ffmpeg/src/`, verifies them, builds its own `pkgconf` (and `nasm` on x86_64 when missing) as host tools, and installs into `.glass-cache/ffmpeg/<target-triple>/` with `lib/`, `include/`, `bin/`, `LICENSES/`, `SOURCES.txt` and `BUILDINFO`. It rebuilds only when `versions.env` or the script changes (`--force` to override). It builds for the host only; CI builds each target on its own runner.
+`scripts/ffmpeg/versions.env` pins FFmpeg 9.0.x, x264, x265 and dav1d (and, per target, nv-codec-headers and zlib) by URL and SHA-256. The script downloads the archives into `.glass-cache/ffmpeg/src/`, verifies them, builds its own `pkgconf` (and `nasm` on x86_64 when missing), `ninja` and `meson` (run from its source with `python3`, which must be on `PATH`) as host tools, and installs into `.glass-cache/ffmpeg/<target-triple>/` with `lib/`, `include/`, `bin/`, `LICENSES/`, `SOURCES.txt` and `BUILDINFO`. It rebuilds only when `versions.env` or the script changes (`--force` to override). It builds for the host only; CI builds each target on its own runner.
 
 ### GPL compliance
 
-That FFmpeg build is configured with `--enable-gpl --enable-version3` and links x264 and x265, so every Glass release is distributed under GPLv3 terms for those libraries. Each release must:
+That FFmpeg build is configured with `--enable-gpl --enable-version3` and links x264, x265 and dav1d (BSD 2-clause), so every Glass release is distributed under GPLv3 terms for those libraries. Each release must:
 
 - bundle the licence texts from `.glass-cache/ffmpeg/<target>/LICENSES/` inside every installer,
 - attach the exact source archives used, produced by `scripts/ffmpeg/package-sources.sh --archive` (archives, `SHA256SUMS`, licence texts and the build scripts, in `.glass-cache/ffmpeg/release-sources.tar.gz`),
 - keep `versions.env` unchanged between building the installers and packaging the sources.
 
-Never patch the FFmpeg, x264 or x265 sources without adding the patches to the source bundle.
+Never patch the FFmpeg, x264, x265 or dav1d sources without adding the patches to the source bundle.
 
 ## Packaging
 

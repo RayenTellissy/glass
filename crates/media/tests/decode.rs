@@ -7,7 +7,7 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use media::{Frame, FrameReader, MediaError, MediaKind, SampleType, StreamSelect, probe};
+use media::{Frame, FrameReader, MediaKind, SampleType, StreamSelect, probe};
 
 struct VideoStats {
     frames: u64,
@@ -18,17 +18,11 @@ struct VideoStats {
     format: &'static str,
 }
 
-/// Decodes the whole video stream, or returns `None` when this FFmpeg build has no
-/// software decoder for the codec (AV1 without libdav1d).
-fn decode_video(path: &Path) -> Option<(VideoStats, FrameReader)> {
-    let mut reader = match FrameReader::open(path, StreamSelect::BestVideo) {
-        Ok(reader) => reader,
-        Err(error @ MediaError::NoDecoder { .. }) => {
-            eprintln!("skipped: {error}");
-            return None;
-        }
-        Err(error) => panic!("{error}"),
-    };
+/// Decodes the whole video stream. Every fixture codec has a software decoder in the
+/// pinned FFmpeg build (AV1 through libdav1d).
+fn decode_video(path: &Path) -> (VideoStats, FrameReader) {
+    let mut reader =
+        FrameReader::open(path, StreamSelect::BestVideo).unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(reader.kind(), MediaKind::Video);
     assert!(!reader.is_hardware());
     let mut stats: Option<VideoStats> = None;
@@ -66,7 +60,7 @@ fn decode_video(path: &Path) -> Option<(VideoStats, FrameReader)> {
         s.frames += 1;
         s.last_pts = pts;
     }
-    Some((stats.expect("at least one frame"), reader))
+    (stats.expect("at least one frame"), reader)
 }
 
 #[test]
@@ -80,9 +74,8 @@ fn every_fixture_decodes() {
         let path = common::generated_dir().join(file);
         let info = probe(&path).unwrap_or_else(|e| panic!("{file}: {e}"));
 
-        if kind != "audio"
-            && let Some((stats, mut reader)) = decode_video(&path)
-        {
+        if kind != "audio" {
+            let (stats, mut reader) = decode_video(&path);
             assert_eq!(
                 (u64::from(stats.width), u64::from(stats.height)),
                 (
