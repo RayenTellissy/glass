@@ -126,7 +126,7 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
   - [x] `criterion` harness: workspace dev-dependency, `benches/` targets, `cargo bench --workspace --bench "*"` with short settings and baselines documented in `CONTRIBUTING.md`, and `scripts/bench-report.py` formatting a baseline comparison as Markdown
   - [ ] `bench` job in `ci.yml`: saves a `main` baseline on pushes to main, compares pull requests against it and posts the report as a PR comment (needs-human: no GitHub remote yet; push, merge once to main to seed the baseline, then open a PR and confirm the comment appears)
 - [x] Logging with `tracing`, per-crate filters, in-memory ring buffer exposed to the UI later
-- [~] Frame-time monitor: records UI frame durations, exposes p50 and p99, fails tests that exceed budget
+- [x] Frame-time monitor: records UI frame durations, exposes p50 and p99, fails tests that exceed budget
 - [ ] i18n: `assets/i18n/en.json`, a `t!()` macro, and a CI check that every key used exists and no literal strings appear in UI code
 - [ ] Theme: tokens in `assets/theme/` (colour, type, spacing, radius, for the default, opposite, and high-contrast themes) loaded into the egui style, and a CI check that no literal colours appear in UI code. Values come from the `00 Foundations` page of the Paper file
 - [ ] Opt-in crash minidumps written locally, never uploaded automatically
@@ -519,3 +519,4 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 1 — benchmark harness — 6577e1f — criterion 0.8.2 (no plots, no rayon); `engine` bench `enabled_features` 0.73 ns on M2 (stands in for M1) with `--quick`, baseline save and compare checked locally, report script output checked; real engine and UI benchmarks join as the code lands
 - 2026-09-29 — Phase 1 — bench CI job with PR comment — needs-human: no GitHub remote yet; job added to `.github/workflows/ci.yml` in 6577e1f
 - 2026-09-29 — Phase 1 — logging — d131061 — tracing 0.1.44, tracing-subscriber 0.3.23 in `engine::logging`; ring of 10,000 events: record 0.14 µs, full snapshot 0.77 ms on M2 (stands in for M1); tests for wraparound, level and target filters, 8 concurrent writers with a reader
+- 2026-09-29 — Phase 1 — frame-time monitor — 78499a3 — egui, egui-wgpu 0.36.2 (wgpu 30.0.1), eframe 0.36 declared, `default_fonts` off; headless editor frame (200 clips, 2880 x 1496, Metal, M2 standing in for M1, debug build): p50 2.31 ms, p99 2.63 ms, 0 of 240 over 8 ms, test 0.73 s; record 3.9 ns, stats 5.1 µs; Geist fonts not bundled yet, the harness reads a system font at test time
