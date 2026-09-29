@@ -218,6 +218,34 @@ pub(crate) fn frame_ref(frame: &ffmpeg::frame::Video) -> Option<ffmpeg::frame::V
     }
 }
 
+/// The channels of an audio frame in order, as FFmpeg `AVChannel` values (`0` front
+/// left, `1` front right, `2` front centre, `3` LFE, ...), or `-1` for each channel of a
+/// layout that names only its channel count. Clears `out` first; no allocation once `out`
+/// has room.
+pub(crate) fn frame_channel_ids(frame: &ffmpeg::Frame, out: &mut Vec<i32>) {
+    out.clear();
+    // SAFETY: the frame wrapper owns a valid AVFrame; ch_layout is an inline struct whose
+    // `order` FFmpeg set, and whose union member matches that order: `mask` for native
+    // and ambisonic orders, `map` (nb_channels AVChannelCustom entries, `id` first) for
+    // custom order. Channel ids are read as plain integers.
+    unsafe {
+        let layout = &(*frame.as_ptr()).ch_layout;
+        let n = layout.nb_channels.max(0) as usize;
+        match layout.order {
+            sys::AVChannelOrder::AV_CHANNEL_ORDER_NATIVE => {
+                let mask = layout.u.mask;
+                out.extend((0..64).filter(|bit| mask & (1u64 << bit) != 0).take(n));
+            }
+            sys::AVChannelOrder::AV_CHANNEL_ORDER_CUSTOM if !layout.u.map.is_null() => {
+                let map = layout.u.map;
+                out.extend((0..n).map(|i| *(map.add(i) as *const i32)));
+            }
+            _ => {}
+        }
+        out.resize(n, -1);
+    }
+}
+
 pub(crate) fn frame_channel_layout(frame: &ffmpeg::Frame) -> Option<String> {
     // SAFETY: as above; ch_layout is an inline struct of the frame.
     channel_layout_description(unsafe { &(*frame.as_ptr()).ch_layout })

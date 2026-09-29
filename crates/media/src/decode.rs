@@ -838,6 +838,10 @@ impl AudioFrame {
         self.time_base
     }
 
+    pub(crate) fn raw(&self) -> &ffmpeg::frame::Audio {
+        &self.inner
+    }
+
     /// One plane per channel for planar formats, a single interleaved plane otherwise.
     pub fn plane_count(&self) -> usize {
         match self.format() {

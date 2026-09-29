@@ -354,6 +354,21 @@ impl FrameReader {
         }
     }
 
+    /// Positions the demuxer at the last keyframe at or before `target` (for audio, the
+    /// packet at or before it) and resets the decoder without decoding anything. Frames
+    /// then start at or before `target`; callers trim to the exact sample or frame (and
+    /// seek early enough for the decoder's pre-roll).
+    pub fn seek_keyframe(&mut self, target: Timestamp) -> Result<()> {
+        self.demuxer.seek_stream(self.stream.index, target)?;
+        self.reset_decoder()?;
+        self.draining = false;
+        self.finished = false;
+        self.pending = None;
+        self.skip_through = None;
+        self.last_pts = None;
+        Ok(())
+    }
+
     /// Goes back to the first frame: seeks the demuxer to the start and flushes the
     /// decoder, so the next `next_frame` returns the first frame again.
     pub fn seek_to_start(&mut self) -> Result<()> {

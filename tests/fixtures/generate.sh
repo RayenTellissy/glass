@@ -418,10 +418,59 @@ produce sequence_gaps_320x180/ gap_sequence
 add_entry "sequence_gaps_320x180/shot_%04d.png" sequence png 320 180 null null rgb24 false 9 null null null 0 null null \
     '"first": 1, "last": 12, "missing": [5, 6, 10]'
 
+# A/V sync markers: a white frame at 1.000 s (frame 30 at 30 fps) and, at the same time, a
+# 5 ms Hann-windowed 2 kHz burst in both audio channels. Encoded with the priming each
+# codec brings (AAC 1024 samples, Opus 312-sample pre-skip) and as PCM for reference.
+SYNC_VIDEO="color=black:s=320x240:r=30:d=3,format=yuv420p,drawbox=x=0:y=0:w=iw:h=ih:c=white:t=fill:enable='eq(n\,30)'"
+sync_audio() {
+    local rate=$1
+    local burst="0.8*sin(2*PI*2000*(t-1))*if(between(t\,1\,1.005)\,pow(sin(PI*(t-1)/0.005)\,2)\,0)"
+    echo "aevalsrc='$burst|$burst':c=stereo:s=$rate:d=3"
+}
+SYNC_EXTRA='"sync_marker_s": 1.0'
+
+make sync_h264_aac_48k.mp4 \
+    -f lavfi -i "$SYNC_VIDEO" -f lavfi -i "$(sync_audio 48000)" \
+    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 30 \
+    -c:a aac -b:a 192k -movflags +faststart
+add_entry sync_h264_aac_48k.mp4 video h264 320 240 30/1 3 yuv420p false null aac 48000 2 0 null null "$SYNC_EXTRA"
+
+make sync_h264_aac_44k1.mp4 \
+    -f lavfi -i "$SYNC_VIDEO" -f lavfi -i "$(sync_audio 44100)" \
+    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 30 \
+    -c:a aac -b:a 192k -movflags +faststart
+add_entry sync_h264_aac_44k1.mp4 video h264 320 240 30/1 3 yuv420p false null aac 44100 2 0 null null "$SYNC_EXTRA"
+
+make sync_vp9_opus.webm \
+    -f lavfi -i "$SYNC_VIDEO" -f lavfi -i "$(sync_audio 48000)" \
+    -c:v libvpx-vp9 -deadline realtime -cpu-used 8 -b:v 500k -pix_fmt yuv420p -g 30 \
+    -c:a libopus -b:a 128k
+add_entry sync_vp9_opus.webm video vp9 320 240 30/1 3 yuv420p false null opus 48000 2 0 null null "$SYNC_EXTRA"
+
+make sync_h264_pcm.mov \
+    -f lavfi -i "$SYNC_VIDEO" -f lavfi -i "$(sync_audio 48000)" \
+    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 30 \
+    -c:a pcm_s16le
+add_entry sync_h264_pcm.mov video h264 320 240 30/1 3 yuv420p false null pcm_s16le 48000 2 0 null null "$SYNC_EXTRA"
+
+# 5.1 (side) with a constant level per channel (FL 0.1, FR 0.2, FC 0.3, LFE 0.4, SL 0.5,
+# SR 0.6), for the downmix rules.
+make audio_51_48k.wav \
+    -f lavfi -i "aevalsrc='0.1|0.2|0.3|0.4|0.5|0.6':c=5.1(side):s=48000:d=1" -c:a pcm_s16le
+add_entry audio_51_48k.wav audio null null null null 1 null false null pcm_s16le 48000 6 0 null null \
+    '"levels": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]'
+
+# Mono 1 kHz sine (amplitude 1/8) at 44.1 kHz as MP3, whose gapless header FFmpeg honours.
+make audio_44k1_mono.mp3 \
+    -f lavfi -i "sine=frequency=1000:sample_rate=44100:duration=2" -c:a libmp3lame -b:a 192k
+add_entry audio_44k1_mono.mp3 audio null null null null 2 null false null mp3 44100 1 0 null null \
+    '"sine_hz": 1000, "sine_amplitude": 0.125'
+
 make audio_48k_stereo.wav \
     -f lavfi -i "$TONE" -f lavfi -i "$NOISE" \
     -filter_complex "[0:a][1:a]amerge=inputs=2[a]" -map "[a]" -t 3 -c:a pcm_s16le -ar 48000
-add_entry audio_48k_stereo.wav audio null null null null 3 null false null pcm_s16le 48000 2
+add_entry audio_48k_stereo.wav audio null null null null 3 null false null pcm_s16le 48000 2 0 null null \
+    '"sine_hz": 440, "sine_amplitude": 0.125, "sine_channel": 0'
 
 {
     echo "{"

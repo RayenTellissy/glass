@@ -18,11 +18,13 @@ bench = false
 
 [dependencies]
 assets.workspace = true
+audioadapter-buffers.workspace = true
 blake3.workspace = true
 ffmpeg-next.workspace = true
 gif.workspace = true
 image.workspace = true
 image-webp.workspace = true
+rubato.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -50,6 +52,10 @@ harness = false
 
 [[bench]]
 name = "seek"
+harness = false
+
+[[bench]]
+name = "audio"
 harness = false
 
 [lints]

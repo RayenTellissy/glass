@@ -6,15 +6,24 @@ use std::time::{Duration, Instant};
 
 pub use media::DecodePath;
 use media::{
-    DecoderOptions, FrameReader, HwPreference, MediaError, MediaInfo, StreamSelect, Timestamp,
+    AudioOptions, AudioReader, ChannelLayout, DecoderOptions, FrameReader, HwPreference,
+    MediaError, MediaInfo, StreamSelect, Timestamp,
 };
+
+/// The rate audio is decoded at, as playback will: the default project rate.
+pub const AUDIO_RATE: u32 = 48_000;
 
 /// What [`probe_and_decode`] saw.
 #[derive(Debug)]
 pub struct DecodeCheck {
     pub info: MediaInfo,
     pub video_frames: u64,
+    /// Samples per channel of planar f32 stereo at [`AUDIO_RATE`], through the playback
+    /// audio path (`media::AudioReader`, resampled with rubato when the file's rate
+    /// differs).
     pub audio_samples: u64,
+    /// Peak absolute sample of that audio, to show it is not silence.
+    pub audio_peak: f32,
     pub first_video_pts: Option<Timestamp>,
     pub last_video_pts: Option<Timestamp>,
     /// How the video decoded: hardware, or software and why (the reason the UI shows).
@@ -25,7 +34,8 @@ pub struct DecodeCheck {
 /// Probes `path`, then decodes its main video stream (and audio stream, if any) from the
 /// start until `seconds` of presentation time have been decoded. Video uses hardware
 /// decode when the platform has it, as playback does, with the automatic software
-/// fallback.
+/// fallback; audio goes through the playback path, `media::AudioReader`, as f32 stereo
+/// at [`AUDIO_RATE`].
 pub fn probe_and_decode(path: &Path, seconds: f64) -> Result<DecodeCheck, MediaError> {
     let start = Instant::now();
     let info = media::probe(path)?;
@@ -33,6 +43,7 @@ pub fn probe_and_decode(path: &Path, seconds: f64) -> Result<DecodeCheck, MediaE
         info,
         video_frames: 0,
         audio_samples: 0,
+        audio_peak: 0.0,
         first_video_pts: None,
         last_video_pts: None,
         video_decode_path: None,
@@ -53,14 +64,26 @@ pub fn probe_and_decode(path: &Path, seconds: f64) -> Result<DecodeCheck, MediaE
         check.video_decode_path = Some(reader.decode_path().clone());
     }
     if check.info.audio().is_some() {
-        let mut reader = FrameReader::open(path, StreamSelect::BestAudio)?;
-        while let Some(frame) = reader.next_frame()? {
-            if frame.pts().is_some_and(|pts| pts.seconds() >= seconds) {
+        let options = AudioOptions {
+            sample_rate: AUDIO_RATE,
+            layout: ChannelLayout::Stereo,
+            ..AudioOptions::default()
+        };
+        let mut reader = AudioReader::open(path, options)?;
+        let wanted = (seconds * f64::from(AUDIO_RATE)).round() as u64;
+        let mut left = vec![0.0f32; 1024];
+        let mut right = vec![0.0f32; 1024];
+        while check.audio_samples < wanted {
+            let n = (wanted - check.audio_samples).min(1024) as usize;
+            let got = reader.read(&mut [&mut left[..n], &mut right[..n]])?;
+            if got == 0 {
                 break;
             }
-            if let Some(audio) = frame.into_audio() {
-                check.audio_samples += audio.samples() as u64;
-            }
+            check.audio_peak = left[..got]
+                .iter()
+                .chain(&right[..got])
+                .fold(check.audio_peak, |peak, v| peak.max(v.abs()));
+            check.audio_samples += got as u64;
         }
     }
     check.elapsed = start.elapsed();

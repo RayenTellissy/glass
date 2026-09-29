@@ -77,18 +77,24 @@ fn decode_check() -> Result<(), String> {
     if check.first_video_pts.map(|t| t.seconds()) != Some(0.0) {
         return Err(format!("first video frame at {:?}", check.first_video_pts));
     }
-    let audio_seconds = check
-        .info
-        .audio()
-        .map(|(_, a)| check.audio_samples as f64 / f64::from(a.sample_rate.max(1)))
-        .unwrap_or(0.0);
+    let audio_seconds = check.audio_samples as f64 / f64::from(engine::media_check::AUDIO_RATE);
+    if check.info.audio().is_some() && (audio_seconds - SECONDS).abs() > 1e-9 {
+        return Err(format!(
+            "decoded {audio_seconds} s of audio at {} Hz, expected {SECONDS} s",
+            engine::media_check::AUDIO_RATE
+        ));
+    }
+    if check.info.audio().is_some() && check.audio_peak <= 0.0 {
+        return Err("the decoded audio is silent".to_string());
+    }
     println!(
-        "smoke: decoded {} {}x{} {} frames and {:.2} s of audio from {} in {} ms",
+        "smoke: decoded {} {}x{} {} frames and {:.2} s of audio (f32 stereo at {} Hz) from {} in {} ms",
         check.video_frames,
         video.width,
         video.height,
         stream.codec.name,
         audio_seconds,
+        engine::media_check::AUDIO_RATE,
         path.file_name()
             .map_or_else(Default::default, |n| n.to_string_lossy()),
         check.elapsed.as_millis()

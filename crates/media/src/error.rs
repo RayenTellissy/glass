@@ -88,6 +88,10 @@ pub enum MediaError {
     #[error("{}: cannot decode the image: {message}", path.display())]
     Image { path: PathBuf, message: String },
 
+    /// Audio could not be converted or resampled.
+    #[error("{}: audio: {message}", path.display())]
+    Audio { path: PathBuf, message: String },
+
     /// The file is a kind of picture this build or platform cannot decode; `reason` has
     /// the message for the UI.
     #[error("{}: {reason}", path.display())]
@@ -119,6 +123,7 @@ impl MediaError {
             | Self::NoDecoder { .. }
             | Self::Hardware { .. }
             | Self::Image { .. }
+            | Self::Audio { .. }
             | Self::Unsupported { .. } => None,
         }
     }
