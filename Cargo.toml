@@ -30,7 +30,8 @@ debug = "line-tables-only"
 debug = false
 
 [workspace.lints.rust]
-# Allowed locally only in media::ffi and render::interop (docs/ARCHITECTURE.md).
+# A crate that must call platform APIs keeps that code in one `ffi`, `sys` or
+# `interop` module with a local #[allow(unsafe_code)] (docs/ARCHITECTURE.md).
 unsafe_code = "deny"
 
 [workspace.lints.clippy]
