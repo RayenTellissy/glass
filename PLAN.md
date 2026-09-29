@@ -129,7 +129,7 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
 - [x] Frame-time monitor: records UI frame durations, exposes p50 and p99, fails tests that exceed budget
 - [x] i18n: `assets/i18n/en.json`, a `t!()` macro, and a CI check that every key used exists and no literal strings appear in UI code
 - [x] Theme: tokens in `assets/theme/` (colour, type, spacing, radius, for the default, opposite, and high-contrast themes) loaded into the egui style, and a CI check that no literal colours appear in UI code. Values come from the `00 Foundations` page of the Paper file
-- [ ] Opt-in crash minidumps written locally, never uploaded automatically
+- [~] Opt-in crash minidumps written locally, never uploaded automatically
 - [ ] `CONTRIBUTING.md` with the session loop from this file
 
 ## Phase 2 — Media engine (M1)
