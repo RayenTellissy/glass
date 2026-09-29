@@ -39,8 +39,19 @@ impl VideoFrame {
     /// [`Self::to_rgba8`] with another colour description, for example a different chroma
     /// siting to compare against.
     pub fn to_rgba8_as(&self, colour: &ColourSpace) -> Result<RgbaImage> {
+        self.convert(colour, None)
+    }
+
+    /// [`Self::to_rgba8`] scaled to `width` x `height` in the same pass (bilinear, with
+    /// swscale's filter widened for downscaling, so it averages rather than skips): the
+    /// thumbnail path, which never converts a full 4K frame.
+    pub fn to_rgba8_scaled(&self, width: u32, height: u32) -> Result<RgbaImage> {
+        self.convert(&self.colour_space(), Some((width, height)))
+    }
+
+    fn convert(&self, colour: &ColourSpace, size: Option<(u32, u32)>) -> Result<RgbaImage> {
         let frame = self.raw();
-        let (width, height) = (frame.width(), frame.height());
+        let (width, height) = size.unwrap_or((frame.width(), frame.height()));
         let format = self.format();
         let error = |e: ffmpeg::Error| MediaError::Convert {
             format: format.name(),
@@ -69,7 +80,7 @@ impl VideoFrame {
                 v_chroma_pos: (shift.1 > 0).then_some(v),
             }
         });
-        let data = ffi::scale_to_rgba(frame, yuv).map_err(error)?;
+        let data = ffi::scale_to_rgba(frame, yuv, size).map_err(error)?;
         Ok(RgbaImage {
             width,
             height,

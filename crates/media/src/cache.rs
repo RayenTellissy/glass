@@ -62,6 +62,38 @@ impl ContentHash {
         Ok(Self(*hasher.finalize().as_bytes()))
     }
 
+    /// A folder (an image sequence): BLAKE3 over a version tag and, in name order, every
+    /// file's name and size, plus the content hashes of the first, middle and last file.
+    /// Renaming the folder keeps the hash; adding, removing, renaming or resizing a frame
+    /// changes it.
+    pub fn of_folder(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        let mut files: Vec<(String, u64, PathBuf)> = Vec::new();
+        for item in std::fs::read_dir(path)? {
+            let item = item?;
+            let meta = item.metadata()?;
+            if meta.is_file()
+                && let Some(name) = item.file_name().to_str()
+                && !name.starts_with('.')
+            {
+                files.push((name.to_string(), meta.len(), item.path()));
+            }
+        }
+        files.sort();
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"glass-folder-hash-v1");
+        for (name, size, _) in &files {
+            hasher.update(&(name.len() as u64).to_le_bytes());
+            hasher.update(name.as_bytes());
+            hasher.update(&size.to_le_bytes());
+        }
+        if !files.is_empty() {
+            for i in [0, files.len() / 2, files.len() - 1] {
+                hasher.update(&Self::of_file(&files[i].2)?.0);
+            }
+        }
+        Ok(Self(*hasher.finalize().as_bytes()))
+    }
+
     /// Lower-case hexadecimal, 64 characters.
     pub fn to_hex(&self) -> String {
         self.0.iter().map(|b| format!("{b:02x}")).collect()
@@ -181,10 +213,14 @@ pub struct SourceFile {
 }
 
 impl SourceFile {
-    /// Hashes `path`.
+    /// Hashes `path`, a file or a folder holding an image sequence.
     pub fn open(path: impl Into<PathBuf>) -> std::io::Result<Self> {
         let path = path.into();
-        let hash = ContentHash::of_file(&path)?;
+        let hash = if path.is_dir() {
+            ContentHash::of_folder(&path)?
+        } else {
+            ContentHash::of_file(&path)?
+        };
         Ok(Self { path, hash })
     }
 }
@@ -375,6 +411,25 @@ mod tests {
             CacheDir::for_project("/work/film.glass").root(),
             Path::new("/work/.glass-cache")
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn folder_hash_follows_the_frames_not_the_folder_name() {
+        let dir = temp_dir("folder");
+        let a = dir.join("shot_a");
+        let b = dir.join("renamed");
+        for folder in [&a, &b] {
+            std::fs::create_dir_all(folder).expect("dir");
+            for n in 0..5 {
+                std::fs::write(folder.join(format!("f_{n:04}.png")), [n as u8; 10]).expect("write");
+            }
+        }
+        let ha = ContentHash::of_folder(&a).expect("hash");
+        assert_eq!(ha, ContentHash::of_folder(&b).expect("hash"));
+        std::fs::remove_file(b.join("f_0004.png")).expect("remove");
+        assert_ne!(ha, ContentHash::of_folder(&b).expect("hash"));
+        assert_eq!(SourceFile::open(&a).expect("open").hash, ha);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

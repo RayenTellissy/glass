@@ -13,6 +13,7 @@
 //! decode-pool thread at a time; [`Packet`] and the frame types are `Send + Sync` and can
 //! be handed to other threads without copying.
 
+pub mod analysis;
 pub mod audio;
 pub mod cache;
 pub mod colour;

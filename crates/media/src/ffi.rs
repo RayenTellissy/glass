@@ -441,7 +441,7 @@ pub(crate) struct SwsYuv {
     pub v_chroma_pos: Option<i32>,
 }
 
-/// Converts a CPU frame to tightly packed 8-bit RGBA at the same size with swscale
+/// Converts a CPU frame to tightly packed 8-bit RGBA, at the same size or `size`, with swscale
 /// (bilinear, accurate rounding, full chroma interpolation). For YUV input `matrix` (an
 /// `AVColorSpace` value, which swscale's `SWS_CS_*` constants share), the input range and
 /// the chroma position (in 1/256 luma samples, `None` for a direction without
@@ -450,8 +450,15 @@ pub(crate) struct SwsYuv {
 pub(crate) fn scale_to_rgba(
     frame: &ffmpeg::frame::Video,
     yuv: Option<SwsYuv>,
+    size: Option<(u32, u32)>,
 ) -> Result<Vec<u8>, ffmpeg::Error> {
-    let (width, height) = (frame.width(), frame.height());
+    let (src_width, src_height) = (frame.width(), frame.height());
+    let (width, height) = size.unwrap_or((src_width, src_height));
+    if width == 0 || height == 0 {
+        return Err(ffmpeg::Error::InvalidData);
+    }
+    let sw = c_int::try_from(src_width).map_err(|_| ffmpeg::Error::InvalidData)?;
+    let sh = c_int::try_from(src_height).map_err(|_| ffmpeg::Error::InvalidData)?;
     let w = c_int::try_from(width).map_err(|_| ffmpeg::Error::InvalidData)?;
     let h = c_int::try_from(height).map_err(|_| ffmpeg::Error::InvalidData)?;
     let src_format: sys::AVPixelFormat = frame.format().into();
@@ -473,8 +480,8 @@ pub(crate) fn scale_to_rgba(
                 errno: ffmpeg::error::ENOMEM,
             });
         }
-        (*ctx).src_w = w;
-        (*ctx).src_h = h;
+        (*ctx).src_w = sw;
+        (*ctx).src_h = sh;
         (*ctx).dst_w = w;
         (*ctx).dst_h = h;
         (*ctx).src_format = src_format as c_int;
@@ -528,7 +535,7 @@ pub(crate) fn scale_to_rgba(
             src.as_ptr(),
             raw.linesize.as_ptr(),
             0,
-            h,
+            sh,
             dst.as_ptr(),
             dst_stride.as_ptr(),
         );

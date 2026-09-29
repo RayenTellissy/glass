@@ -401,6 +401,29 @@ impl VideoSource {
         }
     }
 
+    /// The first frame decoded from the last keyframe at or before `target` (for video:
+    /// one demuxer seek and usually one decoded frame, no decoding forward to the exact
+    /// frame); for pictures the same as [`Self::seek_exact`]. Thumbnails use it when a
+    /// keyframe is close enough to the frame they stand for.
+    pub fn seek_keyframe(&mut self, target: Timestamp) -> Result<Option<VideoFrame>> {
+        match &mut self.inner {
+            Inner::Video(reader) => {
+                reader.seek_keyframe(target)?;
+                loop {
+                    match reader.next_frame()? {
+                        Some(frame) => {
+                            if let Some(video) = frame.into_video() {
+                                return Ok(Some(video));
+                            }
+                        }
+                        None => return Ok(None),
+                    }
+                }
+            }
+            _ => self.seek_exact(target),
+        }
+    }
+
     /// [`Self::seek_exact`] to the source frame that sequence frame `n` of `map` shows;
     /// `None` past the end of the clip (never for a still).
     pub fn seek_to_sequence_frame(

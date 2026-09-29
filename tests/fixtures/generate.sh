@@ -319,6 +319,20 @@ produce still_marked_640x360.bmp ffmpeg_to -f lavfi -i "$MARKED" -frames:v 1 -c:
 add_entry still_marked_640x360.bmp still bmp 640 360 null null bgr24 false 1 null null null 0 null null \
     '"marker": "top_left"'
 
+# A marked clip stored landscape with a 90-degree display rotation: the red block is the
+# stored top-left corner, so thumbnails can check that the rotation was applied (upright,
+# 360x640, block at the bottom left).
+rotated_marked() {
+    local out=$1 plain="$1.plain.mov"
+    ffmpeg_to "$plain" -f lavfi -i "$MARKED,format=yuv420p" -r 25 -t 1 -c:v libx264 \
+        -preset veryfast -g 25 -f mov
+    ffmpeg_to "$out" -display_rotation 90 -i "$plain" -c copy -f mov
+    rm -f "$plain"
+}
+produce rotated_marked_h264_640x360.mov rotated_marked
+add_entry rotated_marked_h264_640x360.mov video h264 640 360 25/1 1 yuv420p false 25 null null null 90 null null \
+    '"marker": "top_left"'
+
 # Display P3 tagged with a PNG cICP chunk (FFmpeg writes cICP and cHRM from the tags).
 produce still_p3_cicp_640x360.png ffmpeg_to \
     -f lavfi -i "$MARKED,setparams=color_primaries=smpte432:color_trc=iec61966-2-1" -frames:v 1 -c:v png -f image2

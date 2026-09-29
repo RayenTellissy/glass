@@ -35,7 +35,7 @@
 mod jobs;
 mod pool;
 
-pub use jobs::TimelineJob;
+pub use jobs::{ThumbnailJob, TimelineJob};
 pub use pool::{
     AnalysisJob, AnalysisPool, Artifact, JobContext, JobError, JobEvent, JobEventKind, JobHandle,
     JobKey, Outcome, PoolConfig, Priority, default_workers,
