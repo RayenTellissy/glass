@@ -466,9 +466,11 @@ Append one line per decision: date, decision, reason.
 - 2026-09-29 — Priority is speed, then features, then size. The 30 MB size target gives way to features and speed optimisations, and release builds ship with every feature flag on. Reason: product decision.
 - 2026-09-29 — Creators come first, and pro tools are how the app grows with them. Reason: product decision.
 - 2026-09-29 — FFmpeg switched from an LGPL build to a GPL build with x264 and x265. Release builds are distributed under GPLv3, the source stays MIT. Reason: better software H.264 and HEVC encoding, and the LGPL limit only mattered while a commercial licence was possible.
+- 2026-09-29 — Each task uses three commits: plan: start, the implementation commit(s), and plan: done, whose Progress Log line cites the implementation commit hash. Reason: the log line can then point at the commit that did the work.
 
 ## Progress Log
 
 Append one line per completed task: date, phase, task, commit hash. Newest last.
 
 - 2026-09-29 — Plan created.
+- 2026-09-29 — Phase 0 — create repository — ee8e233
