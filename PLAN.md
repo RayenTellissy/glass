@@ -112,8 +112,8 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
 - [ ] GitHub Actions matrix: macOS arm64, macOS x86_64, Windows x86_64, Linux x86_64, running build, test, clippy, fmt (needs-human: no GitHub remote yet; push the repo and confirm the workflow runs green)
 - [x] `cargo-deny` for licences and advisories, allowing only licences compatible with GPLv3
 - [~] FFmpeg build script: pinned FFmpeg 9.0.x with x264 and x265, built as shared libraries for every target and cached in CI. Every release bundles the licence texts and attaches the exact source archives used
-  - [~] `scripts/ffmpeg/build.sh` and pinned `scripts/ffmpeg/versions.env`: download and checksum the source archives, build pkgconf (and nasm on x86) as host tools, then x264, x265 and FFmpeg as shared libraries into `.glass-cache/ffmpeg/<target>/` with `lib/`, `include/`, `LICENSES/` and `SOURCES.txt`
-  - [ ] Build locally for `aarch64-apple-darwin`, check the workspace and `experiments/proto-decode` against it, and make `scripts/dev-env.sh` prefer it over Homebrew
+  - [x] `scripts/ffmpeg/build.sh` and pinned `scripts/ffmpeg/versions.env`: download and checksum the source archives, build pkgconf (and nasm on x86) as host tools, then x264, x265 and FFmpeg as shared libraries into `.glass-cache/ffmpeg/<target>/` with `lib/`, `include/`, `LICENSES/` and `SOURCES.txt`
+  - [~] Build locally for `aarch64-apple-darwin`, check the workspace and `experiments/proto-decode` against it, and make `scripts/dev-env.sh` prefer it over Homebrew
   - [ ] `scripts/ffmpeg/package-sources.sh` gathering the exact source archives and licence texts for a release, plus GPL compliance notes in `CONTRIBUTING.md`
   - [ ] CI job building FFmpeg per target, cached on the `versions.env` hash, and release attachment of the sources
 - [ ] `cargo-dist` config producing DMG, MSI or MSIX, and AppImage on tags
@@ -499,3 +499,4 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-09-29 — Phase 1 — reference media generator — 8074022 — 12 entries, 23 MB, 4 s on M2 (stands in for M1), all verified with ffprobe
 - 2026-09-29 — Phase 1 — GitHub Actions matrix — needs-human: no GitHub remote yet; `.github/workflows/ci.yml` added in 8392c3c, push the repo and confirm the workflow runs green
 - 2026-09-29 — Phase 1 — cargo-deny — a036b3f — `cargo deny check` passes locally (advisories, bans, licences, sources); CI job waits on the GitHub remote
+- 2026-09-29 — Phase 1 — FFmpeg build script — 749514b
