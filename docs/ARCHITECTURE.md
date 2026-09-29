@@ -37,22 +37,23 @@ Consequences for every design choice below:
 
 ## 2. Crate layout
 
-The Cargo workspace (Phase 1) has ten crates, each in `crates/<name>/` with a package of the same name. Two are binaries (`app` builds `glass`, `smoke` builds `smoke`); the rest are libraries. `experiments/` is excluded from the workspace.
+The Cargo workspace (Phase 1) has ten crates, each in `crates/<name>/` with a package of the same name. Two are binaries (`app` builds `glass`, `smoke` builds `smoke`); the rest are libraries. `experiments/` is excluded from the workspace. One more crate, `plugin-host`, is planned for Phase 12 and is not in the workspace yet; its row is marked *planned*.
 
 | Crate | Responsibility | May depend on (workspace crates) | `unsafe` |
 | --- | --- | --- | --- |
-| `app` | The `glass` binary. Creates the eframe window, the wgpu device, the threads and the engine, then hands control to `ui`. Owns command-line flags, safe mode, portable mode, crash minidumps. | `ui`, `engine` | no |
-| `ui` | egui panels and widgets: timeline, preview, media pool, inspector, browsers, colour, audio, export, settings, debug panel. Theme and i18n application. Turns input into edit commands and engine requests. | `project`, `engine`, `render` (presentation API only), `assets` | no |
+| `app` | The `glass` binary. Creates the eframe window (eframe creates the wgpu device and queue), passes that device and queue from `cc.wgpu_render_state` to `render`, starts the threads and the engine, then hands control to `ui`. Owns command-line flags, safe mode, portable mode, crash minidumps, and OS integration such as notifications. | `ui`, `engine` | only in `app::ffi`, if platform APIs need it |
+| `ui` | egui panels and widgets: timeline, preview, media pool, inspector, browsers, colour, audio, export, settings, debug panel. Theme and i18n application. Turns input into edit commands and engine requests. | `project`, `engine`, `render` (presentation API only), `assets` | only in `ui::ffi`, if window interop needs it (second display) |
 | `engine` | Scheduler, playback state, master-clock consumer, timeline evaluation into render graphs, dirty-range invalidation, rendered-frame cache policy, look-ahead, background render, export pipeline, analysis job system. | `project`, `media`, `render`, `audio`, `plugins`, `assets` | no |
 | `media` | Safe wrapper over `ffmpeg-next`: demux, decode, encode, probe, hardware decode sessions, VFR maps, GOP index, still images, audio decode and resampling (`rubato`), analysis algorithms (thumbnails, waveforms, scene cuts, silence, beats, loudness), proxy generation. Produces platform frame handles, never wgpu objects. | `assets` (codec presets only) | only in `media::ffi` |
-| `render` | wgpu device and queue ownership, render graph compiler, compositor nodes, WGSL shaders, text via `cosmic-text`, vector shapes, masks, LUTs, scopes, VRAM frame cache storage, async readback ring, import of platform frame handles as textures, and the presentation API `ui` uses to show the preview. | `media` (frame handle and colour metadata types), `assets` | only in the platform interop module (`render::interop`) |
+| `render` | Holds the shared wgpu device and queue it receives at startup (it never creates them), render graph compiler, compositor nodes, WGSL shaders, text via `cosmic-text`, vector shapes, masks, LUTs, scopes, VRAM frame cache storage, async readback ring, import of platform frame handles as textures, and the presentation API `ui` uses to show the preview. | `media` (frame handle and colour metadata types), `assets` | only in the platform interop module (`render::interop`) |
 | `project` | The document: immutable edit tree (`im`), sequences, tracks, clips, transitions, keyframes, effect parameter schemas, project settings, undo history, save and load (`serde_json`), schema versions and migrations, autosave diffs. Pure data, no I/O threads, no GPU. | none | no |
 | `audio` | `cpal` device I/O, the real-time callback, mixer graph, audio effects, meters, master clock, voice-over recording. | none (receives f32 blocks through ring buffers) | no |
-| `plugins` | `wasmtime` host for Component Model effect, transition and title plugins, plugin manager, resource limits. Later: Lua scripting, optional Python bridge, VST3/AU helper-process protocol. | `project` (parameter schema types) | no |
+| `plugins` | `wasmtime` host for Component Model effect, transition and title plugins, plugin manager, resource limits. Defines the host traits (edit operations, texture access, time and project info) that `engine` implements, so plugins and scripts reach the engine without a dependency cycle. Later: Lua scripting, optional Python bridge, VST3/AU helper-process protocol. | `project` (parameter schema types) | no |
 | `assets` | Paths and loaders for bundled data: `assets/theme/`, `assets/i18n/`, fonts, `assets/transitions/`, `assets/titles/`, LUTs; the `t!()` macro; asset pack install locations. | none | no |
 | `smoke` | Headless check binary: opens `tests/fixtures/reference.proj`, plays 2 s, exports 1 s, exits 0. | `engine` | no |
+| `plugin-host` (*planned*, Phase 12, not in the workspace yet) | Separate sandboxed helper binary that loads VST3 and AU plugins and talks to the app over the `plugins` helper-process protocol and shared-memory audio rings. A crashing plugin takes down only this process. | `plugins` (protocol types) | only in `plugin-host::ffi` (VST3 and AU APIs) |
 
-Dependency direction (an arrow means "depends on"). There are no cycles; lower rows never depend on higher ones. The test `crates/app/tests/dependency_direction.rs` fails when a crate's manifest adds a workspace dependency this diagram does not show.
+Dependency direction (an arrow means "depends on"; the dashed edge is planned). The graph has no cycles, and it matches the "May depend on" column. The test `crates/app/tests/dependency_direction.rs` holds the same edges in its `ALLOWED` list and fails when a crate's manifest adds a workspace dependency outside that list, or when the crate folders on disk differ from it. Changing an edge means changing the table, this diagram and that list in the same commit. Planned crates join the list when they are created.
 
 ```mermaid
 flowchart TD
@@ -73,15 +74,16 @@ flowchart TD
     render --> assets
     media --> assets
     plugins --> project
+    plugin-host -.->|planned, Phase 12| plugins
 ```
 
 Rules:
 
 - `ui` never touches FFmpeg or wgpu internals. It shows the preview and GPU scopes through `render`'s presentation API (a texture id registered with the egui wgpu renderer plus its size and colour info) and asks `engine` for everything else. `ui` does not depend on `media`; probe results, thumbnails and waveforms reach it through `engine`.
-- `media` does not depend on wgpu. Hardware decoders hand out platform handles (an `IOSurface` on macOS, a shared D3D11 texture handle on Windows, a DMA-BUF on Linux) or CPU planes; `render::interop` turns them into textures. The prototype kept both halves in one `ffi.rs`; the real crates split them along this line.
+- `media` does not depend on wgpu. Hardware decoders hand out platform handles (an `IOSurface`/`CVPixelBuffer` on macOS, a shared D3D11 texture handle on Windows, a DMA-BUF on Linux) or CPU planes; `render::interop` turns them into textures. The prototype kept both halves in one `ffi.rs`; the real crates split them along this line, so the Phase 2 zero-copy work spans both crates (see section 7).
 - `project` has no dependencies inside the workspace, so the document model can be tested and fuzzed alone.
 - `audio` has no dependencies inside the workspace, so the real-time code stays small and auditable.
-- `unsafe` is allowed only in `media::ffi` (FFmpeg, VideoToolbox, D3D11VA, NVDEC, VAAPI calls) and `render::interop` (Metal, DX12 and Vulkan texture import through wgpu-hal). Everything else is safe Rust; clippy runs with `-D warnings`.
+- `unsafe_code = "deny"` is set for the whole workspace. A crate that must call platform APIs puts that code in one module named `ffi` (or `sys` or `interop`) with a local `#[allow(unsafe_code)]`, and keeps the rest of the crate safe. Current and expected modules: `media::ffi` (FFmpeg, VideoToolbox, D3D11VA, NVDEC, VAAPI), `render::interop` (Metal, DX12 and Vulkan texture import through wgpu-hal), `app::ffi` and `ui::ffi` if notifications or second-display interop need them, and `plugin-host::ffi` for VST3 and AU. Everything else is safe Rust; clippy runs with `-D warnings`.
 
 Feature flags (Phase 1): `codec-av1`, `codec-prores-sw`, `ai-whisper`, `ai-segmentation`. Off by default for fast local builds, all on in release builds. The codec flags live in `media` and the AI flags in `engine` (until an AI module exists); `engine` forwards the codec flags and `app` forwards all four. Cargo features cannot depend on the build profile, so release builds pass `--features release-full`, an `app` feature that turns on all four. `crates/app/tests/features.rs` checks that each flag reaches its owner (`cargo test -p app --features release-full`).
 
@@ -95,7 +97,8 @@ Every long-lived thread is named, so it shows up in profilers, crash reports and
 | --- | --- | --- | --- | --- |
 | UI | `main` (the process main thread, required by winit on macOS) | 1 | egui context, input, the current project root and undo history, the egui wgpu renderer, the frame-time monitor | block, do file I/O, decode, wait on a GPU fence, or hold a lock across a frame |
 | Scheduler | `glass-sched` | 1 | playback state (play, pause, shuttle, loop), the latest project snapshot, timeline evaluation, look-ahead windows, the rendered-frame cache index, dirty-range invalidation | decode or render itself |
-| Decode pool | `glass-decode-<n>` | one per active stream up to a cap sized from core count | demuxers and decoder sessions (hardware or software), GOP indexes in memory, audio decode and resampling | touch the GPU (it hands out platform handles or CPU planes) |
+| Decode pool | `glass-decode-<n>` | one per active stream up to a cap sized from core count | demuxers and decoder sessions (hardware or software), GOP indexes in memory | touch the GPU (it hands out platform handles or CPU planes) |
+| Audio decode | `glass-audio-decode` | 1 | audio decode and resampling into the per-track feed rings, at higher priority than video decode | wait behind video decode; a busy 4K decode pool must never starve the audio feeds |
 | Render | `glass-render` | 1 | render graph compilation and execution, compositor resources, VRAM frame cache storage, texture import from decoded frames, the async readback ring | wait on the UI thread |
 | Audio callback | owned by `cpal` (`glass-audio` where the backend allows naming) | 1 | the output stream, the mixer graph, meters, the master clock counter | allocate, lock, log, or do I/O |
 | Analysis pool | `glass-analysis-<n>` | small, low priority | analysis jobs: thumbnails, waveforms, proxies, GOP index, scene cuts, silence, beats, loudness | block playback; jobs pause while the user scrubs or plays |
@@ -106,13 +109,13 @@ Every long-lived thread is named, so it shows up in profilers, crash reports and
 
 - **Commands down, snapshots up.** The UI thread applies an edit to the immutable tree (cheap, structurally shared), pushes the new root onto its undo list, and sends an `Arc` of the root to the scheduler over a `crossbeam` channel. The scheduler diffs it against the previous root to find dirty ranges.
 - **Frame queues** between decode, render and present are bounded lock-free queues (`rtrb` for single-producer single-consumer, `crossbeam` for multi-producer). A full queue means "look-ahead is deep enough"; producers skip work, they do not block the consumer.
-- **Audio blocks** reach the callback through one `rtrb` ring per track feed. The callback only pops pre-decoded, pre-resampled f32 blocks. Parameter changes (gain, mute, effect settings) arrive through a separate `rtrb` command ring and are applied at block boundaries.
+- **Audio blocks** reach the callback through one `rtrb` ring per track feed. The callback only pops pre-decoded, pre-resampled f32 blocks. Parameter changes (gain, mute, effect settings) arrive through a separate `rtrb` command ring and are applied at block boundaries. Structural mixer changes (adding a track, bus or effect) build a new graph off the audio thread and send it through that ring; the callback swaps it in at a block boundary and sends the old graph back through a return ring, so it is dropped off the audio thread.
 - **State for display** (playhead position, cache map, thread activity, meters) flows back to the UI as latest-value messages. The UI drains them with `try_recv` once per frame and repaints; it never waits for one.
 - **Cancellation** uses a shared atomic generation counter per job family. Seeking or editing bumps the generation; workers drop stale requests without any lock.
 
 ### Clock and sync
 
-The master clock comes from the audio device callback: a monotonically increasing sample counter plus the device's reported output latency, published through an atomic. Video is slaved to it. The render thread picks the frame whose presentation time matches the clock at the next display refresh, and drift correction adjusts which frame is chosen, never the audio. When no audio device is available or output is muted, a monotonic system clock stands in with the same interface. Frame pacing under load follows the adaptive-quality rule: preview resolution drops before any frame is dropped, and it restores when the machine is idle.
+The master clock comes from the audio device callback: a monotonically increasing sample counter plus the device's reported output latency, published through an atomic. Video is slaved to it. The render thread picks the frame whose presentation time matches the clock at the next display refresh, and drift correction adjusts which frame is chosen, never the audio. Muting does not change the clock: while a device is open the callback keeps running (writing silence when muted) and keeps counting samples, so the playhead never jumps. Only when no audio device is open does a monotonic system clock stand in with the same interface; switching between the two re-bases the new clock on the current position. Frame pacing under load follows the adaptive-quality rule: preview resolution drops before any frame is dropped, and it restores when the machine is idle.
 
 ### Thread and data flow overview
 
@@ -123,7 +126,8 @@ flowchart LR
     DEC -->|"platform frame handles (rtrb)"| REND[glass-render]
     SCHED -->|"render graphs"| REND
     REND -->|"preview texture"| UI
-    DEC -->|"f32 audio blocks (rtrb)"| AUD["audio callback"]
+    SCHED -->|"audio decode requests"| ADEC[glass-audio-decode]
+    ADEC -->|"f32 audio blocks (rtrb)"| AUD["audio callback"]
     AUD -->|"master clock (atomic)"| SCHED
     AUD -->|"master clock (atomic)"| REND
     SCHED -->|"jobs"| ANA["glass-analysis-n"]
@@ -211,7 +215,7 @@ flowchart LR
     F --> H["Scheduler and render thread follow the clock"]
 ```
 
-Effects that run inside the callback are preallocated and lock-free. Heavy processing (spectral noise removal, loudness normalisation analysis) runs offline on the analysis pool and is cached. VST3 and AU plugins run in a sandboxed helper process (Phase 12) and exchange audio through shared memory rings, so a crashing plugin cannot take the app down.
+Effects that run inside the callback are preallocated and lock-free. Graph changes are built off the audio thread and swapped in through the command ring; the replaced graph goes back through a return ring and is dropped off the audio thread. Audio decode runs on its own `glass-audio-decode` thread ahead of video decode, so 4K video load cannot starve the feed rings. Heavy processing (spectral noise removal, loudness normalisation analysis) runs offline on the analysis pool and is cached. VST3 and AU plugins run in a sandboxed helper process (Phase 12) and exchange audio through shared memory rings, so a crashing plugin cannot take the app down.
 
 ---
 
@@ -250,13 +254,15 @@ Rules:
 
 ## 7. GPU pipeline
 
-- **API.** `wgpu` with WGSL shaders: Metal on macOS, DX12 on Windows, Vulkan on Linux. One device and queue, shared by the render thread and the egui renderer on the UI thread (wgpu devices and queues are `Send + Sync`).
+- **API.** `wgpu` with WGSL shaders: Metal on macOS, DX12 on Windows, Vulkan on Linux. One device and queue, created by eframe and shared by the render thread and the egui renderer on the UI thread (wgpu devices and queues are `Send + Sync`). `render` takes them from `cc.wgpu_render_state` at startup; if `render` ever needs adapter or device options eframe cannot request through its wgpu configuration, `app` creates the device itself and gives it to eframe with `WgpuSetup::Existing`. Either way there is exactly one device and `render` never creates its own.
 - **Render graph** (Phase 4). Per frame, the engine builds a DAG of nodes (source, transform, blend, text, shape, mask, effect, transition, LUT) that `render` compiles into wgpu passes, aliasing intermediate textures whose lifetimes do not overlap.
 - **Colour.** Sources are converted into a linear-light working space on import to the graph. Intermediates are `Rgba16Float`. Output to the preview or an 8-bit encoder is dithered. Colour metadata (BT.709, BT.2020, sRGB, limited or full range, 8/10/12-bit, PQ and HLG) travels on every frame from `media`.
 - **Text** uses `cosmic-text` for shaping and layout with a glyph atlas (proto-gpu used `glyphon`, which is built on it).
-- **Proven cost.** proto-gpu, 4K dissolve plus a two-line title and a timecode re-shaped every frame, Metal on M2: total GPU time median 0.72 ms, p99 0.77 ms with `Rgba8UnormSrgb` output; 0.92 ms p99 with `Rgba16Float` output. The budget was 2 ms. The text pass loads and stores the whole 4K target, so folding overlays into the previous pass is the first optimisation if the budget tightens.
+- **Proven cost.** proto-gpu, 4K dissolve plus a two-line title and a timecode re-shaped every frame, Metal on M2: total GPU time median 0.72 ms, p99 0.77 ms with `Rgba8UnormSrgb` output; 0.92 ms p99 with `Rgba16Float` output; wall time (encode, submit and wait) p99 1.12 ms. The budget was 2 ms. Apple GPUs overlap consecutive passes, so per-pass timestamps overlap and are not quoted; total GPU time is the judged number. The text pass loads and stores the whole 4K target, so folding overlays into the previous pass is the first optimisation if the budget tightens.
 
 ### Zero-copy hardware decode
+
+PLAN's Phase 2 zero-copy "Done when" spans two crates. `media` produces the platform handles (`IOSurface`/`CVPixelBuffer` on macOS, D3D11 shared texture handles on Windows) with their colour metadata, and its tests check handle production. `render::interop` imports those handles as wgpu textures without a CPU copy, and its tests check import and NV12 conversion against reference frames. The end-to-end check (no CPU copy, CPU budget) lives in `engine`'s integration tests, the first crate that sees both halves.
 
 | Platform | Path | Status |
 | --- | --- | --- |
@@ -265,14 +271,14 @@ Rules:
 | Linux | VAAPI → DMA-BUF → Vulkan image import | Planned (Phase 2, parallel) |
 | Any | Software decode, planes uploaded with `queue.write_texture` | Planned (Phase 2). Automatic per-file fallback, with a reason string shown in the UI |
 
-Next steps recorded by proto-decode for the engine: drive a `VTDecompressionSession` directly with asynchronous output instead of FFmpeg's synchronous hwaccel (keeping FFmpeg for demuxing and software fallback); keep several decoded frames in flight end to end, sized by the look-ahead queue; fold the NV12 conversion into the compositor's frame and keep the IOSurface texture cache.
+Next steps recorded by proto-decode for the engine: drive a `VTDecompressionSession` directly with asynchronous output instead of FFmpeg's synchronous hwaccel (keeping FFmpeg for demuxing and software fallback); keep several decoded frames in flight end to end, sized by the look-ahead queue; fold the NV12 conversion into the compositor's frame and keep the IOSurface texture cache. The engine's cache keys on (surface id, width, height, pixel format), not the surface id alone, because a freed surface's id can be reused for a surface of a different size or format.
 
 ---
 
 ## 8. UI
 
 - **Toolkit.** `egui` with `eframe` on `winit`, rendering through wgpu. proto-ui (egui 0.36, wgpu Metal, 200 clips on 10 tracks, 1440 x 748 points at 2x): full-frame CPU median 1.37 ms, p99 3.00 ms with off-screen culling; 1.09 / 3.13 ms without. The frame interval p99 (about 13 ms) was surface acquire and present wait, not CPU work; the frame-time monitor tracks it once real frames are drawn. The timeline widget stays self-contained so the toolkit could be swapped (fallback: `iced`).
-- **Theme.** Tokens live in `assets/theme/`, one file per theme (default dark, light, high contrast), loaded into the egui style. Values come from the `00 Foundations` page of the Paper file "Inspiration 2". Token roles: `bg/0` to `bg/3`, `border/subtle`, `border/strong`, `text/primary`, `text/secondary`, `text/muted`, `text/inverse`, `accent`, `accent/soft`, `state/*`, `clip/*`, `scope/*`, plus `glass/*` for floating surfaces. Dark is the default. The Paper file has no separate high-contrast tokens; that board reuses dark tokens with primary text only and strong borders. Type: Geist (400, 500) for UI and Geist Mono for timecode and numbers, both OFL and bundled; scale display 24/32, title 18/24, body 14/20, label 12/16, caption 11/14, mono 12/16. Spacing 2, 4, 8, 12, 16, 24, 32. Radius 0 panels, 4 controls, 8 floating, 999 pills. A CI check rejects literal colours in UI code.
+- **Theme.** Tokens live in `assets/theme/`, one file per theme (default dark, light, high contrast), loaded into the egui style. Values come from the Paper file "Inspiration 2" (`00 Foundations` page), which is authoritative where it differs from the defaults in `DESIGN_HANDOFF.md`: Geist and Geist Mono instead of Inter and JetBrains Mono, floating radius 8 instead of 6, added `glass/*` tokens, extra spacing steps 48 and 64 for board margins only, and no separate high-contrast tokens. Token roles: `bg/0` to `bg/3`, `border/subtle`, `border/strong`, `text/primary`, `text/secondary`, `text/muted`, `text/inverse`, `accent`, `accent/soft`, `state/*`, `clip/*`, `scope/*`, plus `glass/*` (top, bottom, edge, highlight, shadow) for the glass sheen on controls and floating surfaces. Dark is the default. The high-contrast theme reuses the dark tokens: all text in `text/primary`, dividers in `border/strong`, surfaces in `bg/0`. Type: Geist (400, 500) for UI and Geist Mono for timecode and numbers, both OFL and bundled; scale display 24/32, title 18/24, body 14/20, label 12/16, caption 11/14, mono 12/16. Spacing 2, 4, 8, 12, 16, 24, 32. Radius 0 panels, 4 controls, 8 floating, 999 pills. A CI check rejects literal colours in UI code.
 - **i18n.** Every user-facing string is a key in `assets/i18n/en.json`, looked up with `t!()`. A CI check verifies every key used exists and no literal strings appear in UI code. Right-to-left layout mirrors panels while the timeline stays left-to-right in time (Phase 6).
 - **Frame-time monitor** (Phase 1). Records every UI frame's duration, exposes p50 and p99 to the debug panel, and fails tests that exceed 8 ms. It is the gate for "no UI-thread stall over 8 ms" on every task.
 - **Density.** Pro panels: 28 px rows, 8 px gutters, 12 px labels. Beginner surfaces: 40 px rows, 16 px gutters, 14 px labels.
@@ -281,8 +287,8 @@ Next steps recorded by proto-decode for the engine: drive a `VTDecompressionSess
 
 ## 9. Plugins, scripting and AI
 
-- **Plugins** (Phase 15): `wasmtime` with the Component Model ABI. An effect, transition or title plugin receives typed parameters, input textures, time and project info through the ABI, and runs sandboxed: no file system or network access unless granted, with memory and execution limits enforced by the plugin manager. Effect parameters use the same schema as built-in effects, so the inspector UI is generated the same way.
-- **Audio plugins** (Phase 12): VST3 and AU run in a separate helper process, never in the app process.
+- **Plugins** (Phase 15): `wasmtime` with the Component Model ABI. An effect, transition or title plugin receives typed parameters, input textures, time and project info through the ABI, and runs sandboxed: no file system or network access unless granted, with memory and execution limits enforced by the plugin manager. Effect parameters use the same schema as built-in effects, so the inspector UI is generated the same way. Plugins and scripts reach engine operations and textures only through host traits defined in `plugins` and implemented by `engine`, which keeps the dependency one way (`engine` depends on `plugins`, never the reverse).
+- **Audio plugins** (Phase 12): VST3 and AU run in the separate sandboxed `plugin-host` helper binary (planned crate, section 2), never in the app process.
 - **Scripting** (Phase 15): Lua for batch operations and automation; an optional Python bridge behind a feature flag.
 - **AI features** (Phase 10) run on-device. Models (for example `whisper-rs` speech-to-text, segmentation) download on demand into the user data folder through the model manager, which verifies, caches and deletes them. Nothing is downloaded into the repo or bundled in the installer. Each feature sits behind a Cargo feature flag (`ai-whisper`, `ai-segmentation`), all on in release builds.
 - **No telemetry.** Crash minidumps are opt-in, written locally, and never uploaded automatically.
@@ -310,7 +316,7 @@ The table below is PLAN.md's defaults table, copied verbatim, with a Status colu
 | Decode/encode | `ffmpeg-next` against a GPL shared FFmpeg 9.0.x build with x264 and x265 | none | Decode confirmed by proto-decode on macOS (`ffmpeg-next` 9 against Homebrew FFmpeg 9.0.1, GPL shared, x264 and x265). Encode adopted without prototype (Phase 8) |
 | HW decode | VideoToolbox (macOS), D3D11VA then NVDEC (Windows), VAAPI (Linux), software fallback | software | VideoToolbox confirmed by proto-decode: 4K60 H.264 at 60.1 fps, 0 late, 2.18% of the machine against under 5% per stream. D3D11VA pending hardware (Windows PC). NVDEC, VAAPI and the software fallback adopted without prototype |
 | Audio I/O | `cpal` | none | Adopted without prototype |
-| Text shaping | `cosmic-text` | `rustybuzz` + `swash` | Confirmed by proto-gpu through `glyphon` (built on `cosmic-text`): text pass p99 0.70 ms at 4K with re-shaping every frame |
+| Text shaping | `cosmic-text` | `rustybuzz` + `swash` | Confirmed by proto-gpu through `glyphon` (built on `cosmic-text`): 4K dissolve plus text re-shaped every frame, total GPU p99 0.77 ms, wall p99 1.12 ms (per-pass timestamps overlap on Apple GPUs, so no separate text-pass figure) |
 | Persistent data | `im` crate for the edit tree, `serde_json` for files | `rpds` | Adopted without prototype; Phase 5 round-trip and undo tests confirm it |
 | Plugins | `wasmtime`, Component Model ABI | none | Adopted without prototype |
 | Speech-to-text | `whisper-rs`, models downloaded on demand | none | Adopted without prototype |
