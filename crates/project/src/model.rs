@@ -84,6 +84,34 @@ impl Project {
             .find_map(|s| s.track(track).map(|t| (s, t)))
     }
 
+    /// True when `other` is this very version: nothing was edited between them (every
+    /// child collection is the same shared tree).
+    pub fn ptr_eq(&self, other: &Project) -> bool {
+        self.next_id == other.next_id
+            && self.uid == other.uid
+            && self.name == other.name
+            && self.media.ptr_eq(&other.media)
+            && self.sequences.ptr_eq(&other.sequences)
+    }
+
+    /// Equal content, comparing shared nodes by pointer first, so two roots that differ
+    /// in one item cost about one track's worth of pointer comparisons.
+    pub fn content_eq(&self, other: &Project) -> bool {
+        let Project {
+            uid,
+            name,
+            next_id,
+            media,
+            sequences,
+        } = self;
+        self.ptr_eq(other)
+            || (*next_id == other.next_id
+                && *uid == other.uid
+                && *name == other.name
+                && (media.ptr_eq(&other.media) || *media == other.media)
+                && all_eq(sequences, &other.sequences, |a, b| a.content_eq(b)))
+    }
+
     pub(crate) fn alloc_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -158,6 +186,22 @@ impl Sequence {
         self.tracks.iter().find(|t| t.id == id)
     }
 
+    /// Equal content, comparing shared tracks and items by pointer first.
+    pub fn content_eq(&self, other: &Sequence) -> bool {
+        let Sequence {
+            id,
+            name,
+            frame_rate,
+            sample_rate,
+            tracks,
+        } = self;
+        *id == other.id
+            && *name == other.name
+            && *frame_rate == other.frame_rate
+            && *sample_rate == other.sample_rate
+            && all_eq(tracks, &other.tracks, |a, b| a.content_eq(b))
+    }
+
     pub(crate) fn track_index(&self, id: TrackId) -> Option<usize> {
         self.tracks.iter().position(|t| t.id == id)
     }
@@ -190,6 +234,20 @@ pub struct Track {
 impl Track {
     pub fn item(&self, id: ItemId) -> Option<&Arc<Item>> {
         self.items.iter().find(|i| i.id == id)
+    }
+
+    /// Equal content, comparing shared items by pointer first.
+    pub fn content_eq(&self, other: &Track) -> bool {
+        let Track {
+            id,
+            kind,
+            name,
+            items,
+        } = self;
+        *id == other.id
+            && *kind == other.kind
+            && *name == other.name
+            && all_eq(items, &other.items, |a, b| a == b)
     }
 
     pub(crate) fn item_index(&self, id: ItemId) -> Option<usize> {
@@ -232,4 +290,13 @@ pub struct Clip {
     pub media: MediaId,
     /// Source time (seconds from the start of the file) shown at the item's start.
     pub source_start: Time,
+}
+
+/// Element-wise equality of two node lists, by pointer first.
+fn all_eq<T>(a: &Vector<Arc<T>>, b: &Vector<Arc<T>>, eq: impl Fn(&T, &T) -> bool) -> bool {
+    a.ptr_eq(b)
+        || (a.len() == b.len()
+            && a.iter()
+                .zip(b.iter())
+                .all(|(x, y)| Arc::ptr_eq(x, y) || eq(x, y)))
 }

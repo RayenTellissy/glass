@@ -5,12 +5,14 @@
 
 pub mod edit;
 pub mod error;
+pub mod history;
 pub mod id;
 pub mod model;
 pub mod time;
 
 pub use edit::ClipSpec;
 pub use error::EditError;
+pub use history::{EditLabel, History, MemoryStats};
 pub use id::{ItemId, MediaId, NodeId, SequenceId, TrackId};
 pub use model::{Clip, Item, ItemKind, MediaRef, MediaRefs, Project, Sequence, Track, TrackKind};
 pub use time::{Rational, Time, TimeError, TimeRange};
