@@ -4,7 +4,7 @@ This document describes how Glass is built: the crates, the threads, how data mo
 
 Status words used below:
 
-- **Proven**: measured by a Phase 0 prototype in `proto-ui/`, `proto-gpu/` or `proto-decode/`.
+- **Proven**: measured by a Phase 0 prototype in `experiments/proto-ui/`, `experiments/proto-gpu/` or `experiments/proto-decode/` (see [`experiments/README.md`](../experiments/README.md)).
 - **Planned**: decided here, built in the phase named next to it.
 - **Pending hardware**: decided, but the prototype could not run locally (no Windows PC, no NVIDIA GPU).
 
@@ -317,4 +317,4 @@ The table below is PLAN.md's defaults table, copied verbatim, with a Status colu
 | Packaging | `cargo-dist` | hand-written CI | Adopted without prototype |
 | Min targets | macOS 12 arm64 + x86_64, Windows 10 x86_64 | Linux best effort | Adopted without prototype; only macOS arm64 is built locally |
 
-Prototype sources and full result tables: [`proto-ui/RESULTS.md`](../proto-ui/RESULTS.md), [`proto-gpu/RESULTS.md`](../proto-gpu/RESULTS.md), [`proto-decode/RESULTS.md`](../proto-decode/RESULTS.md). Decisions and their reasons: [`DECISIONS.md`](DECISIONS.md).
+Prototype sources and full result tables: [`experiments/proto-ui/RESULTS.md`](../experiments/proto-ui/RESULTS.md), [`experiments/proto-gpu/RESULTS.md`](../experiments/proto-gpu/RESULTS.md), [`experiments/proto-decode/RESULTS.md`](../experiments/proto-decode/RESULTS.md). Decisions and their reasons: [`DECISIONS.md`](DECISIONS.md).

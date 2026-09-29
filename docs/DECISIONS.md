@@ -59,7 +59,7 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 
 - **Date:** 2026-09-29
 - **Decision:** The proto-decode budget "under 5% CPU per stream" is judged as whole-machine utilisation: the app process plus the system decoder service (VTDecoderXPCService on macOS), divided by the number of logical cores, at 60 fps paced.
-- **Reason:** The plan does not define the unit; this is how system-wide decode cost is usually stated. The per-core numbers are recorded in `proto-decode/RESULTS.md` so the result can be re-judged on the reference M1.
+- **Reason:** The plan does not define the unit; this is how system-wide decode cost is usually stated. The per-core numbers are recorded in `experiments/proto-decode/RESULTS.md` so the result can be re-judged on the reference M1.
 - **Evidence:** On the M2 (8 logical cores), the judged run (CVMetalTextureCache per frame, paced 60 fps, one stream) used 2.18% of the machine: 9.20% of one core in the process plus 8.26% of one core in VTDecoderXPCService, at 60.1 fps with 0 late frames.
 - **Alternatives:** Judging against a single core. Measured that way, the same run is above 5% (9.20% in the process alone), so the unit decides the verdict; the per-core figures are kept for that reason.
 - **Consequences:** Later "under X% CPU" budgets are judged the same way, with per-core numbers recorded alongside.

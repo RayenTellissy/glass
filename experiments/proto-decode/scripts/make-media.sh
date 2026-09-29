@@ -1,5 +1,5 @@
 #!/bin/sh
-# Generates the 4K60 H.264 test clip into proto-decode/media/ (git-ignored).
+# Generates the 4K60 H.264 test clip into experiments/proto-decode/media/ (git-ignored).
 set -eu
 cd "$(dirname "$0")/.."
 mkdir -p media
