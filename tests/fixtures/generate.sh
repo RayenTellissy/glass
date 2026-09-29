@@ -54,14 +54,19 @@ json_or_null() {
     if [ "$1" = "null" ]; then echo "null"; else echo "\"$1\""; fi
 }
 
-# add_entry file kind codec width height frame_rate duration pix_fmt vfr frames audio_codec audio_rate audio_channels [rotation [timecode [colour]]]
+# add_entry file kind codec width height frame_rate duration pix_fmt vfr frames audio_codec audio_rate audio_channels [rotation [timecode [colour [extra]]]]
 # rotation is the display matrix's counter-clockwise angle in degrees (default 0), timecode
 # the first frame's SMPTE timecode tag (default none), colour the stream's colour tags as
-# "primaries,transfer,matrix,range" in ffprobe's names (default: not checked).
+# "primaries,transfer,matrix,range" in ffprobe's names (default: not checked), extra more
+# JSON members for the entry (default none).
+#
+# Kinds: video, audio, image and image_sequence are read through FFmpeg; still, animation
+# and sequence are read by media::source (the image crate, or ImageIO on macOS), and their
+# width and height are the upright size after EXIF orientation.
 add_entry() {
     local file=$1 kind=$2 codec=$3 width=$4 height=$5 rate=$6 duration=$7 pix_fmt=$8 vfr=$9
     local frames=${10} a_codec=${11} a_rate=${12} a_channels=${13}
-    local rotation=${14:-0} timecode=${15:-null} colour=${16:-null}
+    local rotation=${14:-0} timecode=${15:-null} colour=${16:-null} extra=${17:-}
     local audio="null"
     local colour_json="null"
     if [ "$colour" != "null" ]; then
@@ -85,7 +90,8 @@ add_entry() {
       \"audio\": $audio,
       \"rotation\": $rotation,
       \"timecode\": $(json_or_null "$timecode"),
-      \"colour\": $colour_json
+      \"colour\": $colour_json${extra:+,
+      $extra}
     }")
     VERIFY_JOBS+=("$file|$kind|$codec|$width|$height|$rate|$duration|$pix_fmt|$vfr|$frames|$a_codec|$a_rate|$a_channels|$rotation|$timecode|$colour")
 }
@@ -269,6 +275,149 @@ else
 fi
 add_entry "$SEQ_DIR/frame_%04d.png" image_sequence png 640 360 24/1 2 rgb24 false 48 null null null
 
+# produce file function [args...]: runs `function tmp_path args...` to write the file (or,
+# when the name ends in "/", a directory) under a temporary name and renames it on success.
+produce() {
+    local file=$1 fn=$2
+    shift 2
+    local name=${file%/}
+    local target="$OUT/$name"
+    if [ -e "$target" ] && [ "$FORCE" -eq 0 ]; then
+        SKIPPED=$((SKIPPED + 1))
+        printf "  skip  %s\n" "$file"
+        return
+    fi
+    local tmp="$OUT/.partial-$name"
+    rm -rf "$tmp"
+    "$fn" "$tmp" "$@"
+    rm -rf "$target"
+    mv -f "$tmp" "$target"
+    GENERATED=$((GENERATED + 1))
+    printf "  made  %s\n" "$file"
+}
+
+ffmpeg_to() {
+    local out=$1
+    shift
+    "$FFMPEG" -hide_banner -loglevel error -nostdin -y "$@" "$out"
+}
+
+# Stills, animations and sequences for media::source. Solid frames of known colour make
+# pixel spot checks exact; a red top-left block shows orientation.
+MARKED="color=c=blue:s=640x360,format=rgb24,drawbox=x=0:y=0:w=160:h=90:c=red:t=fill"
+
+produce still_marked_640x360.tiff ffmpeg_to -f lavfi -i "$MARKED" -frames:v 1 -c:v tiff -f image2
+add_entry still_marked_640x360.tiff still tiff 640 360 null null rgb24 false 1 null null null 0 null null \
+    '"marker": "top_left"'
+
+produce still_rgba64_320x180.png ffmpeg_to \
+    -f lavfi -i "color=c=0x336699:s=320x180,format=rgba64le,colorchannelmixer=aa=0.5" -frames:v 1 -c:v png -pix_fmt rgba64be -f image2
+add_entry still_rgba64_320x180.png still png 320 180 null null rgba64be false 1 null null null 0 null null \
+    '"bit_depth": 16, "alpha": true'
+
+produce still_marked_640x360.bmp ffmpeg_to -f lavfi -i "$MARKED" -frames:v 1 -c:v bmp -f image2
+add_entry still_marked_640x360.bmp still bmp 640 360 null null bgr24 false 1 null null null 0 null null \
+    '"marker": "top_left"'
+
+# Display P3 tagged with a PNG cICP chunk (FFmpeg writes cICP and cHRM from the tags).
+produce still_p3_cicp_640x360.png ffmpeg_to \
+    -f lavfi -i "$MARKED,setparams=color_primaries=smpte432:color_trc=iec61966-2-1" -frames:v 1 -c:v png -f image2
+add_entry still_p3_cicp_640x360.png still png 640 360 null null rgb24 false 1 null null null 0 null null \
+    '"primaries": "smpte432", "marker": "top_left"'
+
+# EXIF orientation 6 (rotate 90 degrees clockwise to display): a 640x360 JPEG whose
+# upright picture is 360x640 with the red block at the top right. The APP1 segment is
+# spliced in after SOI.
+exif_jpeg() {
+    local out=$1 plain="$1.plain.jpg"
+    ffmpeg_to "$plain" -f lavfi -i "$MARKED" -frames:v 1 -pix_fmt yuvj444p -q:v 2 -f image2
+    {
+        head -c 2 "$plain"
+        printf "\xff\xe1\x00\x22Exif\x00\x00MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01\x00\x06\x00\x00\x00\x00\x00\x00"
+        tail -c +3 "$plain"
+    } >"$out"
+    rm -f "$plain"
+}
+produce still_exif6_640x360.jpg exif_jpeg
+add_entry still_exif6_640x360.jpg still mjpeg 360 640 null null yuvj444p false 1 null null null 90 null null \
+    '"orientation": 6, "marker": "top_right"'
+
+# Animated GIF, variable frame delays: source frame N is solid (N*16, 255-N*16, 128);
+# frames 3 to 5 of every 10 are dropped, so delays are 100 ms except 400 ms after
+# frames 2 and 12.
+produce anim_vfr_160x120.gif ffmpeg_to \
+    -f lavfi -i "color=c=black:s=160x120:r=10:d=2,format=rgb24,geq=r='N*16':g='255-N*16':b=128" \
+    -vf "select='not(between(mod(n\,10)\,3\,5))',split[a][b];[a]palettegen=reserve_transparent=0:stats_mode=full[p];[b][p]paletteuse=dither=none" \
+    -fps_mode vfr -loop 0 -f gif
+add_entry anim_vfr_160x120.gif animation gif 160 120 null 2 null false 14 null null null 0 null null \
+    '"delays_ms": [100, 100, 400, 100, 100, 100, 100, 100, 100, 400, 100, 100, 100, 100], "source_frames": [0, 1, 2, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 19]'
+
+# Animated and still WebP (lossless) from solid frames (N*40, 255-N*40, 128), when the
+# libwebp tools are installed.
+if command -v img2webp >/dev/null 2>&1 && command -v cwebp >/dev/null 2>&1; then
+    webp_frames() {
+        mkdir -p "$1"
+        ffmpeg_to "$1/f_%02d.png" -f lavfi \
+            -i "color=c=black:s=160x120:r=10:d=0.6,format=rgb24,geq=r='N*40':g='255-N*40':b=128" -start_number 0
+    }
+    anim_webp() {
+        local out=$1 frames="$1.frames"
+        webp_frames "$frames"
+        img2webp -loop 0 -lossless -d 100 "$frames/f_00.png" -d 250 "$frames/f_01.png" \
+            -d 100 "$frames/f_02.png" -d 400 "$frames/f_03.png" -d 100 "$frames/f_04.png" \
+            -d 50 "$frames/f_05.png" -o "$out" >/dev/null 2>&1
+        rm -rf "$frames"
+    }
+    still_webp() {
+        local out=$1
+        ffmpeg_to "$out.png" -f lavfi -i "$MARKED" -frames:v 1 -f image2
+        cwebp -quiet -lossless "$out.png" -o "$out"
+        rm -f "$out.png"
+    }
+    produce anim_vfr_160x120.webp anim_webp
+    add_entry anim_vfr_160x120.webp animation webp_anim 160 120 null 1 null false 6 null null null 0 null null \
+        '"delays_ms": [100, 250, 100, 400, 100, 50], "source_frames": [0, 1, 2, 3, 4, 5], "colour_step": 40'
+    produce still_marked_640x360.webp still_webp
+    add_entry still_marked_640x360.webp still webp 640 360 null null null false 1 null null null 0 null null \
+        '"marker": "top_left"'
+else
+    echo "  note  img2webp or cwebp not found; WebP fixtures skipped"
+fi
+
+# HEIC (Display P3, from the cICP PNG) and AVIF through macOS sips.
+if command -v sips >/dev/null 2>&1 && sips --formats 2>/dev/null | grep -q "heic.*Writable"; then
+    sips_to() {
+        local out=$1 format=$2 src="$1.src.png"
+        ffmpeg_to "$src" -f lavfi -i "$MARKED,setparams=color_primaries=smpte432:color_trc=iec61966-2-1" \
+            -frames:v 1 -c:v png -f image2
+        sips -s format "$format" "$src" --out "$out.$format" >/dev/null
+        mv -f "$out.$format" "$out"
+        rm -f "$src"
+    }
+    produce still_p3_640x360.heic sips_to heic
+    add_entry still_p3_640x360.heic still hevc 640 360 null null null false 1 null null null 0 null null \
+        '"primaries": "smpte432", "marker": "top_left", "platform": "macos"'
+    if sips --formats 2>/dev/null | grep -q "avif.*Writable"; then
+        produce still_p3_640x360.avif sips_to avif
+        add_entry still_p3_640x360.avif still av1 640 360 null null null false 1 null null null 0 null null \
+            '"primaries": "smpte432", "marker": "top_left", "platform": "macos"'
+    fi
+else
+    echo "  note  sips with HEIC output not found (macOS only); HEIC and AVIF fixtures skipped"
+fi
+
+# A numbered sequence with gaps: shot_0001.png to shot_0012.png without 5, 6 and 10;
+# number k is solid ((k-1)*20, 0, 255-(k-1)*20).
+gap_sequence() {
+    mkdir -p "$1"
+    ffmpeg_to "$1/shot_%04d.png" -f lavfi \
+        -i "color=c=black:s=320x180:r=24:d=0.5,format=rgb24,geq=r='N*20':g=0:b='255-N*20'" -start_number 1
+    rm -f "$1/shot_0005.png" "$1/shot_0006.png" "$1/shot_0010.png"
+}
+produce sequence_gaps_320x180/ gap_sequence
+add_entry "sequence_gaps_320x180/shot_%04d.png" sequence png 320 180 null null rgb24 false 9 null null null 0 null null \
+    '"first": 1, "last": 12, "missing": [5, 6, 10]'
+
 make audio_48k_stereo.wav \
     -f lavfi -i "$TONE" -f lavfi -i "$NOISE" \
     -filter_complex "[0:a][1:a]amerge=inputs=2[a]" -map "[a]" -t 3 -c:a pcm_s16le -ar 48000
@@ -335,6 +484,11 @@ for job in "${VERIFY_JOBS[@]}"; do
     input_args=()
     if [ "$kind" = "image_sequence" ]; then
         input_args=(-framerate "${rate%/1}" -start_number 1)
+    elif [ "$kind" = "sequence" ]; then
+        # Gaps stop FFmpeg's image2 demuxer, so count the files and probe the first one.
+        present=$(find "$(dirname "$path")" -name "*.png" | wc -l | tr -d " ")
+        check_eq "$file" frames "$present" "$frames"
+        path=$(find "$(dirname "$path")" -name "*.png" | sort | head -n 1)
     elif [ ! -e "$path" ]; then
         fail "$file" "missing"
         continue
@@ -343,9 +497,17 @@ for job in "${VERIFY_JOBS[@]}"; do
     if [ "$kind" != "audio" ]; then
         v=$(probe "$path" v:0 "stream=codec_name,width,height,pix_fmt,r_frame_rate" ${input_args[@]+"${input_args[@]}"})
         check_eq "$file" codec "$(field "$v" codec_name)" "$codec"
-        check_eq "$file" width "$(field "$v" width)" "$width"
-        check_eq "$file" height "$(field "$v" height)" "$height"
-        check_eq "$file" pix_fmt "$(field "$v" pix_fmt)" "$pix_fmt"
+        # Stills list their upright size; the stored picture of a 90 or 270 degree EXIF
+        # orientation is the other way round.
+        stored_w=$width stored_h=$height
+        if [ "$kind" = "still" ] && { [ "$rotation" = "90" ] || [ "$rotation" = "270" ]; }; then
+            stored_w=$height stored_h=$width
+        fi
+        check_eq "$file" width "$(field "$v" width)" "$stored_w"
+        check_eq "$file" height "$(field "$v" height)" "$stored_h"
+        if [ "$pix_fmt" != "null" ]; then
+            check_eq "$file" pix_fmt "$(field "$v" pix_fmt)" "$pix_fmt"
+        fi
         if [ "$kind" = "video" ] && [ "$vfr" = "false" ]; then
             check_eq "$file" frame_rate "$(field "$v" r_frame_rate)" "$rate"
         fi
@@ -365,12 +527,17 @@ for job in "${VERIFY_JOBS[@]}"; do
         fi
     fi
 
+    if [ "$kind" = "animation" ]; then
+        n=$(probe "$path" v:0 "stream=nb_read_frames" -count_frames)
+        check_eq "$file" frames "$(field "$n" nb_read_frames)" "$frames"
+    fi
+
     if [ "$kind" = "image_sequence" ]; then
         n=$(probe "$path" v:0 "stream=nb_read_frames" -count_frames ${input_args[@]+"${input_args[@]}"})
         check_eq "$file" frames "$(field "$n" nb_read_frames)" "$frames"
     fi
 
-    if [ "$duration" != "null" ] && [ "$kind" != "image_sequence" ]; then
+    if [ "$duration" != "null" ] && { [ "$kind" = "video" ] || [ "$kind" = "audio" ]; }; then
         d=$("$FFPROBE" -v error -show_entries format=duration -of csv=p=0 "$path")
         if ! awk -v d="$d" -v e="$duration" 'BEGIN { x = d - e; if (x < 0) x = -x; exit !(x <= 0.1) }'; then
             fail "$file" "duration is $d s, expected $duration s"

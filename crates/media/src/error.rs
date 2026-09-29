@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use crate::format::MediaKind;
 use crate::hw::FallbackReason;
+use crate::source::Unsupported;
 use crate::time::Timestamp;
 
 /// An FFmpeg return code with its message (`av_strerror`).
@@ -83,6 +84,15 @@ pub enum MediaError {
         source: FfmpegError,
     },
 
+    /// A still image, animation or sequence frame could not be read or decoded.
+    #[error("{}: cannot decode the image: {message}", path.display())]
+    Image { path: PathBuf, message: String },
+
+    /// The file is a kind of picture this build or platform cannot decode; `reason` has
+    /// the message for the UI.
+    #[error("{}: {reason}", path.display())]
+    Unsupported { path: PathBuf, reason: Unsupported },
+
     /// Converting a decoded frame (for example to RGBA with swscale) failed.
     #[error("converting a {format} {width}x{height} frame to {to}: {source}")]
     Convert {
@@ -107,7 +117,9 @@ impl MediaError {
             | Self::NoSuchStream { .. }
             | Self::NotDecodable { .. }
             | Self::NoDecoder { .. }
-            | Self::Hardware { .. } => None,
+            | Self::Hardware { .. }
+            | Self::Image { .. }
+            | Self::Unsupported { .. } => None,
         }
     }
 }

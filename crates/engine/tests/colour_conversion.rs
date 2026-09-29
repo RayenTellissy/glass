@@ -78,6 +78,54 @@ fn software_frames_match_swscale_with_their_siting() {
     }
 }
 
+/// Stills from `media::source` (planar RGB, identity matrix, 8 and 16-bit, with and
+/// without alpha, EXIF-rotated, Display P3 from ImageIO) upload and convert on the GPU
+/// to what swscale makes of the same frame.
+#[test]
+fn stills_convert_like_swscale() {
+    let Some(gpu) = gpu() else {
+        eprintln!("skipped: no GPU adapter with 16-bit normalised textures");
+        return;
+    };
+    for file in [
+        "still_marked_640x360.tiff",
+        "still_rgba64_320x180.png",
+        "still_exif6_640x360.jpg",
+        "still_p3_cicp_640x360.png",
+        "still_p3_640x360.heic",
+        "anim_vfr_160x120.gif",
+    ] {
+        let Some(path) = fixture(file) else {
+            continue;
+        };
+        let mut source = media::VideoSource::open(
+            &path,
+            media::SourceOptions::new(media::Rational::new(30, 1)),
+        )
+        .expect("open");
+        let frame = source.next_frame().expect("decode").expect("frame");
+        let reference = frame.to_rgba8().expect("swscale");
+        let gpu_rgba = gpu_encoded(&gpu, &frame, None);
+        // Alpha is not converted yet (the compositor will read the alpha plane), so
+        // compare colour only.
+        let colour = |data: &[u8]| -> Vec<u8> {
+            data.as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|p| [p[0], p[1], p[2]])
+                .collect()
+        };
+        let d = diff(&colour(&gpu_rgba), &colour(&reference.data));
+        eprintln!(
+            "{file} ({}): GPU vs swscale mean {:.4}, max {}",
+            frame.format(),
+            d.mean,
+            d.max
+        );
+        assert!(d.max <= 1, "{file}: max difference {}", d.max);
+    }
+}
+
 #[test]
 fn siting_changes_the_result_on_detailed_content() {
     // testsrc2 has sharp coloured edges, where a quarter-sample chroma shift shows.

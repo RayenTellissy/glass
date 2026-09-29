@@ -164,16 +164,26 @@ impl PlaneLayout {
         }
     }
 
-    /// A CPU pixel format the converter reads, or `None` (RGB, alpha, big-endian and
-    /// packed formats).
+    /// A CPU pixel format the converter reads, or `None` (packed RGB, YUV with alpha,
+    /// big-endian and packed formats). Planar RGB (`gbrp`, and `gbrap` whose alpha plane
+    /// is uploaded but not read yet) goes through the identity matrix, planes G, B, R in
+    /// the Y, Cb, Cr slots: how stills arrive from `media::source`.
     pub fn from_pixel_format(format: PixelFormat) -> Option<Self> {
-        if format.is_rgb() || format.has_alpha() || format.is_hardware() {
-            return None;
-        }
         let name = format.name();
         let depth = format.bit_depth();
         let container_bits = if depth > 8 { 16 } else { 8 };
         if depth > 8 && !name.ends_with("le") {
+            return None;
+        }
+        if name.starts_with("gbrp") || name.starts_with("gbrap") {
+            return Some(Self {
+                planar: true,
+                container_bits,
+                msb_aligned: false,
+                chroma_shift: (0, 0),
+            });
+        }
+        if format.is_rgb() || format.has_alpha() || format.is_hardware() {
             return None;
         }
         let planar = match format.plane_count() {
@@ -663,6 +673,9 @@ mod tests {
         assert!(layout("yuvj420p").is_some());
         assert!(layout("rgb24").is_none());
         assert!(layout("yuva420p").is_none());
+        assert!(layout("gbrp").is_some_and(|l| l.planar && l.chroma_shift == (0, 0)));
+        assert!(layout("gbrap16le").is_some_and(|l| l.planar && l.container_bits == 16));
+        assert!(layout("gbrp16be").is_none());
         assert!(layout("yuv420p10be").is_none());
     }
 

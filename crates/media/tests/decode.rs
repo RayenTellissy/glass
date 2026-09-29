@@ -71,6 +71,9 @@ fn every_fixture_decodes() {
     for entry in &files {
         let file = entry["file"].as_str().expect("file");
         let kind = entry["kind"].as_str().expect("kind");
+        if !common::is_ffmpeg_kind(kind) {
+            continue;
+        }
         let path = common::generated_dir().join(file);
         let info = probe(&path).unwrap_or_else(|e| panic!("{file}: {e}"));
 

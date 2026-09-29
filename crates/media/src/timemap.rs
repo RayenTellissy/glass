@@ -50,6 +50,9 @@ pub enum FrameTimes {
     },
     /// Sorted presentation times in stream ticks, and the end of the last frame.
     Variable { pts: Vec<i64>, end: i64 },
+    /// A still picture: one frame at time 0 with no end of its own. The project gives the
+    /// clip its length, and every sequence frame of a [`TimestampMap`] shows the picture.
+    Still,
 }
 
 /// How [`SourceTimeline::scan`] learned the frame times.
@@ -199,6 +202,7 @@ impl SourceTimeline {
         match &self.frames {
             FrameTimes::Constant { count, .. } => *count,
             FrameTimes::Variable { pts, .. } => pts.len() as u64,
+            FrameTimes::Still => 1,
         }
     }
 
@@ -207,17 +211,32 @@ impl SourceTimeline {
         match &self.frames {
             FrameTimes::Constant { start, .. } => *start,
             FrameTimes::Variable { pts, .. } => pts.first().copied().unwrap_or(0),
+            FrameTimes::Still => 0,
         }
     }
 
-    /// End of the last frame, in stream ticks.
+    /// End of the last frame, in stream ticks (`i64::MAX` for a still).
     pub fn end(&self) -> i64 {
         match &self.frames {
             FrameTimes::Constant { start, rate, count } => {
                 start + ticks_for_frames(*count, *rate, self.time_base)
             }
             FrameTimes::Variable { end, .. } => *end,
+            FrameTimes::Still => i64::MAX,
         }
+    }
+
+    /// The timeline of a still picture (see [`FrameTimes::Still`]).
+    pub fn still(time_base: Rational) -> Self {
+        Self {
+            stream_index: 0,
+            time_base,
+            frames: FrameTimes::Still,
+        }
+    }
+
+    pub fn is_still(&self) -> bool {
+        matches!(self.frames, FrameTimes::Still)
     }
 
     pub fn duration(&self) -> Timestamp {
@@ -234,6 +253,7 @@ impl SourceTimeline {
                 start + ticks_for_frames(k, *rate, self.time_base)
             }
             FrameTimes::Variable { pts, .. } => pts[k as usize],
+            FrameTimes::Still => 0,
         };
         Some(Timestamp::new(value, self.time_base))
     }
@@ -254,6 +274,7 @@ impl SourceTimeline {
                 ((num.div_euclid(den)) as u64).min(count.saturating_sub(1))
             }
             FrameTimes::Variable { pts, .. } => (pts.partition_point(|p| *p <= t) as u64) - 1,
+            FrameTimes::Still => 0,
         };
         Some(k)
     }
@@ -293,9 +314,14 @@ pub struct TimestampMap {
 impl TimestampMap {
     /// The map of `source` on a sequence running at `sequence_rate` frames per second.
     /// An invalid rate gives an empty map.
+    ///
+    /// A still's map has no end of its own (`len` is `u64::MAX`); the clip's length comes
+    /// from the project.
     pub fn new(source: Arc<SourceTimeline>, sequence_rate: Rational) -> Self {
         let rate = sequence_rate.reduced();
-        let len = if rate.is_valid() && rate.num > 0 {
+        let len = if source.is_still() && rate.is_valid() && rate.num > 0 {
+            u64::MAX
+        } else if rate.is_valid() && rate.num > 0 {
             // ceil(duration * rate), duration = ticks * tb.
             let ticks = i128::from((source.end() - source.start()).max(0));
             let num = ticks * i128::from(source.time_base.num) * i128::from(rate.num);
@@ -354,6 +380,7 @@ impl TimestampMap {
             // The rounded-down instant keeps the comparison exact: a frame at or before
             // the true instant is also at or before its floor, since times are whole ticks.
             FrameTimes::Variable { .. } => self.source.frame_at(self.instant(n)),
+            FrameTimes::Still => Some(0),
         }
     }
 

@@ -35,3 +35,9 @@ pub fn fixture(name: &str) -> Option<PathBuf> {
         None
     }
 }
+
+/// Manifest kinds read through FFmpeg (`FrameReader`, `probe`). The others (`still`,
+/// `animation`, `sequence`) are read by `media::source` and tested in `tests/source.rs`.
+pub fn is_ffmpeg_kind(kind: &str) -> bool {
+    matches!(kind, "video" | "audio" | "image" | "image_sequence")
+}

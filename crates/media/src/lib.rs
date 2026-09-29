@@ -28,6 +28,7 @@ pub mod log;
 mod probe;
 mod reader;
 mod scan;
+pub mod source;
 mod time;
 pub mod timemap;
 
@@ -50,6 +51,9 @@ pub use probe::{
 };
 pub use reader::{FrameReader, StreamSelect};
 pub use scan::PacketEntry;
+pub use source::{
+    ImageKind, ImageSequence, SourceInfo, SourceKind, SourceOptions, Unsupported, VideoSource,
+};
 pub use time::{Rational, Timestamp};
 pub use timemap::{SourceTimeline, TimelineCache, TimestampMap};
 

@@ -20,14 +20,19 @@ bench = false
 assets.workspace = true
 blake3.workspace = true
 ffmpeg-next.workspace = true
+gif.workspace = true
+image.workspace = true
+image-webp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-core-foundation.workspace = true
+objc2-core-foundation = { workspace = true, features = ["CFData", "CFDictionary", "CFNumber", "CFString", "CFURL"] }
+objc2-core-graphics.workspace = true
 objc2-core-video.workspace = true
+objc2-image-io.workspace = true
 objc2-io-surface.workspace = true
 
 [dev-dependencies]

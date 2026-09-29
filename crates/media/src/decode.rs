@@ -653,6 +653,38 @@ impl std::fmt::Debug for VideoFrame {
 }
 
 impl VideoFrame {
+    /// A CPU frame built outside a decoder (a still picture), its colour resolved from
+    /// the tags set on it.
+    pub(crate) fn from_cpu(inner: ffmpeg::frame::Video, time_base: Rational) -> Self {
+        let colour = colour_of(&inner);
+        let colour_space = ColourSpace::resolve(&colour, cpu_layout(&inner));
+        Self {
+            inner,
+            time_base,
+            hw: None,
+            colour,
+            colour_space,
+        }
+    }
+
+    /// Another frame sharing this CPU frame's buffers (no pixel copy), with its own
+    /// presentation time. `None` for hardware frames or when FFmpeg cannot allocate.
+    pub(crate) fn share_at(&self, pts: i64, duration: Option<i64>) -> Option<Self> {
+        if self.hw.is_some() {
+            return None;
+        }
+        let mut inner = ffi::frame_ref(&self.inner)?;
+        inner.set_pts(Some(pts));
+        ffi::set_frame_duration(&mut inner, duration.unwrap_or(0));
+        Some(Self {
+            inner,
+            time_base: self.time_base,
+            hw: None,
+            colour: self.colour,
+            colour_space: self.colour_space,
+        })
+    }
+
     /// The hardware surface holding the picture, for a frame from a hardware decoder.
     pub fn hardware(&self) -> Option<&HwFrame> {
         self.hw.as_ref()

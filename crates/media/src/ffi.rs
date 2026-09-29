@@ -14,6 +14,9 @@ use ffmpeg::ffi as sys;
 use crate::time::Rational;
 use ffmpeg_next as ffmpeg;
 
+#[cfg(target_os = "macos")]
+pub(crate) mod imageio;
+
 // ---- Logging ------------------------------------------------------------------------------
 
 /// Routes FFmpeg's log output into `tracing` (see `crate::log`). FFmpeg's own level is set
@@ -196,6 +199,23 @@ fn channel_layout_description(layout: &sys::AVChannelLayout) -> Option<String> {
 pub(crate) fn frame_duration(frame: &ffmpeg::Frame) -> i64 {
     // SAFETY: the frame wrapper owns a valid AVFrame for the duration of the borrow.
     unsafe { (*frame.as_ptr()).duration }
+}
+
+/// Sets `AVFrame.duration`, in the frame's time base.
+pub(crate) fn set_frame_duration(frame: &mut ffmpeg::Frame, duration: i64) {
+    // SAFETY: the frame wrapper owns a valid AVFrame; `duration` is a plain field.
+    unsafe { (*frame.as_mut_ptr()).duration = duration }
+}
+
+/// A new frame referencing the same (reference-counted) buffers as `frame`, without
+/// copying pixels. `None` if FFmpeg cannot allocate the frame.
+pub(crate) fn frame_ref(frame: &ffmpeg::frame::Video) -> Option<ffmpeg::frame::Video> {
+    // SAFETY: av_frame_clone reads a valid AVFrame and returns a new one (or null) that
+    // the wrapper then owns and frees.
+    unsafe {
+        let copy = sys::av_frame_clone(frame.as_ptr());
+        (!copy.is_null()).then(|| ffmpeg::frame::Video::wrap(copy))
+    }
 }
 
 pub(crate) fn frame_channel_layout(frame: &ffmpeg::Frame) -> Option<String> {

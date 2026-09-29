@@ -17,6 +17,8 @@
     "decode.fallback.codec_unsupported": "Hardware decoding isn't available for {codec} on this Mac, so Glass is decoding it in software",
     "decode.fallback.format_unsupported": "Hardware decoding doesn't support {format} {codec} on this Mac, so Glass is decoding it in software",
     "decode.fallback.device_failed": "Glass couldn't start the hardware decoder, so it is decoding this clip in software",
-    "decode.fallback.decode_failed": "The hardware decoder stopped at {time}, so Glass switched to software decoding for this {codec} clip"
+    "decode.fallback.decode_failed": "The hardware decoder stopped at {time}, so Glass switched to software decoding for this {codec} clip",
+    "media.unsupported.heif": "HEIC and HEIF photos can only be opened on a Mac for now. Convert this photo to JPEG or PNG to use it here",
+    "media.unsupported.avif": "AVIF images can only be opened on a Mac for now. Convert this image to PNG or JPEG to use it here"
   }
 }

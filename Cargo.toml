@@ -32,6 +32,13 @@ ffmpeg-next = { version = "9", default-features = false, features = ["codec", "f
 serde_json = "1"
 # Content hashes for the project cache folder (`media::cache`).
 blake3 = "1"
+# Still images and animations (`media::source`): only the formats Glass imports. HEIC and
+# AVIF come from ImageIO on macOS.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff", "bmp"] }
+# The decoders behind `image`'s GIF and WebP support, used directly for animations: their
+# decoders are `Send`, so an animation can live on a decode-pool thread between frames.
+gif = "0.14"
+image-webp = "0.2"
 
 # GPU: the wgpu version egui-wgpu 0.36 uses, so `render` shares eframe's device.
 wgpu = "30"
@@ -41,6 +48,8 @@ objc2 = "0.6"
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std"] }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVReturn", "objc2-io-surface"] }
 objc2-io-surface = { version = "0.3", default-features = false, features = ["std", "IOSurfaceRef", "IOSurfaceTypes", "objc2-core-foundation"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGGeometry", "CGImage"] }
+objc2-image-io = { version = "0.3", default-features = false, features = ["std", "CGImageSource", "CGImageProperties", "objc2-core-graphics"] }
 objc2-metal = { version = "0.3", default-features = false, features = ["std", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "MTLTypes", "objc2-io-surface"] }
 
 # UI: egui on wgpu, the versions proto-ui measured. `default_fonts` stays off because

@@ -35,11 +35,27 @@ fn manifest_files_exist() {
     let mut missing = Vec::new();
     for entry in files {
         let file = entry["file"].as_str().expect("entry has a file name");
-        let paths = if entry["kind"] == "image_sequence" {
+        let paths = if entry["kind"] == "image_sequence" || entry["kind"] == "sequence" {
             let frames = entry["frames"]
                 .as_u64()
                 .expect("sequence has a frame count");
-            sequence_paths(file, frames)
+            let first = entry["first"].as_u64().unwrap_or(1);
+            let last = entry["last"].as_u64().unwrap_or(first + frames - 1);
+            let missing: Vec<u64> = entry["missing"]
+                .as_array()
+                .map(|m| m.iter().filter_map(|n| n.as_u64()).collect())
+                .unwrap_or_default();
+            let paths: Vec<String> = sequence_paths(file, last)
+                .into_iter()
+                .enumerate()
+                .filter(|(i, _)| {
+                    let n = *i as u64 + 1;
+                    n >= first && !missing.contains(&n)
+                })
+                .map(|(_, p)| p)
+                .collect();
+            assert_eq!(paths.len() as u64, frames, "{file}: frame count");
+            paths
         } else {
             vec![file.to_string()]
         };
