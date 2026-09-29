@@ -30,6 +30,7 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+pollster.workspace = true
 
 [[bench]]
 name = "engine"
