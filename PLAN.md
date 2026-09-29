@@ -208,7 +208,7 @@ Done when: a sequence with 5 video layers, blend modes, transforms, text, shapes
 
 Done when: a 1000-clip project round-trips through save and load byte-identically, undo depth is unlimited, and crash recovery restores the last autosave.
 
-- [x] Immutable edit tree using `im` with structural sharing
+- [x] Immutable edit tree using `imbl` (the maintained fork of `im`, see Decision Log) with structural sharing
 - [x] Undo and redo as a list of tree roots, grouped per gesture, unlimited
 - [ ] Autosave as diffs every 10 s to the cache folder, recovery prompt on next launch
 - [ ] Versioned schema with a migration function per version, tested with fixtures from every prior version
