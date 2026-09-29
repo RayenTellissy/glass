@@ -97,7 +97,7 @@ Size target: installers around 30 MB, not counting asset packs and models, which
 - [ ] Same prototype on Windows via D3D11VA. Done when: same budget (needs-human: no Windows PC available locally; port proto-decode to D3D11VA on one)
 - [x] Write `docs/ARCHITECTURE.md`: threading model, data flow diagram, crate layout, cache design, the defaults table above
 - [x] Write `docs/DECISIONS.md` (Decision Log) with the entries created so far
-- [ ] Delete the prototypes or move them to `experiments/`
+- [~] Delete the prototypes or move them to `experiments/`
 
 ## Phase 1 — Project skeleton and CI
 
