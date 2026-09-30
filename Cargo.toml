@@ -49,6 +49,11 @@ audioadapter-buffers = { version = "5.1", default-features = false, features = [
 
 # GPU: the wgpu version egui-wgpu 0.36 uses, so `render` shares eframe's device.
 wgpu = "30"
+# Text (`render::text`): cosmic-text shapes and lays out (bidi, font fallback, system fonts
+# through fontdb); swash, which cosmic-text already uses, rasterises fills and outline
+# strokes. fontconfig stays off: fontdb scans the standard font folders itself.
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
+swash = "0.2"
 # macOS platform bindings for hardware decode (`media::ffi`) and IOSurface import into
 # Metal (`render::interop`); the same versions wgpu-hal uses.
 objc2 = "0.6"

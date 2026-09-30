@@ -23,6 +23,7 @@ pub mod nodes;
 pub mod profiler;
 pub mod renderer;
 pub mod shaders;
+pub mod text;
 pub mod upload;
 pub mod yuv;
 

@@ -12,6 +12,8 @@ assets.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 wgpu.workspace = true
+cosmic-text.workspace = true
+swash.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
@@ -21,6 +23,14 @@ objc2-metal.workspace = true
 
 [dev-dependencies]
 pollster.workspace = true
+criterion.workspace = true
+
+[lib]
+bench = false
+
+[[bench]]
+name = "text"
+harness = false
 
 [lints]
 workspace = true
