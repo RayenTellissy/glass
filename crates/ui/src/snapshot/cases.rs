@@ -7,6 +7,7 @@ use engine::media_mgmt::{DropSummary, Unreadable};
 use project::media_pool::{Facts, Gps, Metadata};
 
 use super::{SnapshotCase, pool_cases};
+use crate::dialogs::recovery::{self, RecoveryDialog, RecoveryPrompt, RecoveryState};
 use crate::panels::format;
 use crate::panels::import::{
     self, DropArea, FOLDER_DIALOG_WIDTH, FolderImport, FolderRow, ImportProgress,
@@ -108,6 +109,24 @@ pub(super) fn all() -> Vec<SnapshotCase> {
             module: "panels/widgets",
             size: vec2(480.0, 200.0),
             draw: widgets_controls,
+        },
+        SnapshotCase {
+            name: "recovery_prompt",
+            module: "dialogs/recovery",
+            size: vec2(recovery::WIDTH + 32.0, RECOVERY_CASE_HEIGHT),
+            draw: recovery_prompt,
+        },
+        SnapshotCase {
+            name: "recovery_confirm_discard",
+            module: "dialogs/recovery",
+            size: vec2(recovery::WIDTH + 32.0, RECOVERY_CASE_HEIGHT),
+            draw: recovery_confirm_discard,
+        },
+        SnapshotCase {
+            name: "recovery_restoring",
+            module: "dialogs/recovery",
+            size: vec2(recovery::WIDTH + 32.0, RECOVERY_CASE_HEIGHT),
+            draw: recovery_restoring,
         },
     ]
 }
@@ -298,6 +317,46 @@ fn sample_timeline(ui: &mut egui::Ui) {
 
 /// The panel's whole area inside a `CentralPanel` without margins, so painter-drawn
 /// panels start at the case's top-left.
+/// The recovery dialog with 16 pt of margin, as on the board's stage.
+const RECOVERY_CASE_HEIGHT: f32 = 360.0;
+
+/// What the board shows: 38 edits two minutes before the crash, saved at 13:58.
+fn recovery_sample() -> RecoveryPrompt {
+    RecoveryPrompt {
+        project_name: t!("sample.recovery.project"),
+        sequence_name: t!("sample.recovery.sequence"),
+        sequence_duration: t!("sample.recovery.duration"),
+        autosave_time: t!("sample.recovery.autosave_time"),
+        saved_time: Some(t!("sample.recovery.saved_time")),
+        before_crash_ms: 2 * 60_000 + 5_000,
+        edits: 38,
+        poster: None,
+        timecode: Some(t!("sample.recovery.timecode")),
+    }
+}
+
+fn recovery_in(ui: &mut egui::Ui, state: RecoveryState) {
+    bare_panel(ui, |ui, rect| {
+        let mut dialog = RecoveryDialog::new();
+        dialog.set_state(state);
+        let _ = dialog.draw(ui, rect.min + vec2(16.0, 16.0), &recovery_sample());
+    });
+}
+
+fn recovery_prompt(ui: &mut egui::Ui) {
+    recovery_in(ui, RecoveryState::Prompt);
+}
+
+/// After Discard: the footer asks once more.
+fn recovery_confirm_discard(ui: &mut egui::Ui) {
+    recovery_in(ui, RecoveryState::ConfirmDiscard);
+}
+
+/// After Restore: progress in the footer.
+fn recovery_restoring(ui: &mut egui::Ui) {
+    recovery_in(ui, RecoveryState::Restoring { progress: 0.62 });
+}
+
 fn bare_panel(ui: &mut egui::Ui, draw: impl FnOnce(&mut egui::Ui, Rect)) {
     let fill = theme::current(ui.ctx()).color(Role::Bg1);
     egui::CentralPanel::default()
