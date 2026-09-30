@@ -504,6 +504,38 @@ make scenes_cuts_640x360_30.mp4 \
 add_entry scenes_cuts_640x360_30.mp4 video h264 640 360 30/1 12 yuv420p false 360 null null null 0 null null \
     '"hard_cuts": [60, 120, 180, 300], "fade_through_black": 240, "flash_frames": [90, 91]'
 
+# --- Camera metadata fixtures (metadata panel) -------------------------------------
+# A phone-style QuickTime clip with mdta keys (make, model, lens, ISO 6709 position,
+# local creation date), a UTC creation_time and a start timecode, and an MP4 with the
+# ©xyz `location` and ©day `date` atoms. --verify reads the tags back (TAG_CHECKS).
+TAG_CHECKS=()
+TAGGED_MOV="tagged_phone_h264_320x180_25.mov"
+make "$TAGGED_MOV" \
+    -f lavfi -i "testsrc2=size=320x180:rate=25:duration=1" \
+    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 25 -timecode 19:48:07:11 \
+    -metadata com.apple.quicktime.make=Apple \
+    -metadata com.apple.quicktime.model="iPhone 15 Pro" \
+    -metadata com.apple.quicktime.camera.lens_model="iPhone 15 Pro back camera 6.765mm f/1.78" \
+    -metadata com.apple.quicktime.location.ISO6709="+60.3912+005.3223+012.000/" \
+    -metadata com.apple.quicktime.creationdate="2026-08-12T19:48:07+0200" \
+    -metadata creation_time="2026-08-12T17:48:07.000000Z" \
+    -movflags use_metadata_tags -f mov
+add_entry "$TAGGED_MOV" video h264 320 180 25/1 1 yuv420p false 25 null null null 0 19:48:07:11 null \
+    '"tags": { "make": "Apple", "model": "iPhone 15 Pro", "iso6709": "+60.3912+005.3223+012.000/", "creationdate": "2026-08-12T19:48:07+0200" }'
+TAG_CHECKS+=("$TAGGED_MOV|com.apple.quicktime.model|iPhone 15 Pro"
+    "$TAGGED_MOV|com.apple.quicktime.location.ISO6709|+60.3912+005.3223+012.000/"
+    "$TAGGED_MOV|com.apple.quicktime.creationdate|2026-08-12T19:48:07+0200")
+TAGGED_MP4="tagged_location_h264_320x180_25.mp4"
+make "$TAGGED_MP4" \
+    -f lavfi -i "testsrc2=size=320x180:rate=25:duration=1" \
+    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 25 \
+    -metadata location="+35.6586+139.7454/" -metadata date=2026-08-12 \
+    -metadata creation_time="2026-08-12T10:00:00.000000Z" -movflags +faststart
+add_entry "$TAGGED_MP4" video h264 320 180 25/1 1 yuv420p false 25 null null null 0 null null \
+    '"tags": { "location": "+35.6586+139.7454/", "date": "2026-08-12" }'
+TAG_CHECKS+=("$TAGGED_MP4|location|+35.6586+139.7454/" "$TAGGED_MP4|date|2026-08-12")
+# --- End of camera metadata fixtures -------------------------------------------------
+
 {
     echo "{"
     echo "  \"version\": 1,"
@@ -634,6 +666,14 @@ for job in "${VERIFY_JOBS[@]}"; do
 
     if [ "$FAILURES" -eq "$before" ]; then printf "  ok    %s\n" "$file"; fi
 done
+
+# --- Camera metadata fixtures: container tags ----------------------------------------
+for check in "${TAG_CHECKS[@]}"; do
+    IFS="|" read -r file key value <<<"$check"
+    got=$("$FFPROBE" -v error -show_entries "format_tags=$key" -of default=nw=1:nk=1 "$OUT/$file")
+    check_eq "$file" "tag $key" "$got" "$value"
+done
+# --- End of camera metadata fixtures -------------------------------------------------
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "Verification failed: $FAILURES problem(s)"

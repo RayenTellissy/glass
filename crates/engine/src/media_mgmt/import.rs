@@ -9,7 +9,7 @@
 //!    listings and sizes only), for the folder import dialog or a direct drop.
 //! 2. [`Importer::import`] probes every new clip in a plan, hashes it (the analysis
 //!    cache key, also used to skip files already in the project under another path),
-//!    reads its sidecars and hands out [`ImportedClip`]s.
+//!    reads its metadata (sidecars, container tags, EXIF) and hands out [`ImportedClip`]s.
 //!
 //! Both check a cancel flag between files. [`AfterImport`] hooks run on the import
 //! thread for each clip; that is where scene detection attaches when a clip should be
@@ -29,6 +29,7 @@ use project::media_pool::{Facts, Metadata};
 use super::classify::MediaClass;
 use super::scan::{self, ImportPlan, ImportSource, ScanOptions};
 use super::sidecar;
+use super::tags;
 
 /// Import settings, from the import dialog.
 #[derive(Clone, Debug)]
@@ -375,7 +376,16 @@ pub fn import_one(source: &ImportSource) -> Result<ImportedClip, String> {
         _ => {}
     }
 
-    let metadata = sidecar::read_all(&source.sidecars);
+    let container = info.as_ref().map(tags::from_probe);
+    let exif = matches!(source.class, MediaClass::Still | MediaClass::Sequence)
+        .then(|| media::exif::read_exif(primary))
+        .flatten()
+        .map(|e| tags::from_exif(&e));
+    let metadata = tags::merge(
+        sidecar::read_all(&source.sidecars),
+        container.as_ref(),
+        exif.as_ref(),
+    );
     Ok(ImportedClip {
         source: source.clone(),
         hash,
