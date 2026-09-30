@@ -24,6 +24,7 @@ pub mod graph;
 pub mod interop;
 pub mod nodes;
 pub mod profiler;
+pub mod readback;
 pub mod renderer;
 pub mod shaders;
 pub mod upload;
