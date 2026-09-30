@@ -143,3 +143,11 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** The project edit tree uses `imbl` 7 instead of `im` 15, the Phase 0 default.
 - **Reason:** `cargo deny check` rejects `im`: it is unmaintained (RUSTSEC-2026-0248) and has an unsoundness advisory in `OrdSet` insertion with no fixed release (RUSTSEC-2023-0126). `imbl` is the maintained fork, with the same persistent `Vector` and `OrdMap`, the same structural sharing and the same licence (MPL-2.0, allowed by `deny.toml`).
 - **Consequences:** Only `project` depends on it. The architecture doc's defaults table records the change.
+
+
+## 18. Media pool items are keyed by `MediaId`; colour labels use the clip palette
+
+- **Date:** 2026-09-30
+- **Decision:** A media pool item maps one to one onto a source media reference, so the pool keys items by `project::MediaId` (the draft's own `ItemId` is gone) and bins by a new `project::BinId` node id. Until the project root embeds the pool (Phase 5 schema work) the pool hands out ids from its own counter, and `MediaPool::insert_item` accepts ids chosen by the caller. The five colour labels are drawn in the clip roles: amber `clip/title`, blue `clip/video`, green `clip/audio`, red `clip/offline`, violet `clip/adjustment`, and always shown with their names.
+- **Reason:** `project` already exports an `ItemId` for timeline items, and a clip's media reference and its pool entry are the same thing, so one id avoids a mapping table. The colour label menu on the `Sheet / Media pool` board uses exactly these clip colours, and the theme has no separate label roles.
+- **Consequences:** Embedding the pool into `Project.media` later only swaps the id source. The search index is a derived cache and is never saved.

@@ -5,4 +5,5 @@
 pub mod file_dialog;
 pub mod format;
 pub mod import;
+pub mod media_pool;
 pub mod widgets;
