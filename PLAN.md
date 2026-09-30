@@ -213,7 +213,7 @@ Done when: a 1000-clip project round-trips through save and load byte-identicall
 - [x] Immutable edit tree using `imbl` (the maintained fork of `im`, see Decision Log) with structural sharing
 - [x] Undo and redo as a list of tree roots, grouped per gesture, unlimited
 - [x] Autosave as diffs every 10 s to the cache folder, recovery prompt on next launch
-- [ ] Versioned schema with a migration function per version, tested with fixtures from every prior version
+- [~] Versioned schema with a migration function per version, tested with fixtures from every prior version
 - [ ] Sequences, tracks (video, audio, subtitle, adjustment), clips, gaps, markers
 - [ ] Clip properties: source range, timeline range, speed map, effect stack, transform, audio gain, enabled flag
 - [ ] Transitions as first-class items between two clips with alignment (centre, start, end)
