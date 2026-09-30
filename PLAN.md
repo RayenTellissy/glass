@@ -159,7 +159,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [x] Proxy generation: ProRes Proxy on macOS, H.264 720p on Windows, user-selectable, resumable
 - [x] Scene cut detection
 - [x] Silence detection with threshold and minimum length
-- [ ] Beat and tempo detection
+- [~] Beat and tempo detection
 - [x] Loudness analysis (EBU R128 integrated and short-term)
 
 ### Media management
