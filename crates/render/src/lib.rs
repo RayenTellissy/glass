@@ -13,14 +13,18 @@
 //!
 //! Each frame is described as a [`graph::Graph`] of [`nodes`], compiled (topological
 //! order, culling, intermediate aliasing through a [`graph::TexturePool`]) and executed
-//! with a [`renderer::Renderer`], timed per pass by a [`profiler::GpuProfiler`].
+//! with a [`renderer::Renderer`], timed per pass by a [`profiler::GpuProfiler`]. Layers
+//! are stacked by [`nodes::CompositeNode`] with the [`blend::BlendMode`]s, whose CPU
+//! reference lives in [`blend`].
 
+pub mod blend;
 pub mod colour;
 pub mod graph;
 #[allow(unsafe_code)]
 pub mod interop;
 pub mod nodes;
 pub mod profiler;
+pub mod readback;
 pub mod renderer;
 pub mod shaders;
 pub mod text;

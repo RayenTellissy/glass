@@ -14,6 +14,8 @@ tracing.workspace = true
 wgpu.workspace = true
 cosmic-text.workspace = true
 swash.workspace = true
+naga.workspace = true
+notify.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true

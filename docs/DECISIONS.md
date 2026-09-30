@@ -159,3 +159,31 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** `render::text` rasterises glyphs to 8-bit coverage in one `R8Unorm` atlas (shelf packed, doubling up to 4096, then evicting glyphs unused this frame and repacking on the GPU). Outlines are round-join strokes rasterised by swash at twice the outline width, cached per glyph and width in the same atlas, instead of a signed distance field. The drop shadow is a separable Gaussian of the fill-and-outline union, as render-graph passes. cosmic-text 0.19 is built without its `fontconfig` feature.
 - **Reason:** Coverage matches the CPU rasteriser exactly (GPU vs CPU max difference 0.0005), strokes stay crisp at any width without an SDF's range limit, and fontdb scans the standard font folders without fontconfig.
 - **Consequences:** Each outline width is a separate atlas entry, so animating the outline width re-rasterises per step (quantised to 1/16 px). Per-glyph scale above 1 samples the atlas bilinearly; the text animator should lay out at the final size for large zooms. Colour glyphs (emoji) keep only their alpha and take the fill colour.
+## 19. Shader hot reload dependencies are not profile-gated
+
+- **Date:** 2026-09-30
+- **Decision:** `render` depends on `notify` 8 (default features off, macOS FSEvents backend) and directly on `naga` 30 (the version wgpu 30 uses, `wgsl-in`) in every profile; the watcher (`shader-watch` thread, `ShaderLibrary::watching`) is compiled only under `debug_assertions`, and release builds use the embedded shaders.
+- **Reason:** Cargo cannot choose dependencies by build profile: it does not support `debug_assertions` in `[target.'cfg(...)'.dependencies]` tables. naga is already compiled for wgpu, so a direct dependency costs nothing, and naga validation stays usable in tests of every profile.
+- **Consequences:** Release binaries contain no watcher code. notify brings a second `windows-sys` version, which `cargo deny check` reports as a duplicate warning; `cargo deny check` passes.
+
+## 20. Blend modes on linear light, HDR-safe
+
+- **Date:** 2026-09-30
+- **Decision:** Layer blend modes are evaluated on premultiplied linear light in the working space (W3C Compositing and Blending Level 1, source-over with a separable blend function B, plus Add and Subtract). Where a W3C formula would clip or dim an HDR backdrop above 1, Glass keeps it: Screen takes max(Cb, Cs) once either is above 1, Colour dodge caps at max(1, Cb) instead of 1, Colour burn returns Cb for Cb >= 1.
+- **Reason:** The working space is linear light (Decision 15) and holds values above 1; a neutral screen, dodge or burn layer should leave highlights alone. For 0..1 values every mode equals the W3C function.
+- **Details:** `render::blend` (CPU reference, f64) and `crates/render/shaders/composite.wgsl`; `crates/render/tests/composite.rs` compares them for every mode.
+- **Consequences:** Overlay and Soft light look somewhat different from editors that blend encoded sRGB values. Soft light and the other modes extrapolate their 0..1 formulas above 1.
+
+## 21. Output encoding: inverse BT.1886 for SDR video, straight alpha, triangular dither
+
+- **Date:** 2026-09-30
+- **Decision:** `render::nodes::OutputNode` encodes SDR video tagged BT.709 with the inverse of the BT.1886 EOTF (a 1/2.4 power), not the BT.709 camera OETF; the preview and stills use sRGB; PQ is absolute (1.0 = 203 nits) and HLG goes through the inverse BT.2100 OOTF for a 1000-nit display. Outputs carry straight alpha unless a caller asks for premultiplied. 8, 10 and 16-bit integer targets get triangular-PDF dither of one code value from a PCG3D hash of pixel position and a per-frame seed; exact black and white are not dithered.
+- **Reason:** players decode BT.709-tagged video with BT.1886, so the inverse EOTF makes display light round-trip with the working space, which is display-referred (the same convention `render::yuv` decodes with); the BT.709 OETF stays available (`OutputTransfer::Bt709`) for scene-referred delivery. Straight alpha is the delivery convention of ProRes 4444, PNG and most encoders. TPDF dither makes the quantisation error independent of the signal, removing banding without bias; varying the seed per frame keeps the pattern from sitting still.
+- **Consequences:** Round trips through `media::TransferFn` are exact for sRGB, BT.1886, PQ and HLG. The dithered 8-bit output has no run of equal codes longer than a few pixels on a gradient that bands in 320-pixel steps undithered (`crates/render/tests/output.rs`).
+
+## 22. Autosave in the per-user cache folder until projects have their own
+
+- **Date:** 2026-09-30
+- **Decision:** Autosaves go to `<cache>/autosave/<project uid>/`, where `<cache>` is the per-user cache folder (`~/Library/Caches/Glass` on macOS, `%LOCALAPPDATA%\Glass` on Windows, `$XDG_CACHE_HOME/Glass` on Linux, `GLASS_CACHE_DIR` to override) until the Phase 5 project settings task adds the per-project cache folder. The autosave format has its own version (`project::autosave::FORMAT_VERSION`, in every snapshot, log header and marker), separate from the project schema version, and autosaves of another format version are not read or migrated. The recovery prompt shows ages (`12 min ago`) instead of clock times.
+- **Reason:** Project files and settings do not exist yet, so there is no project cache folder to write into, and the launch scan needs one known place to look. Autosaves are short-lived (deleted on a clean quit, on Discard, or seven days after the session was last alive), so migrating them is not worth the code; the saved project file is what schema migrations cover. Local clock times need a time zone library, which no task has chosen yet.
+- **Consequences:** When project settings land, the app passes the project's cache folder to `engine::autosave` and the launch scan also looks in the recent projects' cache folders. The prompt's `autosave_time` and `saved_time` become local clock times once a date and time crate is added.
