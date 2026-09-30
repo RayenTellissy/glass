@@ -166,7 +166,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [x] Import from drag-drop, file dialog, and folders, recursive, with camera card structures recognised (AVCHD, XDCAM, Sony, Canon, DJI)
 - [ ] Media pool with bins, colour labels, tags, and a search index
 - [ ] Relinking: fuzzy match by name, duration, and content hash, batch relink dialog
-- [ ] Offline media placeholder that keeps edits intact and renders a labelled slate
+- [~] Offline media placeholder that keeps edits intact and renders a labelled slate
 - [x] Metadata panel: camera, lens, timecode, GPS, created date
 
 ## Phase 3 — Playback engine (M1)
