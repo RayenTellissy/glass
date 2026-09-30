@@ -167,7 +167,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [ ] Media pool with bins, colour labels, tags, and a search index
 - [ ] Relinking: fuzzy match by name, duration, and content hash, batch relink dialog
 - [ ] Offline media placeholder that keeps edits intact and renders a labelled slate
-- [ ] Metadata panel: camera, lens, timecode, GPS, created date
+- [~] Metadata panel: camera, lens, timecode, GPS, created date
 
 ## Phase 3 — Playback engine (M1)
 
