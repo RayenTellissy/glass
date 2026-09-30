@@ -504,6 +504,97 @@ make scenes_cuts_640x360_30.mp4 \
 add_entry scenes_cuts_640x360_30.mp4 video h264 640 360 30/1 12 yuv420p false 360 null null null 0 null null \
     '"hard_cuts": [60, 120, 180, 300], "fade_through_black": 240, "flash_frames": [90, 91]'
 
+# Silence: 10 s of stereo over a uniform noise floor of +-0.0015 (-61 dBFS RMS) per
+# channel, with 1 kHz tone at 0.25 (-15 dBFS RMS) in both channels at 0.7-1.5 s and
+# 5.0-5.02 s, in the left channel only at 2.9-3.5 s, a white noise burst (-15 dBFS RMS)
+# at 2.3-2.6 s and a quiet tone at -30 dBFS RMS at 6.0-7.2 s. Silences at -40 dBFS and
+# 500 ms: 0-0.7, 1.5-2.3, 3.5-5.0, 5.02-6.0 and 7.2-10 s; 2.6-2.9 s is too short.
+on() { echo "gte(t\\,$1)*lt(t\\,$2)"; }
+SIL_TONE="sin(2*PI*1000*t)"
+SIL_COMMON="0.0447*$SIL_TONE*$(on 6 7.2)"
+SIL_L="0.003*(random(0)-0.5)+0.25*$SIL_TONE*($(on 0.7 1.5)+$(on 2.9 3.5)+$(on 5 5.02))+$SIL_COMMON+0.6*(random(1)-0.5)*$(on 2.3 2.6)"
+SIL_R="0.003*(random(2)-0.5)+0.25*$SIL_TONE*($(on 0.7 1.5)+$(on 5 5.02))+$SIL_COMMON+0.6*(random(3)-0.5)*$(on 2.3 2.6)"
+make silence_48k_stereo.wav \
+    -f lavfi -i "aevalsrc='$SIL_L|$SIL_R':c=stereo:s=48000:d=10" -c:a pcm_s16le
+add_entry silence_48k_stereo.wav audio null null null null 10 null false null pcm_s16le 48000 2 0 null null \
+    '"silences": [[0.0, 0.7], [1.5, 2.3], [3.5, 5.0], [5.02, 6.0], [7.2, 10.0]]'
+# The same program as AAC in MP4 (lossy, with encoder priming that the decoder removes).
+make silence_48k_stereo.m4a -i "$OUT/silence_48k_stereo.wav" -c:a aac -b:a 160k -movflags +faststart
+add_entry silence_48k_stereo.m4a audio null null null null 10 null false null aac 48000 2 0 null null \
+    '"silences": [[0.0, 0.7], [1.5, 2.3], [3.5, 5.0], [5.02, 6.0], [7.2, 10.0]]'
+
+# Beats: mono 48 kHz 16-bit FLAC drum patterns (lossless: AAC codes the noise hats with
+# perceptual noise substitution, which a seek does not repeat) whose first beat is at 0.1 s. ld(0) is the time
+# since 0.1 s, ld(1) the time since the last beat, ld(2) the beat number.
+# kick: a 55 Hz thump with a 2 kHz attack; hat: a white noise tick; click: 1.5 kHz.
+beat_vars() { echo "st(0\\,t-0.1);st(1\\,mod(ld(0)\\,$1));st(2\\,floor(ld(0)/$1));gte(ld(0)\\,0)*"; }
+KICK="(0.8*exp(-ld(1)*25)*sin(2*PI*55*ld(1))+0.3*exp(-ld(1)*300)*sin(2*PI*2000*ld(1)))"
+hat() { echo "$1*(random(4)-0.5)*exp(-(ld(1)-$2)*80)*gte(ld(1)\\,$2)"; }
+beat_track() {
+    local file=$1 expr=$2 extra=$3
+    make "$file" -f lavfi -i "aevalsrc='$expr':c=mono:s=48000:d=20" -c:a flac -sample_fmt s16
+    add_entry "$file" audio null null null null 20 null false null flac 48000 1 0 null null "$extra"
+}
+# 90 BPM: a kick on every beat, soft hats on the eighths.
+P=0.666666667
+beat_track beats_090_kick_hats.flac "$(beat_vars $P)($KICK+$(hat 0.2 0)+$(hat 0.2 $(echo "$P/2" | bc -l)))" \
+    '"bpm": 90, "first_beat_s": 0.1, "style": "kick on beats, soft eighth-note hats"'
+# 120 BPM: a metronome, accented every fourth click.
+P=0.5
+beat_track beats_120_clicks.flac \
+    "$(beat_vars $P)0.5*(1+eq(mod(ld(2)\\,4)\\,0))*exp(-ld(1)*200)*sin(2*PI*1500*ld(1))" \
+    '"bpm": 120, "first_beat_s": 0.1, "style": "accented metronome"'
+# 128 BPM: four on the floor with an off-beat open hat.
+P=0.46875
+beat_track beats_128_house.flac "$(beat_vars $P)($KICK+$(hat 0.4 0.234375))" \
+    '"bpm": 128, "first_beat_s": 0.1, "style": "four on the floor, off-beat hats"'
+# 174 BPM: kick on odd beats, a noise snare on even beats.
+P=0.344827586
+beat_track beats_174_kick_snare.flac \
+    "$(beat_vars $P)(eq(mod(ld(2)\\,2)\\,0)*$KICK+eq(mod(ld(2)\\,2)\\,1)*1.2*(random(5)-0.5)*exp(-ld(1)*30))" \
+    '"bpm": 174, "first_beat_s": 0.1, "style": "kick and snare alternating"'
+# 100 BPM swing: kick on beats, hats on the beat and on the swung eighth (2/3 of a beat).
+P=0.6
+beat_track beats_100_swing.flac "$(beat_vars $P)($KICK+$(hat 0.25 0)+$(hat 0.25 0.4))" \
+    '"bpm": 100, "first_beat_s": 0.1, "style": "swung eighth-note hats (2/3)"'
+# Tempo drift: accented clicks speeding up linearly from 116 to 124 BPM over 20 s; beat k
+# is where the phase (116 u + 0.2 u^2) / 60 = k, u = t - 0.1.
+DRIFT="st(0\\,t-0.1);st(3\\,(116*ld(0)+0.2*ld(0)*ld(0))/60);st(1\\,(ld(3)-floor(ld(3)))*60/(116+0.4*ld(0)));gte(ld(0)\\,0)*0.5*exp(-ld(1)*200)*sin(2*PI*1500*ld(1))"
+beat_track beats_drift_116_124_clicks.flac "$DRIFT" \
+    '"bpm_start": 116, "bpm_end": 124, "first_beat_s": 0.1, "style": "clicks, linear tempo drift over 20 s (phase (116 u + 0.2 u^2) / 60)"'
+
+# Loudness: FFmpeg's ebur128 filter measures each file when the manifest is written
+# (integrated LUFS, loudness range LU, true peak dBTP), for media::analysis::loudness to
+# match within 0.1 LU.
+ebur128_ref() {
+    "$FFMPEG" -hide_banner -nostats -nostdin -i "$OUT/$1" -af ebur128=peak=true -f null - 2>&1 |
+        awk '/Summary:/ { s = 1 } s && $1 == "I:" { i = $2 } s && $1 == "LRA:" { l = $2 } s && $1 == "Peak:" { p = $2 }
+             END { printf "\"ebur128\": { \"integrated\": %s, \"lra\": %s, \"true_peak\": %s }", i, l, p }'
+}
+# 30 s of stereo noise (pink left, brown right) at four levels, and a 1 kHz tone in the
+# left channel at 12-14 s; also resampled to 44.1 kHz FLAC (measured at its own rate;
+# FFmpeg's filter measures at 48 kHz).
+LOUD_PROGRAM=(-f lavfi -i "anoisesrc=c=pink:seed=11:a=0.5:r=48000:d=30"
+    -f lavfi -i "anoisesrc=c=brown:seed=12:a=0.5:r=48000:d=30"
+    -f lavfi -i "sine=f=1000:r=48000:d=30"
+    -filter_complex "[0:a][1:a]amerge=inputs=2,volume='if(lt(t,8),0.4,if(lt(t,16),0.08,if(lt(t,24),0.2,0.6)))':eval=frame[n];[2:a]volume='0.3*between(t,12,14)':eval=frame,pan=stereo|c0=c0|c1=0*c0[s];[n][s]amix=inputs=2:normalize=0[a]"
+    -map "[a]")
+make loudness_program_48k_stereo.wav "${LOUD_PROGRAM[@]}" -c:a pcm_s16le
+add_entry loudness_program_48k_stereo.wav audio null null null null 30 null false null pcm_s16le 48000 2 0 null null \
+    "$(ebur128_ref loudness_program_48k_stereo.wav)"
+make loudness_program_44k1_stereo.flac "${LOUD_PROGRAM[@]}" -ar 44100 -c:a flac -sample_fmt s16
+add_entry loudness_program_44k1_stereo.flac audio null null null null 30 null false null flac 44100 2 0 null null \
+    "$(ebur128_ref loudness_program_44k1_stereo.flac)"
+# 12 s of 5.1 (side) pink noise, a different seed and level per channel (the LFE loud, so
+# leaving it out matters).
+make loudness_51_48k.wav \
+    -f lavfi -i "anoisesrc=c=pink:seed=21:a=0.3:r=48000:d=13" -f lavfi -i "anoisesrc=c=pink:seed=22:a=0.2:r=48000:d=13" \
+    -f lavfi -i "anoisesrc=c=pink:seed=23:a=0.25:r=48000:d=13" -f lavfi -i "anoisesrc=c=brown:seed=24:a=0.8:r=48000:d=13" \
+    -f lavfi -i "anoisesrc=c=pink:seed=25:a=0.15:r=48000:d=13" -f lavfi -i "anoisesrc=c=pink:seed=26:a=0.1:r=48000:d=13" \
+    -filter_complex "[0:a][1:a][2:a][3:a][4:a][5:a]join=inputs=6:channel_layout=5.1(side)[a]" -map "[a]" -t 12 -c:a pcm_s16le
+add_entry loudness_51_48k.wav audio null null null null 12 null false null pcm_s16le 48000 6 0 null null \
+    "$(ebur128_ref loudness_51_48k.wav)"
+
 {
     echo "{"
     echo "  \"version\": 1,"
