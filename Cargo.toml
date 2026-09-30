@@ -49,6 +49,17 @@ audioadapter-buffers = { version = "5.1", default-features = false, features = [
 
 # GPU: the wgpu version egui-wgpu 0.36 uses, so `render` shares eframe's device.
 wgpu = "30"
+# Text (`render::text`): cosmic-text shapes and lays out (bidi, font fallback, system fonts
+# through fontdb); swash, which cosmic-text already uses, rasterises fills and outline
+# strokes. fontconfig stays off: fontdb scans the standard font folders itself.
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
+swash = "0.2"
+# Shader hot reload in debug builds (`render::shaders`): naga validates an edited shader
+# before its pipelines rebuild (the naga version wgpu 30 uses) and notify watches the
+# shader folder. Cargo cannot gate dependencies on the build profile, so both are always
+# built; the watcher code itself is compiled only with debug assertions.
+naga = { version = "30", features = ["wgsl-in"] }
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 # macOS platform bindings for hardware decode (`media::ffi`) and IOSurface import into
 # Metal (`render::interop`); the same versions wgpu-hal uses.
 objc2 = "0.6"

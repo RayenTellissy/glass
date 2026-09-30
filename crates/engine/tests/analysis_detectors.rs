@@ -7,8 +7,10 @@ use std::time::Duration;
 
 use engine::analysis::{
     AnalysisJob, AnalysisPool, JobEvent, JobEventKind, Outcome, PoolConfig, Priority, SceneJob,
+    SilenceJob,
 };
 use media::analysis::scenes::SceneSettings;
+use media::analysis::silence::SilenceSettings;
 use media::{CacheDir, SourceFile};
 
 const LIMIT: Duration = Duration::from_secs(120);
@@ -99,4 +101,29 @@ fn scene_job_caches_by_settings() {
     let cuts = computed_cached_rekeyed("scenes", job, other).expect("cuts");
     let frames: Vec<u64> = cuts.cuts.iter().map(|c| c.frame).collect();
     assert_eq!(frames, [60, 120, 180, 240, 300]);
+}
+
+#[test]
+fn silence_job_caches_by_settings() {
+    let Some(path) = fixture("silence_48k_stereo.wav") else {
+        return;
+    };
+    let source = SourceFile::open(&path).expect("hash");
+    let job = SilenceJob {
+        source: source.clone(),
+        settings: SilenceSettings::default(),
+    };
+    let other = SilenceJob {
+        source,
+        settings: SilenceSettings {
+            min_ms: 1000,
+            ..SilenceSettings::default()
+        },
+    };
+    let silences = computed_cached_rekeyed("silence", job, other).expect("silences");
+    let starts: Vec<u64> = silences.ranges.iter().map(|r| r.start / 48).collect();
+    assert_eq!(starts.len(), 5, "{silences:?}");
+    for (got, ms) in starts.iter().zip([0, 1500, 3500, 5020, 7200]) {
+        assert!(got.abs_diff(ms) <= 3, "{silences:?}");
+    }
 }

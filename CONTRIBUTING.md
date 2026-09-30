@@ -43,7 +43,7 @@ Several tasks can be worked on at once, each in its own git worktree, while the 
 
    `cargo fmt` does not compile and may run directly. Stop a run with Ctrl-C or `SIGTERM`, which reach cargo and release the lock; `SIGKILL` releases the lock but can leave cargo running.
 4. **Benchmarks only when nothing else is building.** `cargo-serial` keeps other builds out while a benchmark runs, but also check that no other heavy work is going on first (see [Benchmarks](#benchmarks)).
-5. **Merge back when the task's checks pass.** The task follows the usual three-commit rhythm on its branch; when its full check is green, merge `task/<name>` into the phase branch and remove the worktree (`git worktree remove ../glass-<name>`).
+5. **Merge back when the task's checks pass.** The task follows the usual three-commit rhythm on its branch; when its scoped check is green (the workspace build, the tests of the crates it changed and of the crates that depend on them, clippy, fmt and smoke; Decision 18), merge `task/<name>` into the phase branch and remove the worktree (`git worktree remove ../glass-<name>`). The full `cargo test --workspace` runs on the phase branch after each batch of merges.
 
 `PLAN.md` and `docs/DECISIONS.md` merge with git's union driver (`.gitattributes`), so branches that each append Progress Log or Decision Log lines, or mark different checkboxes, merge without conflicts. The known risk: a line changed differently on two branches (the same checkbox marked `[~]` on one and `[x]` on the other) is kept both ways, so it appears twice. Read the changed parts of `PLAN.md` after every merge and delete the stale copy.
 
