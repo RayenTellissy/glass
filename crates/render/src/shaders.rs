@@ -22,6 +22,8 @@ pub const EMBEDDED: &[(&str, &str)] = &[
     ("composite", include_str!("../shaders/composite.wgsl")),
     ("gamut", include_str!("../shaders/gamut.wgsl")),
     ("output", include_str!("../shaders/output.wgsl")),
+    ("text", include_str!("../shaders/text.wgsl")),
+    ("text_glyph", include_str!("../shaders/text_glyph.wgsl")),
 ];
 
 /// The embedded source of one shader file, without `common.wgsl`.

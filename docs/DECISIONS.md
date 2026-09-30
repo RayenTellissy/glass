@@ -152,6 +152,13 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** One full check takes about 30 minutes of cargo time on the M2 (the workspace test alone about 22 minutes) and about 65 minutes end to end with other agents queued, so running it on every task branch kept most agents waiting on the lock.
 - **Consequences:** A breakage that only shows in an unrelated crate's tests is caught one batch later, on the integration branch, instead of on the task branch. A phase still merges to `main` only after a full check passes on its branch.
 
+
+## 25. Text: coverage atlas, vector outline strokes, graph shadow
+
+- **Date:** 2026-09-30
+- **Decision:** `render::text` rasterises glyphs to 8-bit coverage in one `R8Unorm` atlas (shelf packed, doubling up to 4096, then evicting glyphs unused this frame and repacking on the GPU). Outlines are round-join strokes rasterised by swash at twice the outline width, cached per glyph and width in the same atlas, instead of a signed distance field. The drop shadow is a separable Gaussian of the fill-and-outline union, as render-graph passes. cosmic-text 0.19 is built without its `fontconfig` feature.
+- **Reason:** Coverage matches the CPU rasteriser exactly (GPU vs CPU max difference 0.0005), strokes stay crisp at any width without an SDF's range limit, and fontdb scans the standard font folders without fontconfig.
+- **Consequences:** Each outline width is a separate atlas entry, so animating the outline width re-rasterises per step (quantised to 1/16 px). Per-glyph scale above 1 samples the atlas bilinearly; the text animator should lay out at the final size for large zooms. Colour glyphs (emoji) keep only their alpha and take the fill colour.
 ## 19. Shader hot reload dependencies are not profile-gated
 
 - **Date:** 2026-09-30
@@ -180,3 +187,19 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** Autosaves go to `<cache>/autosave/<project uid>/`, where `<cache>` is the per-user cache folder (`~/Library/Caches/Glass` on macOS, `%LOCALAPPDATA%\Glass` on Windows, `$XDG_CACHE_HOME/Glass` on Linux, `GLASS_CACHE_DIR` to override) until the Phase 5 project settings task adds the per-project cache folder. The autosave format has its own version (`project::autosave::FORMAT_VERSION`, in every snapshot, log header and marker), separate from the project schema version, and autosaves of another format version are not read or migrated. The recovery prompt shows ages (`12 min ago`) instead of clock times.
 - **Reason:** Project files and settings do not exist yet, so there is no project cache folder to write into, and the launch scan needs one known place to look. Autosaves are short-lived (deleted on a clean quit, on Discard, or seven days after the session was last alive), so migrating them is not worth the code; the saved project file is what schema migrations cover. Local clock times need a time zone library, which no task has chosen yet.
 - **Consequences:** When project settings land, the app passes the project's cache folder to `engine::autosave` and the launch scan also looks in the recent projects' cache folders. The prompt's `autosave_time` and `saved_time` become local clock times once a date and time crate is added.
+
+## 23. Layer transforms are sampled inside the composite pass
+
+- **Date:** 2026-09-30
+- **Decision:** A layer's transform (position, non-uniform scale, rotation, anchor) is applied inside `CompositeNode`'s pass: the shader maps each canvas pixel centre through the inverse matrix into the layer and resamples there (nearest, bilinear, or Catmull-Rom bicubic by default). There is no standalone transform node; opacity and crop are applied in the same pass. A transform that lands every pixel centre on a texel centre samples nearest whatever the setting. The shader has an entry point per filter and each pass uses the one for its most expensive layer filter; a per-pass cap (`CompositeNode::with_max_resample`) lets playback sample transformed layers bilinear, and paused frames and export use bicubic. The per-layer transform is a list of shutter samples (up to 16), of which the compositor renders the middle one until motion blur (Phase 13) averages them.
+- **Reason:** Five 4K layers already take about 5.5 ms of the 8 ms Phase 4 budget, bound by memory bandwidth; a separate transform pass would add a full-frame `Rgba16Float` write and read per layer. Sampling in place costs only the extra texture fetches, which mostly hit the cache. Measured on the M2 (standing in for the M1): exact Catmull-Rom from nine bilinear fetches takes about twice the GPU time of bilinear for five full-frame 4K layers (texture-rate bound), a five-fetch approximation still about 1.6 times, and merely compiling the bicubic path into a pass slowed untransformed layers by about half, hence the per-filter entry points and the playback cap.
+- **Details:** `render::transform` (matrix maths, `ShutterTransforms`, `Resample`, the CPU resampling reference), `nodes::Layer::reference`, `crates/render/shaders/composite.wgsl`; `crates/render/tests/transform.rs`.
+- **Consequences:** A layer whose effects need its transformed pixels as a texture (a blur after scaling, for example) will need a transform node then; the maths is in `render::transform` for it. Strong downscaling samples without mipmaps and can alias.
+
+## 24. Crop in layer pixels with an inward feather
+
+- **Date:** 2026-09-30
+- **Decision:** A layer's crop is four per-edge amounts in layer pixels, applied before the transform, plus a feather width in layer pixels. The feather ramps each edge of the crop rectangle inward with a smoothstep (0 half a pixel outside the edge, 0.5 at half the feather, 1 past it); with no crop it softens the layer's own edges. A hard edge is box-filtered over the canvas pixel's footprint. Opacity scales the layer's premultiplied colour before the blend.
+- **Reason:** Cropping before the transform keeps the cut attached to the picture when it moves, turns or scales, as editors do. An inward feather never shows pixels the crop removed, and the smoothstep avoids the visible kink of a linear ramp's ends. Scaling premultiplied colour is how W3C compositing defines opacity and fades every blend mode towards the backdrop.
+- **Details:** `render::crop` (CPU reference), `nodes::Layer::{opacity, crop}`, `crates/render/shaders/composite.wgsl`; `crates/render/tests/crop_opacity.rs`.
+- **Consequences:** A proxy at a lower resolution than the source needs its crop, feather and transform scaled into proxy pixels by the caller (the same mapping as the transform's anchor).
