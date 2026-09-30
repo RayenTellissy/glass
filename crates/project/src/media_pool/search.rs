@@ -1,16 +1,19 @@
 //! The media pool's search index: every item's name, file name, tags, camera metadata,
-//! codec, resolution class, kind, label and card tokenised into one sorted token list
-//! with postings, so a query is a few binary searches (exact and prefix matches) plus a
+//! codec, resolution class, kind, label and card tokenised into one sorted token map
+//! with postings, so a query is a few ordered lookups (exact and prefix matches) plus a
 //! bounded edit-distance scan over tokens of similar length (typos).
 //!
-//! The index is a derived cache, never saved. It remembers the pool version it was built
-//! from (an O(1) clone of the item map), so [`SearchIndex::is_current`] is a pointer
-//! comparison and the UI rebuilds only after an edit.
+//! The index is a derived cache, never saved. It remembers the pool version it describes
+//! (an O(1) clone of the item map), so [`SearchIndex::is_current`] is a pointer
+//! comparison, and after an edit [`SearchIndex::refresh`] re-indexes only the items the
+//! persistent map says changed.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::ops::Bound;
 use std::sync::Arc;
 
 use imbl::OrdMap;
+use imbl::ordmap::DiffItem;
 
 use super::{ColourLabel, MediaItem, MediaKind, MediaPool};
 use crate::id::{BinId, MediaId};
@@ -173,115 +176,123 @@ impl Query {
 /// The index; see the module docs.
 #[derive(Clone, Debug, Default)]
 pub struct SearchIndex {
-    /// Sorted, unique tokens.
-    tokens: Vec<String>,
-    /// For each token, (item slot, best field weight) sorted by slot.
-    postings: Vec<Vec<(u32, u8)>>,
-    /// Token indices by character count, for the typo scan.
-    by_len: HashMap<usize, Vec<u32>>,
-    ids: Vec<MediaId>,
+    /// Token to the items carrying it, with the best field weight, sorted by id.
+    postings: BTreeMap<String, Vec<(MediaId, u8)>>,
+    /// Tokens by character count, for the typo scan.
+    by_len: HashMap<usize, BTreeSet<String>>,
+    /// Each item's tokens, to take them out again when it changes.
+    terms: HashMap<MediaId, Vec<(String, u8)>>,
     /// The pool version this index describes.
     items: OrdMap<MediaId, Arc<MediaItem>>,
     label_names: OrdMap<ColourLabel, String>,
 }
 
-impl SearchIndex {
-    pub fn build(pool: &MediaPool) -> Self {
-        let mut entries: HashMap<String, Vec<(u32, u8)>> = HashMap::new();
-        let mut ids = Vec::with_capacity(pool.len());
-        for (slot, item) in pool.items().enumerate() {
-            let slot = slot as u32;
-            ids.push(item.id);
-            let mut add = |text: &str, weight: u8| {
-                for token in tokens(text) {
-                    let list = entries.entry(token).or_default();
-                    match list.last_mut() {
-                        Some((s, w)) if *s == slot => *w = (*w).max(weight),
-                        _ => list.push((slot, weight)),
-                    }
-                }
-            };
-            add(&item.name, NAME);
-            if let Some(name) = item.path.file_name() {
-                add(&name.to_string_lossy(), NAME);
-            }
-            for tag in &item.tags {
-                add(tag, TAG);
-            }
-            let m = &item.metadata;
-            for text in [
-                &m.camera_make,
-                &m.camera_model,
-                &m.lens,
-                &m.reel,
-                &m.timecode,
-                &m.created,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                add(text, OTHER);
-            }
-            let f = &item.facts;
-            if let Some(codec) = &f.video_codec {
-                add(codec, OTHER);
-                for alias in codec_aliases(codec) {
-                    add(alias, OTHER);
-                }
-            }
-            for text in [&f.video_profile, &f.hdr].into_iter().flatten() {
-                add(text, OTHER);
-            }
-            if let Some(codec) = &f.audio_codec {
-                for alias in codec_aliases(codec) {
-                    add(alias, OTHER);
-                }
-            }
-            let long = f.width.max(f.height);
-            if long >= 3800 {
-                add("4k uhd", OTHER);
-            } else if long >= 1900 {
-                add("hd 1080p", OTHER);
-            } else if long >= 1200 {
-                add("720p", OTHER);
-            }
-            add(
-                match item.kind {
-                    MediaKind::Video => "video",
-                    MediaKind::Audio => "audio",
-                    MediaKind::Still => "still photo picture",
-                    MediaKind::Sequence => "sequence",
-                },
-                OTHER,
-            );
-            if let Some(label) = item.label {
-                add(label.key(), OTHER);
-                if let Some(name) = pool.label_name(label) {
-                    add(name, OTHER);
-                }
-            }
-            if let Some(card) = &item.card {
-                add(card, OTHER);
-            }
-            if item.status.is_offline() {
-                add("offline", OTHER);
-            }
+/// Every token of `item` with its best field weight, sorted by token.
+fn item_terms(item: &MediaItem, pool: &MediaPool) -> Vec<(String, u8)> {
+    let mut out: Vec<(String, u8)> = Vec::new();
+    let mut add = |text: &str, weight: u8| {
+        out.extend(tokens(text).into_iter().map(|t| (t, weight)));
+    };
+    add(&item.name, NAME);
+    if let Some(name) = item.path.file_name() {
+        add(&name.to_string_lossy(), NAME);
+    }
+    for tag in &item.tags {
+        add(tag, TAG);
+    }
+    let m = &item.metadata;
+    for text in [
+        &m.camera_make,
+        &m.camera_model,
+        &m.lens,
+        &m.reel,
+        &m.timecode,
+        &m.created,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        add(text, OTHER);
+    }
+    let f = &item.facts;
+    if let Some(codec) = &f.video_codec {
+        add(codec, OTHER);
+        for alias in codec_aliases(codec) {
+            add(alias, OTHER);
         }
-        let mut sorted: Vec<(String, Vec<(u32, u8)>)> = entries.into_iter().collect();
-        sorted.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut by_len: HashMap<usize, Vec<u32>> = HashMap::new();
-        for (i, (token, _)) in sorted.iter().enumerate() {
+    }
+    for text in [&f.video_profile, &f.hdr].into_iter().flatten() {
+        add(text, OTHER);
+    }
+    if let Some(codec) = &f.audio_codec {
+        for alias in codec_aliases(codec) {
+            add(alias, OTHER);
+        }
+    }
+    let long = f.width.max(f.height);
+    if long >= 3800 {
+        add("4k uhd", OTHER);
+    } else if long >= 1900 {
+        add("hd 1080p", OTHER);
+    } else if long >= 1200 {
+        add("720p", OTHER);
+    }
+    add(
+        match item.kind {
+            MediaKind::Video => "video",
+            MediaKind::Audio => "audio",
+            MediaKind::Still => "still photo picture",
+            MediaKind::Sequence => "sequence",
+        },
+        OTHER,
+    );
+    if let Some(label) = item.label {
+        add(label.key(), OTHER);
+        if let Some(name) = pool.label_name(label) {
+            add(name, OTHER);
+        }
+    }
+    if let Some(card) = &item.card {
+        add(card, OTHER);
+    }
+    if item.status.is_offline() {
+        add("offline", OTHER);
+    }
+    // Best weight first within each token, then keep one entry per token.
+    out.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    out.dedup_by(|a, b| a.0 == b.0);
+    out
+}
+
+impl SearchIndex {
+    /// Indexes every item of `pool`. 10,000 items take tens of milliseconds, so the app
+    /// builds it once per project (off the UI thread if it likes; the index is `Send`)
+    /// and then follows edits with [`SearchIndex::refresh`].
+    pub fn build(pool: &MediaPool) -> Self {
+        let mut entries: HashMap<String, Vec<(MediaId, u8)>> = HashMap::new();
+        let mut terms = HashMap::with_capacity(pool.len());
+        for item in pool.items() {
+            let item_terms = item_terms(item, pool);
+            for (token, weight) in &item_terms {
+                // Items come in id order, so each list stays sorted.
+                entries
+                    .entry(token.clone())
+                    .or_default()
+                    .push((item.id, *weight));
+            }
+            terms.insert(item.id, item_terms);
+        }
+        let mut by_len: HashMap<usize, BTreeSet<String>> = HashMap::new();
+        for token in entries.keys() {
             by_len
                 .entry(token.chars().count())
                 .or_default()
-                .push(i as u32);
+                .insert(token.clone());
         }
-        let (tokens, postings) = sorted.into_iter().unzip();
         Self {
-            tokens,
-            postings,
+            postings: entries.into_iter().collect(),
             by_len,
-            ids,
+            terms,
             items: pool.items.clone(),
             label_names: pool.label_names.clone(),
         }
@@ -290,29 +301,94 @@ impl SearchIndex {
     /// True when `pool` is the version this index was built from, or one whose items
     /// and label names were not edited since.
     pub fn is_current(&self, pool: &MediaPool) -> bool {
-        self.items.ptr_eq(&pool.items)
-            && (self.label_names.ptr_eq(&pool.label_names) || self.label_names == pool.label_names)
+        self.items.ptr_eq(&pool.items) && self.labels_current(pool)
     }
 
-    /// Rebuilds when the pool changed since the last build; returns whether it did.
+    fn labels_current(&self, pool: &MediaPool) -> bool {
+        self.label_names.ptr_eq(&pool.label_names) || self.label_names == pool.label_names
+    }
+
+    /// Brings the index up to date with `pool` and returns whether anything changed.
+    /// Only the items that differ are re-indexed: the item maps share every untouched
+    /// node, so finding them skips the shared parts, and labelling one clip of ten
+    /// thousand costs microseconds. Renaming a colour label rebuilds the index.
     pub fn refresh(&mut self, pool: &MediaPool) -> bool {
-        let stale = !self.is_current(pool);
-        if stale {
+        if !self.labels_current(pool) {
             *self = Self::build(pool);
+            return true;
         }
-        stale
+        if self.items.ptr_eq(&pool.items) {
+            return false;
+        }
+        let changed: Vec<MediaId> = self
+            .items
+            .diff(&pool.items)
+            .map(|d| match d {
+                DiffItem::Add(id, _) | DiffItem::Remove(id, _) => *id,
+                DiffItem::Update { new: (id, _), .. } => *id,
+            })
+            .collect();
+        for id in changed {
+            self.remove(id);
+            if let Some(item) = pool.item(id) {
+                self.insert(item, pool);
+            }
+        }
+        self.items = pool.items.clone();
+        true
+    }
+
+    fn remove(&mut self, id: MediaId) {
+        let Some(terms) = self.terms.remove(&id) else {
+            return;
+        };
+        for (token, _) in terms {
+            let Some(list) = self.postings.get_mut(&token) else {
+                continue;
+            };
+            if let Ok(i) = list.binary_search_by_key(&id, |p| p.0) {
+                list.remove(i);
+            }
+            if list.is_empty() {
+                self.postings.remove(&token);
+                if let Some(set) = self.by_len.get_mut(&token.chars().count()) {
+                    set.remove(&token);
+                }
+            }
+        }
+    }
+
+    fn insert(&mut self, item: &MediaItem, pool: &MediaPool) {
+        let terms = item_terms(item, pool);
+        for (token, weight) in &terms {
+            let list = match self.postings.get_mut(token) {
+                Some(list) => list,
+                None => {
+                    self.by_len
+                        .entry(token.chars().count())
+                        .or_default()
+                        .insert(token.clone());
+                    self.postings.entry(token.clone()).or_default()
+                }
+            };
+            match list.binary_search_by_key(&item.id, |p| p.0) {
+                Ok(i) => list[i].1 = *weight,
+                Err(i) => list.insert(i, (item.id, *weight)),
+            }
+        }
+        self.terms.insert(item.id, terms);
     }
 
     pub fn len(&self) -> usize {
-        self.ids.len()
+        self.terms.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.ids.is_empty()
+        self.terms.is_empty()
     }
 
     pub fn token_count(&self) -> usize {
-        self.tokens.len()
+        self.postings.len()
     }
 
     /// Items matching every word of `query`, best first. A word matches a token exactly
@@ -329,14 +405,14 @@ impl SearchIndex {
         if words.is_empty() {
             return Vec::new();
         }
-        let mut total: Option<HashMap<u32, f32>> = None;
+        let mut total: Option<HashMap<MediaId, f32>> = None;
         for word in words {
             let scores = self.word_scores(word);
             total = Some(match total {
                 None => scores,
                 Some(prev) => prev
                     .into_iter()
-                    .filter_map(|(slot, s)| scores.get(&slot).map(|t| (slot, s + t)))
+                    .filter_map(|(id, s)| scores.get(&id).map(|t| (id, s + t)))
                     .collect(),
             });
             if total.as_ref().is_some_and(HashMap::is_empty) {
@@ -346,10 +422,7 @@ impl SearchIndex {
         let mut hits: Vec<Hit> = total
             .unwrap_or_default()
             .into_iter()
-            .map(|(slot, score)| Hit {
-                id: self.ids[slot as usize],
-                score,
-            })
+            .map(|(id, score)| Hit { id, score })
             .collect();
         hits.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.id.cmp(&b.id)));
         hits
@@ -373,33 +446,29 @@ impl SearchIndex {
         }
     }
 
-    fn word_scores(&self, word: &str) -> HashMap<u32, f32> {
-        let mut scores: HashMap<u32, f32> = HashMap::new();
-        let mut credit = |token: usize, quality: f32| {
-            for &(slot, weight) in &self.postings[token] {
+    fn word_scores(&self, word: &str) -> HashMap<MediaId, f32> {
+        let mut scores: HashMap<MediaId, f32> = HashMap::new();
+        let mut credit = |list: &[(MediaId, u8)], quality: f32| {
+            for &(id, weight) in list {
                 let s = quality * f32::from(weight);
-                let e = scores.entry(slot).or_insert(0.0);
+                let e = scores.entry(id).or_insert(0.0);
                 if s > *e {
                     *e = s;
                 }
             }
         };
         let len = word.chars().count();
-        let start = self.tokens.partition_point(|t| t.as_str() < word);
-        let mut prefix_end = start;
         if len >= 2 {
-            while prefix_end < self.tokens.len() && self.tokens[prefix_end].starts_with(word) {
-                let quality = if self.tokens[prefix_end] == word {
-                    1.0
-                } else {
-                    0.8
-                };
-                credit(prefix_end, quality);
-                prefix_end += 1;
+            let from = (Bound::Included(word), Bound::Unbounded);
+            for (token, list) in self
+                .postings
+                .range::<str, _>(from)
+                .take_while(|(t, _)| t.starts_with(word))
+            {
+                credit(list, if token == word { 1.0 } else { 0.8 });
             }
-        } else if self.tokens.get(start).is_some_and(|t| t == word) {
-            credit(start, 1.0);
-            prefix_end = start + 1;
+        } else if let Some(list) = self.postings.get(word) {
+            credit(list, 1.0);
         }
         // Numbers and codes (`h264`, `c003`, `2026`) match exactly or as a prefix: one
         // wrong digit names a different thing, not a typo.
@@ -415,13 +484,14 @@ impl SearchIndex {
                 let Some(candidates) = self.by_len.get(&l) else {
                     continue;
                 };
-                for &t in candidates {
-                    let t = t as usize;
-                    if (start..prefix_end).contains(&t) {
+                for token in candidates {
+                    if token.starts_with(word) {
                         continue;
                     }
-                    if let Some(d) = bounded_distance(&word_chars, &self.tokens[t], max_edits) {
-                        credit(t, 0.6 - 0.1 * d as f32);
+                    if let Some(d) = bounded_distance(&word_chars, token, max_edits)
+                        && let Some(list) = self.postings.get(token)
+                    {
+                        credit(list, 0.6 - 0.1 * d as f32);
                     }
                 }
             }
@@ -636,6 +706,55 @@ mod tests {
         };
         assert_eq!(index.query(&pool, &q).len(), 5);
         assert!(Query::default().is_empty());
+    }
+
+    #[test]
+    fn refresh_follows_edits_like_a_rebuild() {
+        let mut pool = pool();
+        let mut index = SearchIndex::build(&pool);
+        let root = pool.root();
+        let gulls = pool
+            .items()
+            .find(|i| i.name == "Gulls take off")
+            .unwrap()
+            .id;
+        let dusk = pool
+            .items()
+            .find(|i| i.name == "Harbour at dusk")
+            .unwrap()
+            .id;
+        pool.add_tag(&[gulls], "Harbour mouth").unwrap();
+        pool.update_item(dusk, |i| {
+            i.name = "Pier at night".into();
+            i.path = "/card/pier.mov".into();
+        })
+        .unwrap();
+        let new = pool
+            .add_item(
+                root,
+                MediaItem::new("Harbour crane", MediaKind::Still, "/card/crane.jpg"),
+            )
+            .unwrap();
+        let rope = pool.items().find(|i| i.name == "Rope detail").unwrap().id;
+        pool.remove_item(rope).unwrap();
+        assert!(index.refresh(&pool));
+        assert!(index.is_current(&pool));
+        let fresh = SearchIndex::build(&pool);
+        assert_eq!(index.len(), fresh.len());
+        assert_eq!(index.token_count(), fresh.token_count());
+        for q in [
+            "harb", "harbour", "pier", "dusk", "amber", "detail", "photo", "intervew",
+        ] {
+            assert_eq!(index.search(q), fresh.search(q), "{q}");
+        }
+        assert_eq!(
+            hits(&pool, &index, "harbour"),
+            ["Harbour crane", "Harbourmaster interview", "Gulls take off"]
+        );
+        assert!(index.search("dusk").is_empty());
+        assert!(index.search("rope").is_empty());
+        assert!(pool.contains(new));
+        assert!(!index.refresh(&pool));
     }
 
     #[test]

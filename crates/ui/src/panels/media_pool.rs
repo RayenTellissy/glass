@@ -1708,24 +1708,38 @@ fn list_row(
     cell(4, &fps, Type::MonoCaption, dim(Role::TextSecondary));
     cell(5, &row.codec, Type::Caption, dim(Role::TextSecondary));
     cell(6, &row.camera, Type::Caption, dim(Role::TextSecondary));
-    // Tags: chips while they fit, then `+N`.
+    // Tags: chips while they fit, keeping room for a `+N` chip after the last one shown.
+    // One layout per tag: the chip is drawn from the measured galley.
     let (x0, x1) = columns[7];
+    let more_room = 28.0 + 4.0;
     let mut x = x0;
     for (i, tag) in row.tags.iter().enumerate() {
-        let rest = row.tags.len() - i;
-        let more = t!("pool.tags.more", count = rest - 1);
-        let more_w = if rest > 1 {
-            paint.width(painter, &more, Type::Caption) + 12.0 + 4.0
-        } else {
-            0.0
-        };
-        let tag_w = paint.width(painter, tag, Type::Caption) + 12.0;
-        if i > 0 && x + tag_w + more_w > x1 {
-            let more = t!("pool.tags.more", count = rest);
-            paint.chip(painter, pos2(x, cy), &more, x1 - x);
-            break;
+        let rest = row.tags.len() - i - 1;
+        let limit = x1 - x - if rest > 0 { more_room } else { 0.0 };
+        let text = paint.c(Role::TextPrimary);
+        let mut galley = paint.galley(painter, tag, Type::Caption, text, f32::INFINITY);
+        if galley.size().x + 12.0 > limit {
+            if i > 0 {
+                paint.chip(
+                    painter,
+                    pos2(x, cy),
+                    &t!("pool.tags.more", count = rest + 1),
+                    x1 - x,
+                );
+                break;
+            }
+            galley = paint.galley(painter, tag, Type::Caption, text, (limit - 12.0).max(12.0));
         }
-        let chip = paint.chip(painter, pos2(x, cy), tag, (x1 - x - more_w).max(24.0));
+        let chip = Rect::from_min_size(
+            pos2(x, cy - size::BADGE / 2.0),
+            vec2(galley.size().x + 12.0, size::BADGE),
+        );
+        paint.glass_outline(painter, chip, CornerRadius::same(255));
+        painter.galley(
+            pos2(chip.min.x + 6.0, cy - galley.size().y / 2.0),
+            galley,
+            text,
+        );
         x = chip.max.x + 4.0;
     }
     // Status.

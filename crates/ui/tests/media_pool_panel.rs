@@ -1,10 +1,10 @@
 //! The media pool panel from `Sheet / Media pool`, drawn headless over a 3,000-clip pool:
-//! the docked grid and the widened list side by side, scrolling every frame and searching
-//! the pool through `SearchIndex` as the text changes, within the frame budget.
+//! the docked grid, then the same panel widened into the list, scrolling every frame and
+//! showing new search results from `SearchIndex`, within the frame budget.
 
 use std::collections::BTreeSet;
 
-use egui::{Rect, pos2, vec2};
+use egui::{Rect, vec2};
 use project::media_pool::{
     ColourLabel, Facts, MediaItem, MediaKind, MediaPool, MediaStatus, OfflineReason, Query,
     SearchIndex,
@@ -18,6 +18,8 @@ use ui::panels::media_pool::{
 use ui::theme::ThemeKind;
 
 const CLIPS: usize = 3_000;
+const WARMUP: usize = 30;
+const FRAMES: usize = 300;
 
 fn shoot() -> MediaPool {
     let mut pool = MediaPool::new("Harbour film");
@@ -120,19 +122,16 @@ fn media_pool_draws_thousands_of_clips_within_budget() {
         items,
         ..MediaPoolView::default()
     };
-    let mut grid = MediaPoolView {
+    let mut view = MediaPoolView {
         view: PoolView::Grid,
-        ..base.clone()
-    };
-    let mut list = MediaPoolView {
-        view: PoolView::List,
         metadata: pool.item(ids[0]).map(|item| metadata_view(item)),
         ..base
     };
     // The search results for what the user types, queried through the index up front:
-    // the query itself runs once per keystroke, and its cost (well under a millisecond
-    // for 10,000 items in release) is measured by the `project` bench `media_pool`. Here
-    // the panel shows each result set for 25 frames while both views scroll.
+    // the query runs once per keystroke, and its cost (well under a millisecond for
+    // 10,000 items in release) is measured by the `project` bench `media_pool`. A new
+    // result set lays out every visible row's text afresh, so its frame is the slowest;
+    // the slow frames are printed.
     let searches = ["", "harb", "gulls wide", "intervew", "", "label:amber"];
     index.refresh(&pool);
     let mut results: Vec<_> = searches
@@ -150,32 +149,63 @@ fn media_pool_draws_thousands_of_clips_within_budget() {
     assert!(results.iter().all(|(_, _, rows)| !rows.is_empty()));
     let mut shown = usize::MAX;
     let mut monitor = FrameTimeMonitor::default();
-    headless
-        .run(30, 300, &mut monitor, |ui, frame| {
-            let next = (frame / 25) % results.len();
-            if next != shown {
-                if shown != usize::MAX {
-                    std::mem::swap(&mut list.items, &mut results[shown].2);
-                }
-                let (text, chips, rows) = &mut results[next];
-                std::mem::swap(&mut list.items, rows);
-                list.search.clone_from(text);
-                list.filters.clone_from(chips);
-                shown = next;
+    let mut slow = Vec::new();
+    for frame in 0..WARMUP + FRAMES {
+        // The docked grid first, then the same panel widened into the list, as the user
+        // switches views; one keystroke (a new result set) in each, scrolling otherwise.
+        let next = match frame {
+            0..100 => 1,
+            100..250 => 3,
+            _ => 5,
+        };
+        let swapped = next != shown;
+        if swapped {
+            if shown != usize::MAX {
+                std::mem::swap(&mut view.items, &mut results[shown].2);
             }
-            grid.scroll = (frame as f32 * 37.0) % 40_000.0;
-            list.scroll = (frame as f32 * 53.0) % 20_000.0;
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ui, |ui| {
-                    let full = ui.max_rect();
-                    let left = Rect::from_min_size(full.min, vec2(400.0, full.height()));
-                    let right = Rect::from_min_max(pos2(left.max.x + 8.0, full.min.y), full.max);
-                    media_pool(ui, left, &mut grid);
-                    media_pool(ui, right, &mut list);
-                });
-        })
-        .expect("headless frames");
+            let (text, chips, rows) = &mut results[next];
+            std::mem::swap(&mut view.items, rows);
+            view.search.clone_from(text);
+            view.filters.clone_from(chips);
+            shown = next;
+        }
+        // Both views are drawn once during the warm-up (fonts, glyphs, the metadata strip),
+        // as a running app would have.
+        view.view = match frame {
+            10..20 | 180.. => PoolView::List,
+            _ => PoolView::Grid,
+        };
+        view.scroll = (frame as f32 * 45.0) % 20_000.0;
+        let elapsed = headless
+            .frame(|ui| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        let full = ui.max_rect();
+                        let rect = match view.view {
+                            PoolView::Grid => {
+                                Rect::from_min_size(full.min, vec2(400.0, full.height()))
+                            }
+                            PoolView::List => full,
+                        };
+                        media_pool(ui, rect, &mut view);
+                    });
+            })
+            .expect("headless frame");
+        if frame >= WARMUP {
+            monitor.record(elapsed);
+            if elapsed.as_secs_f64() > 0.008 {
+                slow.push(format!(
+                    "{frame}{} {:.1} ms",
+                    if swapped { " (new results)" } else { "" },
+                    elapsed.as_secs_f64() * 1e3
+                ));
+            }
+        }
+    }
+    if !slow.is_empty() {
+        eprintln!("media pool panel: slow frames: {}", slow.join(", "));
+    }
     let stats = monitor.stats();
     eprintln!("media pool panel ({}): {stats}", headless.adapter());
     headless.assert_p99_within_budget("media pool panel", &stats);

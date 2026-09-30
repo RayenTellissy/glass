@@ -155,6 +155,19 @@ fn media_pool(c: &mut Criterion) {
             black_box(edited)
         })
     });
+    let mut labelled = pool.clone();
+    labelled
+        .set_label(&[first], Some(ColourLabel::Violet))
+        .unwrap();
+    let mut following = SearchIndex::build(&pool);
+    let mut flip = false;
+    group.bench_function("refresh_after_one_label_edit_10k", |b| {
+        b.iter(|| {
+            flip = !flip;
+            let target = if flip { &labelled } else { &pool };
+            assert!(following.refresh(black_box(target)));
+        })
+    });
     group.finish();
 }
 
