@@ -4,6 +4,7 @@
 
 mod crash;
 mod ffi;
+mod recovery;
 mod settings;
 
 use std::process::ExitCode;
@@ -24,5 +25,14 @@ fn main() -> ExitCode {
         .crash_reports
         .then(|| crash::install(&paths.crashes(), &paths.data));
     crash::trigger_debug_crash();
+    // The window shell shows these one at a time over the welcome screen once it exists.
+    let pending = recovery::LaunchRecovery::scan(&paths.cache, engine::autosave::now_ms());
+    for launch in &pending {
+        tracing::info!(
+            "autosave of {} with {} unsaved edits waits for the recovery prompt",
+            launch.prompt.project_name,
+            launch.prompt.edits
+        );
+    }
     ExitCode::SUCCESS
 }

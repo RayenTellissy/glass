@@ -8,6 +8,7 @@ pub mod classify;
 pub mod import;
 pub mod scan;
 pub mod sidecar;
+pub mod tags;
 
 pub use cards::{Card, CardClip, CardKind, CardOptions, Sidecar, SidecarKind};
 pub use classify::{DropSummary, FileKind, MediaClass, Unreadable, classify};
