@@ -55,9 +55,11 @@ impl Driver {
             ..RawInput::default()
         };
         let mut action = None;
-        let _ = self.ctx.run_ui(input, |ui| {
+        let mut output = self.ctx.run_ui(input, |ui| {
             action = self.dialog.show(ui.ctx(), &self.prompt);
         });
+        // Nothing renders here; drop the font atlas uploads.
+        output.textures_delta.clear();
         action
     }
 
@@ -122,6 +124,7 @@ fn discard_asks_once_more() {
         "Escape backs out of the confirmation"
     );
     assert_eq!(d.dialog.state(), RecoveryState::Prompt);
+    d.frame(Vec::new());
     d.click(Control::Discard);
     assert_eq!(
         d.click(Control::ConfirmDiscard),

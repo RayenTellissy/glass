@@ -769,21 +769,10 @@ fn edits_text(p: &RecoveryPrompt) -> String {
     }
 }
 
-/// A filled button background: `role`, with the board's darkening towards the bottom
-/// (`bg/0` at 16%), lightened on hover.
+/// A filled button background in `role`, lightened on hover.
 fn primary_fill(paint: &Paint, painter: &Painter, rect: Rect, role: Role, hovered: bool) {
     let corner = paint.control_radius();
     painter.rect_filled(rect, corner, paint.c(role));
-    let bottom = Rect::from_min_max(pos2(rect.min.x, rect.center().y), rect.max);
-    painter.rect_filled(
-        bottom,
-        CornerRadius {
-            nw: 0,
-            ne: 0,
-            ..corner
-        },
-        paint.mix(Role::Bg0, 0.08),
-    );
     if hovered {
         painter.rect_filled(rect, corner, paint.c(Role::GlassHighlight));
     }
