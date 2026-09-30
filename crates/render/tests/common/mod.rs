@@ -157,6 +157,48 @@ pub fn read(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture)
     out
 }
 
+/// A noise tile of premultiplied pixels (alpha 0.25 to 1, some values above 1) as f16
+/// bytes, repeated over a 4K texture from a different offset per layer, so lossless
+/// texture compression cannot shortcut the reads.
+pub fn noise_4k(device: &wgpu::Device, queue: &wgpu::Queue, seed: u32) -> wgpu::Texture {
+    const TILE: (usize, usize) = (509, 251);
+    const SIZE: (usize, usize) = (3840, 2160);
+    let mut state = seed.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        (state >> 8) as f32 / (1 << 24) as f32
+    };
+    let mut tile = Vec::with_capacity(TILE.0 * TILE.1 * 8);
+    for _ in 0..TILE.0 * TILE.1 {
+        let a = 0.25 + 0.75 * next();
+        let px = [next() * 1.2 * a, next() * a, next() * a, a];
+        for c in px {
+            tile.extend_from_slice(&f32_to_f16(c).to_le_bytes());
+        }
+    }
+    let mut data = Vec::with_capacity(SIZE.0 * SIZE.1 * 8);
+    for y in 0..SIZE.1 {
+        let row = &tile[((y + seed as usize * 37) % TILE.1) * TILE.0 * 8..][..TILE.0 * 8];
+        let mut x = seed as usize * 101 % TILE.0;
+        let mut left = SIZE.0;
+        while left > 0 {
+            let n = (TILE.0 - x).min(left);
+            data.extend_from_slice(&row[x * 8..(x + n) * 8]);
+            left -= n;
+            x = 0;
+        }
+    }
+    texture(
+        device,
+        queue,
+        wgpu::TextureFormat::Rgba16Float,
+        (SIZE.0 as u32, SIZE.1 as u32),
+        &data,
+    )
+}
+
 pub fn f16_to_f32(h: u16) -> f32 {
     let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
     let exp = i32::from((h >> 10) & 0x1f);
