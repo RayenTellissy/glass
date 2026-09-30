@@ -446,7 +446,7 @@ Done when: a tagged build installs cleanly on a fresh macOS and Windows machine 
 - [ ] Portable mode with settings next to the executable
 - [ ] Safe mode: disable plugins and GPU features on repeated crash
 - [-] Licensing and activation (dropped: free and open source, see Decision Log)
-- [ ] About dialog: version, MIT and GPLv3 notices, third-party licences, link to the release's source archives, matching the About window on the Brand page
+- [~] About dialog: version, MIT and GPLv3 notices, third-party licences, link to the release's source archives, matching the About window on the Brand page
 
 ## Phase 18 — Documentation and onboarding
 
