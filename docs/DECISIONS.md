@@ -153,12 +153,6 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Consequences:** A breakage that only shows in an unrelated crate's tests is caught one batch later, on the integration branch, instead of on the task branch. A phase still merges to `main` only after a full check passes on its branch.
 
 
-## 25. Text: coverage atlas, vector outline strokes, graph shadow
-
-- **Date:** 2026-09-30
-- **Decision:** `render::text` rasterises glyphs to 8-bit coverage in one `R8Unorm` atlas (shelf packed, doubling up to 4096, then evicting glyphs unused this frame and repacking on the GPU). Outlines are round-join strokes rasterised by swash at twice the outline width, cached per glyph and width in the same atlas, instead of a signed distance field. The drop shadow is a separable Gaussian of the fill-and-outline union, as render-graph passes. cosmic-text 0.19 is built without its `fontconfig` feature.
-- **Reason:** Coverage matches the CPU rasteriser exactly (GPU vs CPU max difference 0.0005), strokes stay crisp at any width without an SDF's range limit, and fontdb scans the standard font folders without fontconfig.
-- **Consequences:** Each outline width is a separate atlas entry, so animating the outline width re-rasterises per step (quantised to 1/16 px). Per-glyph scale above 1 samples the atlas bilinearly; the text animator should lay out at the final size for large zooms. Colour glyphs (emoji) keep only their alpha and take the fill colour.
 ## 19. Shader hot reload dependencies are not profile-gated
 
 - **Date:** 2026-09-30
@@ -173,6 +167,7 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** The working space is linear light (Decision 15) and holds values above 1; a neutral screen, dodge or burn layer should leave highlights alone. For 0..1 values every mode equals the W3C function.
 - **Details:** `render::blend` (CPU reference, f64) and `crates/render/shaders/composite.wgsl`; `crates/render/tests/composite.rs` compares them for every mode.
 - **Consequences:** Overlay and Soft light look somewhat different from editors that blend encoded sRGB values. Soft light and the other modes extrapolate their 0..1 formulas above 1.
+
 
 ## 21. Output encoding: inverse BT.1886 for SDR video, straight alpha, triangular dither
 
@@ -211,3 +206,16 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** Keeping availability out of the tree means loading, editing, undo and saving never depend on the disk, and a relink or a remounted drive changes nothing in the document. One cached texture per size and label costs one layout and a few passes per offline file, then only an import per frame.
 - **Details:** `engine::media_mgmt::offline`, `render::slate` (CPU reference `slate::reference`), `crates/render/shaders/slate.wgsl`; `crates/engine/tests/offline_media.rs`, `crates/render/tests/slate.rs`.
 - **Consequences:** The design's glow blur (18 px) and backdrop blur are approximated analytically (the glows are already soft; the card's backdrop is the dot screen at its average cover). The file size is not stored on `MediaRef`, so the only content check is the hash (at most 2.5 MiB read per file). The slate uses Geist and Geist Mono when installed and falls back to system faces until they are bundled.
+
+## 25. Text: coverage atlas, vector outline strokes, graph shadow
+
+- **Date:** 2026-09-30
+- **Decision:** `render::text` rasterises glyphs to 8-bit coverage in one `R8Unorm` atlas (shelf packed, doubling up to 4096, then evicting glyphs unused this frame and repacking on the GPU). Outlines are round-join strokes rasterised by swash at twice the outline width, cached per glyph and width in the same atlas, instead of a signed distance field. The drop shadow is a separable Gaussian of the fill-and-outline union, as render-graph passes. cosmic-text 0.19 is built without its `fontconfig` feature.
+- **Reason:** Coverage matches the CPU rasteriser exactly (GPU vs CPU max difference 0.0005), strokes stay crisp at any width without an SDF's range limit, and fontdb scans the standard font folders without fontconfig.
+- **Consequences:** Each outline width is a separate atlas entry, so animating the outline width re-rasterises per step (quantised to 1/16 px). Per-glyph scale above 1 samples the atlas bilinearly; the text animator should lay out at the final size for large zooms. Colour glyphs (emoji) keep only their alpha and take the fill colour.
+## 26. Media pool items are keyed by `MediaId`; colour labels use the clip palette
+
+- **Date:** 2026-09-30
+- **Decision:** A media pool item maps one to one onto a source media reference, so the pool keys items by `project::MediaId` (the draft's own `ItemId` is gone) and bins by a new `project::BinId` node id. Until the project root embeds the pool (Phase 5 schema work) the pool hands out ids from its own counter, and `MediaPool::insert_item` accepts ids chosen by the caller. The five colour labels are drawn in the clip roles: amber `clip/title`, blue `clip/video`, green `clip/audio`, red `clip/offline`, violet `clip/adjustment`, and always shown with their names.
+- **Reason:** `project` already exports an `ItemId` for timeline items, and a clip's media reference and its pool entry are the same thing, so one id avoids a mapping table. The colour label menu on the `Sheet / Media pool` board uses exactly these clip colours, and the theme has no separate label roles.
+- **Consequences:** Embedding the pool into `Project.media` later only swaps the id source. The search index is a derived cache and is never saved.

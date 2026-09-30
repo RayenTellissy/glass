@@ -4,6 +4,15 @@
 
 use serde::{Deserialize, Serialize};
 
+mod pool;
+mod search;
+
+pub use pool::{
+    Bin, ColourLabel, MediaItem, MediaKind, MediaPool, MediaStatus, OfflineReason, PoolError,
+    SortBy, natural_cmp,
+};
+pub use search::{Hit, Query, SearchIndex, tokens};
+
 /// Camera and capture metadata for one media item, gathered from the container's tags,
 /// EXIF for stills and camera sidecar files. Every field is optional: most files carry
 /// only a few of them.
