@@ -175,7 +175,7 @@ Done when: the stress project (Phase 16) plays at full rate on both platforms, s
 
 - [ ] Thread layout implemented: UI, scheduler, decode pool, render, audio callback, analysis pool, all named, all visible in the debug panel
 - [ ] Lock-free frame queues between decode, render, and present (`crossbeam` or `rtrb`)
-- [ ] Master clock from the audio device callback, video slaved to it, drift correction
+- [~] Master clock from the audio device callback, video slaved to it, drift correction
 - [ ] Look-ahead decode across cuts and transitions, configurable depth
 - [ ] Rendered-frame cache keyed by (segment hash, frame index), LRU in VRAM with RAM spill and a configurable ceiling
 - [ ] Dirty-range invalidation: any edit invalidates only affected segments, verified by a test that counts re-renders
