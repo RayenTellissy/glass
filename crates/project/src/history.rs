@@ -79,6 +79,8 @@ pub struct History {
     /// The entry whose root is current.
     index: usize,
     gesture: Option<Gesture>,
+    /// Grows by one every time the current root changes; see [`History::changes`].
+    changes: u64,
 }
 
 impl History {
@@ -91,6 +93,7 @@ impl History {
             }],
             index: 0,
             gesture: None,
+            changes: 0,
         }
     }
 
@@ -184,6 +187,7 @@ impl History {
         if let Some(Gesture { pushed: true, .. }) = self.gesture.take() {
             self.entries.pop();
             self.index -= 1;
+            self.changes += 1;
         }
     }
 
@@ -217,6 +221,7 @@ impl History {
             return None;
         }
         self.index -= 1;
+        self.changes += 1;
         Some(self.current())
     }
 
@@ -226,7 +231,16 @@ impl History {
             return None;
         }
         self.index += 1;
+        self.changes += 1;
         Some(self.current())
+    }
+
+    /// A counter that grows by one whenever a commit, a gesture's first change, an undo,
+    /// a redo or a cancelled gesture changes the current root. Autosave counts the edits
+    /// between two ticks with it. Updates inside a gesture and coalesced commits replace
+    /// the current root without counting again.
+    pub fn changes(&self) -> u64 {
+        self.changes
     }
 
     /// The number of undo steps available.
@@ -305,6 +319,7 @@ impl History {
             coalesce,
         });
         self.index += 1;
+        self.changes += 1;
     }
 }
 
