@@ -1,6 +1,6 @@
 //! The compositor's shared GPU state: device and queue handles, the effect pipelines
-//! (built lazily per shader, entry point, target format and input count), samplers and
-//! the Y'CbCr converter. One per device, owned by the render thread; nodes reach it
+//! (built lazily per shader, entry point, target format and input count, and rebuilt when
+//! a debug build reloads their shader), samplers and the Y'CbCr converter. One per device, owned by the render thread; nodes reach it
 //! through [`crate::graph::NodeContext`].
 
 use std::collections::HashMap;
@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 use wgpu::util::DeviceExt;
 
-use crate::shaders;
+use crate::shaders::ShaderLibrary;
 use crate::yuv::YuvConverter;
 
 /// Identifies one effect pipeline.
@@ -44,6 +44,7 @@ pub struct Renderer {
     queue: wgpu::Queue,
     layouts: Mutex<HashMap<u8, wgpu::BindGroupLayout>>,
     pipelines: Mutex<HashMap<EffectKey, wgpu::RenderPipeline>>,
+    shaders: ShaderLibrary,
     linear: wgpu::Sampler,
     nearest: wgpu::Sampler,
     yuv: YuvConverter,
@@ -57,7 +58,17 @@ impl std::fmt::Debug for Renderer {
 }
 
 impl Renderer {
+    /// Uses [`ShaderLibrary::default`]: watched shader files in debug builds, the
+    /// embedded ones in release builds.
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        Self::with_shaders(device, queue, ShaderLibrary::default())
+    }
+
+    pub fn with_shaders(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        shaders: ShaderLibrary,
+    ) -> Self {
         let sampler = |filter| {
             device.create_sampler(&wgpu::SamplerDescriptor {
                 label: Some("effect"),
@@ -73,6 +84,7 @@ impl Renderer {
             queue: queue.clone(),
             layouts: Mutex::default(),
             pipelines: Mutex::default(),
+            shaders,
             linear: sampler(wgpu::FilterMode::Linear),
             nearest: sampler(wgpu::FilterMode::Nearest),
             yuv: YuvConverter::new(device),
@@ -110,6 +122,26 @@ impl Renderer {
 
     pub fn yuv(&self) -> &YuvConverter {
         &self.yuv
+    }
+
+    pub fn shaders(&self) -> &ShaderLibrary {
+        &self.shaders
+    }
+
+    /// Drops the pipelines of shaders reloaded since the last frame (all of them when
+    /// `common.wgsl` changed) so they rebuild from the new source on first use. Returns
+    /// the reloaded shader names. Called once per frame by
+    /// [`crate::graph::CompiledGraph::record`].
+    pub fn begin_frame(&self) -> Vec<String> {
+        let changed = self.shaders.poll_changes();
+        if !changed.is_empty() {
+            let all = changed.iter().any(|n| n == "common");
+            self.pipelines
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|key, _| !all && !changed.iter().any(|n| n == key.shader));
+        }
+        changed
     }
 
     fn layout(&self, inputs: u8) -> wgpu::BindGroupLayout {
@@ -174,13 +206,12 @@ impl Renderer {
     }
 
     fn build(&self, key: EffectKey, layout: &wgpu::BindGroupLayout) -> wgpu::RenderPipeline {
-        let common = shaders::embedded("common").unwrap_or_default();
-        let source = shaders::embedded(key.shader).unwrap_or_default();
+        let source = self.shaders.composed(key.shader).unwrap_or_default();
         let module = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(key.shader),
-                source: wgpu::ShaderSource::Wgsl(shaders::compose(common, source)),
+                source: wgpu::ShaderSource::Wgsl(source.into()),
             });
         let pipeline_layout = self
             .device
@@ -311,6 +342,12 @@ impl Uniform {
     /// Zero words up to the next 16-byte boundary (WGSL `vec4` alignment).
     pub fn align16(mut self) -> Self {
         self.0.resize(self.0.len().next_multiple_of(16), 0);
+        self
+    }
+
+    /// Appends another uniform's words (a nested record).
+    pub fn extend(mut self, other: &Uniform) -> Self {
+        self.0.extend_from_slice(&other.0);
         self
     }
 
