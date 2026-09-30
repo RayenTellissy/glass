@@ -5,6 +5,7 @@ mod common;
 
 use std::cell::Cell;
 
+use media::analysis::beats::{self, BeatSettings};
 use media::analysis::loudness::{self, LoudnessSettings};
 use media::analysis::scenes::{self, CutKind, SceneSettings};
 use media::analysis::silence::{self, SilenceSettings};
@@ -301,4 +302,117 @@ fn loudness_reports_progress_and_stops_when_cancelled() {
     assert!(matches!(result, Err(AnalysisError::Stopped)), "{result:?}");
     let progress = control.progress.get();
     assert!(progress > 0.2 && progress < 0.6, "progress {progress}");
+}
+
+/// Beat times of a fixture: steady tracks from `bpm`, the drift track from its phase
+/// `(116 u + 0.2 u^2) / 60 = k`, `u = t - first beat`.
+fn expected_beats(entry: &serde_json::Value, seconds: f64) -> Vec<f64> {
+    let first = entry["first_beat_s"].as_f64().expect("first beat");
+    let at = |k: usize| match entry["bpm"].as_f64() {
+        Some(bpm) => first + k as f64 * 60.0 / bpm,
+        None => first + (-116.0 + (116f64.powi(2) + 0.8 * 60.0 * k as f64).sqrt()) / 0.4,
+    };
+    (0..).map(at).take_while(|&t| t < seconds).collect()
+}
+
+/// Onset times from the file (decoded, onset strength, nearest peak) against the click
+/// fixtures' known clicks: the latency calibration of `beats::LATENCY_FRACTION`.
+#[test]
+fn onset_latency_is_calibrated_on_the_click_fixtures() {
+    for file in ["beats_120_clicks.flac", "beats_drift_116_124_clicks.flac"] {
+        let (Some(path), Some(entry)) = (common::fixture(file), entry(file)) else {
+            return;
+        };
+        let mut reader = media::AudioReader::open(
+            &path,
+            media::AudioOptions {
+                layout: media::ChannelLayout::Mono,
+                ..media::AudioOptions::default()
+            },
+        )
+        .expect("open");
+        let mut samples = vec![0f32; 48_000 * 20];
+        let n = reader.read(&mut [samples.as_mut_slice()]).expect("read");
+        samples.truncate(n);
+        let onsets = beats::onsets(&samples, 48_000);
+        let expected = expected_beats(&entry, 19.9);
+        let errors: Vec<f64> = expected[1..]
+            .iter()
+            .map(|&t| beats::nearest_onset(&onsets, 48_000, t) - t)
+            .collect();
+        let mean = errors.iter().sum::<f64>() / errors.len() as f64;
+        let sd =
+            (errors.iter().map(|e| (e - mean).powi(2)).sum::<f64>() / errors.len() as f64).sqrt();
+        println!(
+            "{file}: onset error after calibration mean {:.2} ms, sd {:.2} ms",
+            mean * 1e3,
+            sd * 1e3
+        );
+        assert!(mean.abs() <= 0.0005, "{file}: mean {mean}");
+        assert!(
+            errors.iter().all(|e| e.abs() <= 0.002),
+            "{file}: {errors:?}"
+        );
+    }
+}
+
+/// Tempo within 1 BPM and every beat between 1 and 19 s within 10 ms, matched once, on
+/// every fixture. Swing: the off-beat hat at 2/3 of a beat does not repeat at half the
+/// period, so it neither doubles the tempo nor moves beats. Drift: the tempo is the
+/// least-squares slope through the beats, compared with the mean tempo over the track;
+/// the tracker's tempo penalty is small against a 3 % drift, so beats follow it.
+#[test]
+fn beat_fixtures_give_tempo_and_beats() {
+    for file in [
+        "beats_090_kick_hats.flac",
+        "beats_120_clicks.flac",
+        "beats_128_house.flac",
+        "beats_174_kick_snare.flac",
+        "beats_100_swing.flac",
+        "beats_drift_116_124_clicks.flac",
+    ] {
+        let (Some(path), Some(entry)) = (common::fixture(file), entry(file)) else {
+            return;
+        };
+        let found = beats::detect(&path, &BeatSettings::default(), &Unattended).expect("detect");
+        let expected = expected_beats(&entry, 20.0);
+        let bpm = entry["bpm"].as_f64().unwrap_or_else(|| {
+            60.0 * (expected.len() - 1) as f64 / (expected[expected.len() - 1] - expected[0])
+        });
+        let inner: Vec<f64> = expected
+            .iter()
+            .copied()
+            .filter(|&t| (1.0..19.0).contains(&t))
+            .collect();
+        let mut worst = 0f64;
+        let mut sum = 0.0;
+        for t in &inner {
+            let error = found
+                .beats
+                .iter()
+                .map(|b| b - t)
+                .min_by(|a, b| a.abs().total_cmp(&b.abs()))
+                .expect("beats");
+            worst = worst.max(error.abs());
+            sum += error;
+        }
+        let extra = found
+            .beats
+            .iter()
+            .filter(|b| (1.0..19.0).contains(*b))
+            .count() as i64
+            - inner.len() as i64;
+        println!(
+            "{file}: {:.2} BPM (expected {bpm:.2}), confidence {:.2}, {} beats, mean error {:.2} ms, worst {:.2} ms, {extra} extra",
+            found.bpm,
+            found.confidence,
+            found.beats.len(),
+            sum / inner.len() as f64 * 1e3,
+            worst * 1e3
+        );
+        assert!((found.bpm - bpm).abs() <= 1.0, "{file}: {} BPM", found.bpm);
+        assert!(worst <= 0.010, "{file}: worst beat error {worst} s");
+        assert_eq!(extra, 0, "{file}: {extra} beats too many");
+        assert_eq!(found.tempo_curve.len(), found.beats.len() - 1);
+    }
 }

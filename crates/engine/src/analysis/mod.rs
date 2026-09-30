@@ -1,5 +1,5 @@
 //! The analysis job system: background work on source files (timelines, thumbnails,
-//! waveforms, proxies, scene cuts, silence, loudness, later beats) on a small pool of
+//! waveforms, proxies, scene cuts, silence, beats, loudness) on a small pool of
 //! low-priority `glass-analysis-<n>` threads, with results cached on disk under the
 //! project cache folder.
 //!
@@ -36,7 +36,9 @@
 mod jobs;
 mod pool;
 
-pub use jobs::{LoudnessJob, PeaksJob, ProxyJob, SceneJob, SilenceJob, ThumbnailJob, TimelineJob};
+pub use jobs::{
+    BeatsJob, LoudnessJob, PeaksJob, ProxyJob, SceneJob, SilenceJob, ThumbnailJob, TimelineJob,
+};
 pub use pool::{
     AnalysisJob, AnalysisPool, Artifact, JobContext, JobError, JobEvent, JobEventKind, JobHandle,
     JobKey, Outcome, PoolConfig, Priority, default_workers,

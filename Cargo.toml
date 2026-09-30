@@ -49,6 +49,8 @@ audioadapter-buffers = { version = "5.1", default-features = false, features = [
 # Loudness after BS.1770-4 and EBU R128 (`media::analysis::loudness`): a Rust port of
 # libebur128.
 ebur128 = { version = "0.1", default-features = false }
+# Real FFTs for onset strength in beat detection (`media::analysis::beats`).
+realfft = "3.5"
 
 # GPU: the wgpu version egui-wgpu 0.36 uses, so `render` shares eframe's device.
 wgpu = "30"
