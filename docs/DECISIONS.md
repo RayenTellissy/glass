@@ -188,12 +188,6 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** Project files and settings do not exist yet, so there is no project cache folder to write into, and the launch scan needs one known place to look. Autosaves are short-lived (deleted on a clean quit, on Discard, or seven days after the session was last alive), so migrating them is not worth the code; the saved project file is what schema migrations cover. Local clock times need a time zone library, which no task has chosen yet.
 - **Consequences:** When project settings land, the app passes the project's cache folder to `engine::autosave` and the launch scan also looks in the recent projects' cache folders. The prompt's `autosave_time` and `saved_time` become local clock times once a date and time crate is added.
 
-## 23. Frame queues: rtrb for one producer, crossbeam's ArrayQueue for the decode pool
-
-- **Date:** 2026-09-30
-- **Decision:** `engine::frame_queue` uses `rtrb` 0.4 for single-producer queues (render → present, one decoder → render) and `crossbeam-queue`'s bounded `ArrayQueue` for the multi-producer decode → render queue, with `crossbeam-utils`' `Parker` for waiting. Stale frames are flushed through a shared generation counter carried in every frame's stamp rather than by draining the queue under a lock.
-- **Reason:** Both are lock-free, bounded and allocation-free per operation, and both pass `cargo deny check` (MIT or Apache-2.0, no new transitive crates; `crossbeam-utils` was already in the tree). `rtrb` is the fastest SPSC ring and can peek, which the present policy needs; it cannot take several producers, so the decode pool uses `ArrayQueue`. `std::sync::mpsc::sync_channel` (crossbeam's channel in std) was not used because a sender blocked on a full channel cannot be woken by a seek, and blocking decoders must return at once when the generation moves on.
-- **Consequences:** Order is kept per producer only on the decode queue; render matches frames to requests by stamp. Push and pop fence once (`SeqCst`) to pair with the waiting flags.
 ## 23. Layer transforms are sampled inside the composite pass
 
 - **Date:** 2026-09-30
@@ -209,3 +203,10 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** Cropping before the transform keeps the cut attached to the picture when it moves, turns or scales, as editors do. An inward feather never shows pixels the crop removed, and the smoothstep avoids the visible kink of a linear ramp's ends. Scaling premultiplied colour is how W3C compositing defines opacity and fades every blend mode towards the backdrop.
 - **Details:** `render::crop` (CPU reference), `nodes::Layer::{opacity, crop}`, `crates/render/shaders/composite.wgsl`; `crates/render/tests/crop_opacity.rs`.
 - **Consequences:** A proxy at a lower resolution than the source needs its crop, feather and transform scaled into proxy pixels by the caller (the same mapping as the transform's anchor).
+
+## 26. Frame queues: rtrb for one producer, crossbeam's ArrayQueue for the decode pool
+
+- **Date:** 2026-09-30
+- **Decision:** `engine::frame_queue` uses `rtrb` 0.4 for single-producer queues (render → present, one decoder → render) and `crossbeam-queue`'s bounded `ArrayQueue` for the multi-producer decode → render queue, with `crossbeam-utils`' `Parker` for waiting. Stale frames are flushed through a shared generation counter carried in every frame's stamp rather than by draining the queue under a lock.
+- **Reason:** Both are lock-free, bounded and allocation-free per operation, and both pass `cargo deny check` (MIT or Apache-2.0, no new transitive crates; `crossbeam-utils` was already in the tree). `rtrb` is the fastest SPSC ring and can peek, which the present policy needs; it cannot take several producers, so the decode pool uses `ArrayQueue`. `std::sync::mpsc::sync_channel` (crossbeam's channel in std) was not used because a sender blocked on a full channel cannot be woken by a seek, and blocking decoders must return at once when the generation moves on.
+- **Consequences:** Order is kept per producer only on the decode queue; render matches frames to requests by stamp. Push and pop fence once (`SeqCst`) to pair with the waiting flags.
