@@ -45,6 +45,9 @@ fn texels((w, h): (u32, u32)) -> Vec<[f32; 4]> {
         .collect()
 }
 
+/// A layer's premultiplied texels, texture size and settings.
+type LayerInput<'a> = (&'a [[f32; 4]], (u32, u32), Layer);
+
 struct Rig {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -68,7 +71,7 @@ impl Rig {
     fn render(
         &mut self,
         canvas: (u32, u32),
-        layers: &[(&[[f32; 4]], (u32, u32), Layer)],
+        layers: &[LayerInput<'_>],
         max_resample: Resample,
     ) -> Vec<[f32; 4]> {
         let textures: Vec<wgpu::Texture> = layers
