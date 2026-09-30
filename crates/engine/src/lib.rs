@@ -4,6 +4,7 @@
 //! analysis job system, plus logging setup for every binary.
 
 pub mod analysis;
+pub mod autosave;
 pub mod frame_queue;
 pub mod logging;
 pub mod media_check;
