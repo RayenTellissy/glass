@@ -12,7 +12,8 @@
 //! let a = g.add(YuvSourceNode::uploaded(&frame_a, working), &[]);
 //! let b = g.import("cached frame", &cached_view);
 //! let c = g.add(GamutNode::new(Primaries::DisplayP3, Primaries::Bt709), &[b]);
-//! let out = g.add(CompositeNode::over(canvas, layers), &[a.out(0), c.out(0)]);
+//! let layers = vec![Layer::blended(BlendMode::Normal), Layer::blended(BlendMode::Screen)];
+//! let out = g.add(CompositeNode::new(canvas, false, layers), &[a.out(0), c.out(0)]);
 //! g.export(out.out(0), &target_view);
 //! let compiled = g.compile()?;
 //! compiled.execute(&renderer, &mut pool, Some(&mut profiler));

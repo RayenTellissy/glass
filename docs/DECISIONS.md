@@ -157,3 +157,11 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** `render` depends on `notify` 8 (default features off, macOS FSEvents backend) and directly on `naga` 30 (the version wgpu 30 uses, `wgsl-in`) in every profile; the watcher (`shader-watch` thread, `ShaderLibrary::watching`) is compiled only under `debug_assertions`, and release builds use the embedded shaders.
 - **Reason:** Cargo cannot choose dependencies by build profile: it does not support `debug_assertions` in `[target.'cfg(...)'.dependencies]` tables. naga is already compiled for wgpu, so a direct dependency costs nothing, and naga validation stays usable in tests of every profile.
 - **Consequences:** Release binaries contain no watcher code. notify brings a second `windows-sys` version, which `cargo deny check` reports as a duplicate warning; `cargo deny check` passes.
+
+## 20. Blend modes on linear light, HDR-safe
+
+- **Date:** 2026-09-30
+- **Decision:** Layer blend modes are evaluated on premultiplied linear light in the working space (W3C Compositing and Blending Level 1, source-over with a separable blend function B, plus Add and Subtract). Where a W3C formula would clip or dim an HDR backdrop above 1, Glass keeps it: Screen takes max(Cb, Cs) once either is above 1, Colour dodge caps at max(1, Cb) instead of 1, Colour burn returns Cb for Cb >= 1.
+- **Reason:** The working space is linear light (Decision 15) and holds values above 1; a neutral screen, dodge or burn layer should leave highlights alone. For 0..1 values every mode equals the W3C function.
+- **Details:** `render::blend` (CPU reference, f64) and `crates/render/shaders/composite.wgsl`; `crates/render/tests/composite.rs` compares them for every mode.
+- **Consequences:** Overlay and Soft light look somewhat different from editors that blend encoded sRGB values. Soft light and the other modes extrapolate their 0..1 formulas above 1.
