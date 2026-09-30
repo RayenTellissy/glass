@@ -7,6 +7,7 @@ use std::borrow::Cow;
 /// Every effect shader by name, embedded at build time.
 pub const EMBEDDED: &[(&str, &str)] = &[
     ("common", include_str!("../shaders/common.wgsl")),
+    ("composite", include_str!("../shaders/composite.wgsl")),
     ("gamut", include_str!("../shaders/gamut.wgsl")),
 ];
 
