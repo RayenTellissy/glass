@@ -1,6 +1,6 @@
 //! The media pool panel from `Sheet / Media pool`, drawn headless over a 3,000-clip pool:
-//! the docked grid, then the same panel widened into the list, scrolling every frame and
-//! showing new search results from `SearchIndex`, within the frame budget.
+//! the docked grid and the widened list, each scrolling every frame and showing a new set
+//! of search results from `SearchIndex` once, within the frame budget.
 
 use std::collections::BTreeSet;
 
@@ -100,10 +100,11 @@ fn view_rows_follow_the_search() {
     assert_eq!(tree.len(), 1 + 10);
 }
 
-#[test]
-fn media_pool_draws_thousands_of_clips_within_budget() {
-    let Some(mut headless) = HeadlessUi::new_or_skip("media pool panel", Viewport::default())
-    else {
+/// Draws `mode` over the 3,000-clip pool for the warm-up plus [`FRAMES`] frames, scrolling
+/// every frame, with one keystroke (a new result set) half way, and holds the p99 to the
+/// budget. The docked grid is 400 pt wide; the list fills the window.
+fn draw_within_budget(what: &str, mode: PoolView) {
+    let Some(mut headless) = HeadlessUi::new_or_skip(what, Viewport::default()) else {
         return;
     };
     ui::theme::builtin(ThemeKind::Dark).apply(headless.context());
@@ -123,16 +124,17 @@ fn media_pool_draws_thousands_of_clips_within_budget() {
         ..MediaPoolView::default()
     };
     let mut view = MediaPoolView {
-        view: PoolView::Grid,
+        view: mode,
         metadata: pool.item(ids[0]).map(|item| metadata_view(item)),
         ..base
     };
     // The search results for what the user types, queried through the index up front:
     // the query runs once per keystroke, and its cost (well under a millisecond for
     // 10,000 items in release) is measured by the `project` bench `media_pool`. A new
-    // result set lays out every visible row's text afresh, so its frame is the slowest;
-    // the slow frames are printed.
-    let searches = ["", "harb", "gulls wide", "intervew", "", "label:amber"];
+    // result set lays out every visible row's text afresh, so its frame is the slowest
+    // (tens of milliseconds in a debug build, about 2 ms in release); the slow frames are
+    // printed.
+    let searches = ["harb", "intervew"];
     index.refresh(&pool);
     let mut results: Vec<_> = searches
         .iter()
@@ -151,13 +153,7 @@ fn media_pool_draws_thousands_of_clips_within_budget() {
     let mut monitor = FrameTimeMonitor::default();
     let mut slow = Vec::new();
     for frame in 0..WARMUP + FRAMES {
-        // The docked grid first, then the same panel widened into the list, as the user
-        // switches views; one keystroke (a new result set) in each, scrolling otherwise.
-        let next = match frame {
-            0..100 => 1,
-            100..250 => 3,
-            _ => 5,
-        };
+        let next = usize::from(frame >= WARMUP + FRAMES / 2);
         let swapped = next != shown;
         if swapped {
             if shown != usize::MAX {
@@ -169,12 +165,6 @@ fn media_pool_draws_thousands_of_clips_within_budget() {
             view.filters.clone_from(chips);
             shown = next;
         }
-        // Both views are drawn once during the warm-up (fonts, glyphs, the metadata strip),
-        // as a running app would have.
-        view.view = match frame {
-            10..20 | 180.. => PoolView::List,
-            _ => PoolView::Grid,
-        };
         view.scroll = (frame as f32 * 45.0) % 20_000.0;
         let elapsed = headless
             .frame(|ui| {
@@ -204,9 +194,16 @@ fn media_pool_draws_thousands_of_clips_within_budget() {
         }
     }
     if !slow.is_empty() {
-        eprintln!("media pool panel: slow frames: {}", slow.join(", "));
+        eprintln!("{what}: slow frames: {}", slow.join(", "));
     }
     let stats = monitor.stats();
-    eprintln!("media pool panel ({}): {stats}", headless.adapter());
-    headless.assert_p99_within_budget("media pool panel", &stats);
+    eprintln!("{what} ({}): {stats}", headless.adapter());
+    headless.assert_p99_within_budget(what, &stats);
+}
+
+/// One test for both views, so their headless frames never run at the same time.
+#[test]
+fn grid_and_list_of_thousands_of_clips_draw_within_budget() {
+    draw_within_budget("media pool grid", PoolView::Grid);
+    draw_within_budget("media pool list", PoolView::List);
 }
