@@ -151,3 +151,11 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** A task branch's finish check runs `cargo build --workspace`, `cargo test` for the crates it changed and every workspace crate that depends on them, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check` and the smoke binary, holding the cargo lock once for the whole sequence. The full `cargo test --workspace` runs on the integration branch after each batch of merges; a failure there is fixed before the next batch merges.
 - **Reason:** One full check takes about 30 minutes of cargo time on the M2 (the workspace test alone about 22 minutes) and about 65 minutes end to end with other agents queued, so running it on every task branch kept most agents waiting on the lock.
 - **Consequences:** A breakage that only shows in an unrelated crate's tests is caught one batch later, on the integration branch, instead of on the task branch. A phase still merges to `main` only after a full check passes on its branch.
+
+
+## 19. Loudness through the `ebur128` crate
+
+- **Date:** 2026-09-30
+- **Decision:** `media::analysis::loudness` measures with the `ebur128` crate (a Rust port of libebur128, MIT) instead of an in-house BS.1770-4 meter. Fixture references come from FFmpeg's `ebur128` filter and are matched within 0.1 LU integrated, 0.3 dB true peak and 0.5 LU loudness range.
+- **Reason:** A maintained, reference-tested implementation of the standard; `cargo deny check` passes (it adds `bitflags` 1 beside 2, a duplicate warning only).
+- **Consequences:** Loudness range differs from FFmpeg's by 0.3 to 0.4 LU on the stepped program fixtures (FFmpeg bins short-term values into a histogram); libebur128's values pass EBU Tech 3342, so the fixture tolerance is 0.5 LU rather than 0.1.
