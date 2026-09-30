@@ -15,11 +15,12 @@
 //! order, culling, intermediate aliasing through a [`graph::TexturePool`]) and executed
 //! with a [`renderer::Renderer`], timed per pass by a [`profiler::GpuProfiler`]. Layers
 //! are stacked by [`nodes::CompositeNode`] with the [`blend::BlendMode`]s, whose CPU
-//! reference lives in [`blend`]; each layer is sampled through its [`transform`] inside the
-//! same pass.
+//! reference lives in [`blend`]; each layer is sampled through its [`transform`], cut by its
+//! [`crop`] and scaled by its opacity inside the same pass.
 
 pub mod blend;
 pub mod colour;
+pub mod crop;
 pub mod graph;
 #[allow(unsafe_code)]
 pub mod interop;

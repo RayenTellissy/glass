@@ -1,9 +1,9 @@
 // Layer compositing: up to eight layers over an optional background in one pass. Each
 // layer is resampled through its transform (canvas pixel centre to layer point, nearest,
-// bilinear or Catmull-Rom bicubic), limited to its own rectangle with antialiased edges,
-// and blended with its mode on premultiplied linear light (W3C Compositing Level 1). The
+// bilinear or Catmull-Rom bicubic), cut to its crop rectangle with antialiased or
+// feathered edges, scaled by its opacity, and blended with its mode on premultiplied linear light (W3C Compositing Level 1). The
 // node picks the entry point for the most expensive filter its layers use.
-// render::transform and render::blend hold the formulas, and nodes::Layer::reference is
+// render::transform, render::crop and render::blend hold the formulas, and nodes::Layer::reference is
 // the CPU version of layer_colour. Per-layer fields extend `Layer` here and
 // `Layer::gpu_words` together.
 
@@ -20,6 +20,14 @@ struct Layer {
     // pixels one canvas pixel spans along each axis.
     m: vec4<f32>,
     t: vec4<f32>,
+    // Visible rectangle after the crop, in layer pixels: left, top, right, bottom.
+    crop: vec4<f32>,
+    // 0 when the crop leaves nothing.
+    opacity: f32,
+    // Soft edge width inside the crop rectangle, in layer pixels.
+    feather: f32,
+    _pad0: f32,
+    _pad1: f32,
 }
 
 struct CompositeParams {
@@ -97,10 +105,15 @@ fn fetch(i: u32, p: vec2<f32>, ceiling: u32) -> vec4<f32> {
     }
 }
 
-// Coverage of one hard edge for a pixel centre `d` layer pixels inside it, box-filtered
-// over the pixel's footprint.
-fn edge(d: f32, footprint: f32) -> f32 {
-    return clamp((d + 0.5 * footprint) / footprint, 0.0, 1.0);
+// Coverage of one crop edge for a pixel centre `d` layer pixels inside it: a hard edge
+// is box-filtered over the pixel's footprint, a feathered one ramps smoothly over
+// `feather` pixels inside the edge (render::crop::edge).
+fn edge(d: f32, feather: f32, footprint: f32) -> f32 {
+    let t = clamp((d + 0.5 * footprint) / (feather + footprint), 0.0, 1.0);
+    if feather > 0.0 {
+        return t * t * (3.0 - 2.0 * t);
+    }
+    return t;
 }
 
 // The layer's premultiplied colour at canvas point q.
@@ -111,8 +124,11 @@ fn layer_colour(i: u32, q: vec2<f32>, ceiling: u32) -> vec4<f32> {
         layer.m.y * q.x + layer.m.w * q.y + layer.t.y,
     );
     let fp = layer.t.zw;
-    let coverage = edge(p.x, fp.x) * edge(layer.size.x - p.x, fp.x)
-        * edge(p.y, fp.y) * edge(layer.size.y - p.y, fp.y);
+    let c = layer.crop;
+    let f = layer.feather;
+    let coverage = layer.opacity
+        * edge(p.x - c.x, f, fp.x) * edge(c.z - p.x, f, fp.x)
+        * edge(p.y - c.y, f, fp.y) * edge(c.w - p.y, f, fp.y);
     if coverage <= 0.0 {
         return vec4<f32>(0.0);
     }

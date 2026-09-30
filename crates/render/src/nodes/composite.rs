@@ -1,4 +1,5 @@
 use crate::blend::BlendMode;
+use crate::crop::Crop;
 use crate::graph::{Graph, Node, NodeContext, Port, TextureDesc};
 use crate::renderer::{Effect, Filter, Uniform};
 use crate::transform::{self, Affine2, Resample, ShutterTransforms};
@@ -7,13 +8,30 @@ use crate::transform::{self, Affine2, Resample, ShutterTransforms};
 /// Per-layer settings are fields here and in the shader's `Layer` record (written by
 /// `Layer::gpu_words`); [`Layer::reference`] is the CPU version of what the shader does
 /// with them.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Layer {
     pub blend: BlendMode,
     /// Layer pixels to canvas pixels (see [`crate::transform`]); the identity puts the
     /// layer at the canvas's top left.
     pub transform: ShutterTransforms,
     pub resample: Resample,
+    /// 0 to 1, scaling the layer's premultiplied colour before it is blended, so every
+    /// blend mode fades towards the backdrop.
+    pub opacity: f32,
+    /// Per-edge crop and soft edge, in layer pixels (see [`crate::crop`]).
+    pub crop: Crop,
+}
+
+impl Default for Layer {
+    fn default() -> Self {
+        Self {
+            blend: BlendMode::Normal,
+            transform: ShutterTransforms::default(),
+            resample: Resample::default(),
+            opacity: 1.0,
+            crop: Crop::default(),
+        }
+    }
 }
 
 impl Layer {
@@ -32,6 +50,25 @@ impl Layer {
     pub fn with_resample(mut self, resample: Resample) -> Self {
         self.resample = resample;
         self
+    }
+
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
+
+    pub fn with_crop(mut self, crop: Crop) -> Self {
+        self.crop = crop;
+        self
+    }
+
+    /// The opacity used: clamped to 0..1, and 0 when the crop leaves nothing.
+    fn visible_opacity(&self, size: (u32, u32)) -> f64 {
+        let [x0, y0, x1, y1] = self.crop.rect(size);
+        if x1 <= x0 || y1 <= y0 || self.opacity.is_nan() {
+            return 0.0;
+        }
+        f64::from(self.opacity.clamp(0.0, 1.0))
     }
 
     /// Canvas pixels to layer pixels at the middle of the shutter interval, or `None`
@@ -56,12 +93,7 @@ impl Layer {
             return [0.0; 4];
         };
         let p = m.apply(q);
-        let [fx, fy] = m.footprint();
-        let (w, h) = (f64::from(size.0), f64::from(size.1));
-        let coverage = transform::edge_coverage(p[0], fx)
-            * transform::edge_coverage(w - p[0], fx)
-            * transform::edge_coverage(p[1], fy)
-            * transform::edge_coverage(h - p[1], fy);
+        let coverage = self.crop.coverage(size, p, m.footprint()) * self.visible_opacity(size);
         if coverage <= 0.0 {
             return [0.0; 4];
         }
@@ -69,8 +101,8 @@ impl Layer {
     }
 
     /// The shader's `Layer` record for a texture of `size` pixels sampled with
-    /// `resample`, as 12 words.
-    fn gpu_words(&self, size: (f32, f32), resample: Resample) -> Uniform {
+    /// `resample`, as 20 words.
+    fn gpu_words(&self, size: (u32, u32), resample: Resample) -> Uniform {
         // A layer scaled to nothing samples a point outside itself everywhere.
         let m = self.canvas_to_layer().unwrap_or(Affine2 {
             a: 0.0,
@@ -81,13 +113,16 @@ impl Layer {
             ty: -1.0,
         });
         let [fx, fy] = m.footprint();
+        let opacity = self.visible_opacity(size);
         Uniform::new()
-            .f32(size.0)
-            .f32(size.1)
+            .f32(size.0 as f32)
+            .f32(size.1 as f32)
             .u32(self.blend.code())
             .u32(resample.code())
             .vec4([m.a, m.b, m.c, m.d].map(|v| v as f32))
             .vec4([m.tx, m.ty, fx.max(1e-6), fy.max(1e-6)].map(|v| v as f32))
+            .vec4(self.crop.rect(size).map(|v| v as f32))
+            .vec4([opacity as f32, self.crop.feather() as f32, 0.0, 0.0])
     }
 }
 
@@ -151,8 +186,8 @@ impl CompositeNode {
             .align16();
         for i in 0..Self::MAX_LAYERS {
             let (layer, size) = match (self.layers.get(i), sizes.get(i)) {
-                (Some(l), Some(s)) => (l.clone(), (s.width as f32, s.height as f32)),
-                _ => (Layer::default(), (0.0, 0.0)),
+                (Some(l), Some(s)) => (l.clone(), (s.width, s.height)),
+                _ => (Layer::default(), (0, 0)),
             };
             u = u.extend(&layer.gpu_words(size, self.resample_of(&layer)));
         }

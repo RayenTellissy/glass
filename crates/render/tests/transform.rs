@@ -13,6 +13,7 @@
 mod common;
 
 use render::blend::BlendMode;
+use render::crop::Crop;
 use render::graph::{Graph, Node, TexturePool};
 use render::nodes::{CompositeNode, Layer, composite_stack_capped};
 use render::profiler::GpuProfiler;
@@ -395,47 +396,66 @@ const MODES: [BlendMode; 5] = [
 ];
 
 /// Each layer rotated, scaled (non-uniformly) and moved by a subpixel amount about its
-/// centre, covering most of the canvas.
-fn transformed_4k_layers() -> Vec<Layer> {
+/// centre, covering most of the canvas; when `cropped`, also cut by 90 to 330 pixels per
+/// edge with a 40-pixel feather at 85% opacity.
+fn transformed_4k_layers(cropped: bool) -> Vec<Layer> {
     MODES
         .into_iter()
         .enumerate()
         .map(|(k, mode)| {
             let k = k as f64;
-            Layer::blended(mode).with_transform(Transform2D {
+            let layer = Layer::blended(mode).with_transform(Transform2D {
                 position: [1920.0 + 13.3 * k, 1080.0 - 7.7 * k],
                 scale: [1.05 + 0.02 * k, 1.04 - 0.01 * k],
                 rotation: 2.0 * k - 3.5,
                 anchor: [1920.0, 1080.0],
-            })
+            });
+            if !cropped {
+                return layer;
+            }
+            layer
+                .with_crop(Crop {
+                    left: 90.0 + 60.0 * k,
+                    top: 120.0 + 30.0 * k,
+                    right: 330.0 - 50.0 * k,
+                    bottom: 100.0 + 20.0 * k,
+                    feather: 40.0,
+                })
+                .with_opacity(0.85)
         })
         .collect()
 }
 
-/// Five 4K layers untransformed, transformed with bilinear (the playback cap) and
-/// transformed with bicubic, timed in one run so the machine's load is the same for all
-/// three. The Phase 4 budget (8 ms for the whole frame) is held for the first two;
-/// bicubic is for paused frames and export and is only reported.
+/// Five 4K layers untransformed, then transformed, then transformed and cropped with
+/// feather and opacity, each with bilinear (the playback cap) and bicubic, timed in one
+/// run so the machine's load is the same for all. The Phase 4 budget (8 ms for the whole
+/// frame) is held for untransformed and bilinear; bicubic is for paused frames and export
+/// and is only reported.
 #[test]
 fn five_transformed_4k_layers_gpu_time() {
     let plain: Vec<Layer> = MODES.into_iter().map(Layer::blended).collect();
-    let Some((plain_median, plain_p99)) = time_five_4k_layers(&plain, Resample::Bicubic) else {
+    let Some((median, p99)) = time_five_4k_layers(&plain, Resample::Bicubic) else {
         eprintln!("skipped: no GPU adapter or timestamp queries");
         return;
     };
-    let moved = transformed_4k_layers();
-    let (bilinear_median, bilinear_p99) =
-        time_five_4k_layers(&moved, Resample::Bilinear).expect("timed");
-    let (bicubic_median, bicubic_p99) =
-        time_five_4k_layers(&moved, Resample::Bicubic).expect("timed");
-    println!(
-        "5 layers at 4K, one pass, GPU median / p99: untransformed {plain_median:.3} / \
-         {plain_p99:.3} ms, transformed bilinear {bilinear_median:.3} / {bilinear_p99:.3} ms, \
-         transformed bicubic {bicubic_median:.3} / {bicubic_p99:.3} ms"
-    );
-    assert!(plain_median < 8.0, "untransformed median {plain_median} ms");
-    assert!(
-        bilinear_median < 8.0,
-        "bilinear median {bilinear_median} ms"
-    );
+    println!("5 layers at 4K, one pass, GPU median / p99: untransformed {median:.3} / {p99:.3} ms");
+    assert!(median < 8.0, "untransformed median {median} ms");
+    for cropped in [false, true] {
+        let layers = transformed_4k_layers(cropped);
+        let what = if cropped {
+            "transformed, cropped"
+        } else {
+            "transformed"
+        };
+        for resample in [Resample::Bilinear, Resample::Bicubic] {
+            let (median, p99) = time_five_4k_layers(&layers, resample).expect("timed");
+            println!(
+                "5 layers at 4K, one pass, GPU median / p99: {what} {} {median:.3} / {p99:.3} ms",
+                resample.id()
+            );
+            if resample == Resample::Bilinear {
+                assert!(median < 8.0, "{what} bilinear median {median} ms");
+            }
+        }
+    }
 }

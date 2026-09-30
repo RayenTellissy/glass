@@ -16,7 +16,8 @@
 //!
 //! Resampling ([`Resample`]) is nearest, bilinear or bicubic (Catmull-Rom, B = 0,
 //! C = 0.5) on premultiplied texels with the edge texels extended; the layer's own
-//! rectangle then limits it, antialiased over the canvas pixel's footprint. A transform
+//! rectangle, or its [`crate::crop::Crop`], then limits it, antialiased over the canvas
+//! pixel's footprint. A transform
 //! that maps every canvas pixel centre onto a layer pixel centre (whole-pixel moves,
 //! quarter turns, flips) is sampled with nearest whatever the setting, which is exact
 //! and the cheapest.
@@ -386,12 +387,6 @@ pub fn resample(texels: &[[f32; 4]], size: (u32, u32), p: [f64; 2], filter: Resa
     }
 }
 
-/// Coverage of one hard edge for a pixel whose centre is `d` layer pixels inside it
-/// (negative outside), box-filtered over the pixel's `footprint` in layer pixels.
-pub fn edge_coverage(d: f64, footprint: f64) -> f64 {
-    ((d + 0.5 * footprint) / footprint.max(1e-9)).clamp(0.0, 1.0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,13 +518,5 @@ mod tests {
             let w = catmull_rom_weights(f);
             assert!((w.iter().sum::<f64>() - 1.0).abs() < 1e-12);
         }
-    }
-
-    #[test]
-    fn edge_coverage_box_filters() {
-        assert_eq!(edge_coverage(0.5, 1.0), 1.0);
-        assert_eq!(edge_coverage(-0.5, 1.0), 0.0);
-        assert_eq!(edge_coverage(0.0, 1.0), 0.5);
-        assert_eq!(edge_coverage(0.25, 2.0), 0.625);
     }
 }
