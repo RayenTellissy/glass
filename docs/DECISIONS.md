@@ -153,12 +153,6 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Consequences:** A breakage that only shows in an unrelated crate's tests is caught one batch later, on the integration branch, instead of on the task branch. A phase still merges to `main` only after a full check passes on its branch.
 
 
-## 25. Text: coverage atlas, vector outline strokes, graph shadow
-
-- **Date:** 2026-09-30
-- **Decision:** `render::text` rasterises glyphs to 8-bit coverage in one `R8Unorm` atlas (shelf packed, doubling up to 4096, then evicting glyphs unused this frame and repacking on the GPU). Outlines are round-join strokes rasterised by swash at twice the outline width, cached per glyph and width in the same atlas, instead of a signed distance field. The drop shadow is a separable Gaussian of the fill-and-outline union, as render-graph passes. cosmic-text 0.19 is built without its `fontconfig` feature.
-- **Reason:** Coverage matches the CPU rasteriser exactly (GPU vs CPU max difference 0.0005), strokes stay crisp at any width without an SDF's range limit, and fontdb scans the standard font folders without fontconfig.
-- **Consequences:** Each outline width is a separate atlas entry, so animating the outline width re-rasterises per step (quantised to 1/16 px). Per-glyph scale above 1 samples the atlas bilinearly; the text animator should lay out at the final size for large zooms. Colour glyphs (emoji) keep only their alpha and take the fill colour.
 ## 19. Shader hot reload dependencies are not profile-gated
 
 - **Date:** 2026-09-30
@@ -206,6 +200,12 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Consequences:** A proxy at a lower resolution than the source needs its crop, feather and transform scaled into proxy pixels by the caller (the same mapping as the transform's anchor).
 
 
+## 25. Text: coverage atlas, vector outline strokes, graph shadow
+
+- **Date:** 2026-09-30
+- **Decision:** `render::text` rasterises glyphs to 8-bit coverage in one `R8Unorm` atlas (shelf packed, doubling up to 4096, then evicting glyphs unused this frame and repacking on the GPU). Outlines are round-join strokes rasterised by swash at twice the outline width, cached per glyph and width in the same atlas, instead of a signed distance field. The drop shadow is a separable Gaussian of the fill-and-outline union, as render-graph passes. cosmic-text 0.19 is built without its `fontconfig` feature.
+- **Reason:** Coverage matches the CPU rasteriser exactly (GPU vs CPU max difference 0.0005), strokes stay crisp at any width without an SDF's range limit, and fontdb scans the standard font folders without fontconfig.
+- **Consequences:** Each outline width is a separate atlas entry, so animating the outline width re-rasterises per step (quantised to 1/16 px). Per-glyph scale above 1 samples the atlas bilinearly; the text animator should lay out at the final size for large zooms. Colour glyphs (emoji) keep only their alpha and take the fill colour.
 ## 26. Media pool items are keyed by `MediaId`; colour labels use the clip palette
 
 - **Date:** 2026-09-30
