@@ -6,7 +6,7 @@ use egui::{Align2, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 use engine::media_mgmt::{DropSummary, Unreadable};
 use project::media_pool::{Facts, Gps, Metadata};
 
-use super::SnapshotCase;
+use super::{SnapshotCase, pool_cases};
 use crate::dialogs::recovery::{self, RecoveryDialog, RecoveryPrompt, RecoveryState};
 use crate::panels::format;
 use crate::panels::import::{
@@ -85,6 +85,24 @@ pub(super) fn all() -> Vec<SnapshotCase> {
             module: "panels/format",
             size: vec2(520.0, 168.0),
             draw: format_list_columns,
+        },
+        SnapshotCase {
+            name: "media_pool_grid",
+            module: "panels/media_pool",
+            size: pool_cases::GRID_SIZE,
+            draw: pool_cases::grid,
+        },
+        SnapshotCase {
+            name: "media_pool_list",
+            module: "panels/media_pool",
+            size: pool_cases::LIST_SIZE,
+            draw: pool_cases::list,
+        },
+        SnapshotCase {
+            name: "media_pool_label_menu",
+            module: "panels/media_pool",
+            size: pool_cases::MENU_SIZE,
+            draw: pool_cases::label_menu,
         },
         SnapshotCase {
             name: "widgets_controls",

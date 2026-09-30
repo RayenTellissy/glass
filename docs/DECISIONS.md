@@ -174,6 +174,7 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Details:** `render::blend` (CPU reference, f64) and `crates/render/shaders/composite.wgsl`; `crates/render/tests/composite.rs` compares them for every mode.
 - **Consequences:** Overlay and Soft light look somewhat different from editors that blend encoded sRGB values. Soft light and the other modes extrapolate their 0..1 formulas above 1.
 
+
 ## 21. Output encoding: inverse BT.1886 for SDR video, straight alpha, triangular dither
 
 - **Date:** 2026-09-30
@@ -203,3 +204,11 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** Cropping before the transform keeps the cut attached to the picture when it moves, turns or scales, as editors do. An inward feather never shows pixels the crop removed, and the smoothstep avoids the visible kink of a linear ramp's ends. Scaling premultiplied colour is how W3C compositing defines opacity and fades every blend mode towards the backdrop.
 - **Details:** `render::crop` (CPU reference), `nodes::Layer::{opacity, crop}`, `crates/render/shaders/composite.wgsl`; `crates/render/tests/crop_opacity.rs`.
 - **Consequences:** A proxy at a lower resolution than the source needs its crop, feather and transform scaled into proxy pixels by the caller (the same mapping as the transform's anchor).
+
+
+## 26. Media pool items are keyed by `MediaId`; colour labels use the clip palette
+
+- **Date:** 2026-09-30
+- **Decision:** A media pool item maps one to one onto a source media reference, so the pool keys items by `project::MediaId` (the draft's own `ItemId` is gone) and bins by a new `project::BinId` node id. Until the project root embeds the pool (Phase 5 schema work) the pool hands out ids from its own counter, and `MediaPool::insert_item` accepts ids chosen by the caller. The five colour labels are drawn in the clip roles: amber `clip/title`, blue `clip/video`, green `clip/audio`, red `clip/offline`, violet `clip/adjustment`, and always shown with their names.
+- **Reason:** `project` already exports an `ItemId` for timeline items, and a clip's media reference and its pool entry are the same thing, so one id avoids a mapping table. The colour label menu on the `Sheet / Media pool` board uses exactly these clip colours, and the theme has no separate label roles.
+- **Consequences:** Embedding the pool into `Project.media` later only swaps the id source. The search index is a derived cache and is never saved.
