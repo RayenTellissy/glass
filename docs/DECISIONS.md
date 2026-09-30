@@ -144,6 +144,7 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** `cargo deny check` rejects `im`: it is unmaintained (RUSTSEC-2026-0248) and has an unsoundness advisory in `OrdSet` insertion with no fixed release (RUSTSEC-2023-0126). `imbl` is the maintained fork, with the same persistent `Vector` and `OrdMap`, the same structural sharing and the same licence (MPL-2.0, allowed by `deny.toml`).
 - **Consequences:** Only `project` depends on it. The architecture doc's defaults table records the change.
 
+
 ## 18. Scoped checks on task branches, full test on the integration branch
 
 - **Date:** 2026-09-30
@@ -172,3 +173,10 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** `render::nodes::OutputNode` encodes SDR video tagged BT.709 with the inverse of the BT.1886 EOTF (a 1/2.4 power), not the BT.709 camera OETF; the preview and stills use sRGB; PQ is absolute (1.0 = 203 nits) and HLG goes through the inverse BT.2100 OOTF for a 1000-nit display. Outputs carry straight alpha unless a caller asks for premultiplied. 8, 10 and 16-bit integer targets get triangular-PDF dither of one code value from a PCG3D hash of pixel position and a per-frame seed; exact black and white are not dithered.
 - **Reason:** players decode BT.709-tagged video with BT.1886, so the inverse EOTF makes display light round-trip with the working space, which is display-referred (the same convention `render::yuv` decodes with); the BT.709 OETF stays available (`OutputTransfer::Bt709`) for scene-referred delivery. Straight alpha is the delivery convention of ProRes 4444, PNG and most encoders. TPDF dither makes the quantisation error independent of the signal, removing banding without bias; varying the seed per frame keeps the pattern from sitting still.
 - **Consequences:** Round trips through `media::TransferFn` are exact for sRGB, BT.1886, PQ and HLG. The dithered 8-bit output has no run of equal codes longer than a few pixels on a gradient that bands in 320-pixel steps undithered (`crates/render/tests/output.rs`).
+
+## 21. Autosave in the per-user cache folder until projects have their own
+
+- **Date:** 2026-09-30
+- **Decision:** Autosaves go to `<cache>/autosave/<project uid>/`, where `<cache>` is the per-user cache folder (`~/Library/Caches/Glass` on macOS, `%LOCALAPPDATA%\Glass` on Windows, `$XDG_CACHE_HOME/Glass` on Linux, `GLASS_CACHE_DIR` to override) until the Phase 5 project settings task adds the per-project cache folder. The autosave format has its own version (`project::autosave::FORMAT_VERSION`, in every snapshot, log header and marker), separate from the project schema version, and autosaves of another format version are not read or migrated. The recovery prompt shows ages (`12 min ago`) instead of clock times.
+- **Reason:** Project files and settings do not exist yet, so there is no project cache folder to write into, and the launch scan needs one known place to look. Autosaves are short-lived (deleted on a clean quit, on Discard, or seven days after the session was last alive), so migrating them is not worth the code; the saved project file is what schema migrations cover. Local clock times need a time zone library, which no task has chosen yet.
+- **Consequences:** When project settings land, the app passes the project's cache folder to `engine::autosave` and the launch scan also looks in the recent projects' cache folders. The prompt's `autosave_time` and `saved_time` become local clock times once a date and time crate is added.

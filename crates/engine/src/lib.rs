@@ -3,6 +3,7 @@
 //! the export pipeline and the analysis job system, plus logging setup for every binary.
 
 pub mod analysis;
+pub mod autosave;
 pub mod logging;
 pub mod media_check;
 pub mod media_mgmt;
