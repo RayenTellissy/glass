@@ -8,7 +8,10 @@ use render::blend::BlendMode;
 #[test]
 fn blend_choice_ids_are_the_compositors_ids() {
     for id in BLEND_MODES {
-        assert!(BlendMode::from_id(id).is_some(), "no blend mode for choice {id:?}");
+        assert!(
+            BlendMode::from_id(id).is_some(),
+            "no blend mode for choice {id:?}"
+        );
     }
     assert_eq!(BLEND_MODES.len(), BlendMode::ALL.len());
 }

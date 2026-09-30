@@ -149,7 +149,7 @@ fn dragging_a_number_scrubs_and_commits_once_at_the_end() {
     let schema = builtin::transform();
     let values = schema.defaults();
     let mut h = Harness::new();
-    let mut draw = |ui: &mut egui::Ui| Section::new(&schema, &values).show(ui);
+    let draw = |ui: &mut egui::Ui| Section::new(&schema, &values).show(ui);
     let y = row_y(0);
     let start = pos2(100.0, y);
     let mut events = Vec::new();
@@ -159,7 +159,7 @@ fn dragging_a_number_scrubs_and_commits_once_at_the_end() {
     }
     input.push(vec![button(pos2(140.0, y), false)]);
     for frame in input {
-        events.extend(h.frame(frame, Modifiers::NONE, &mut draw).0);
+        events.extend(h.frame(frame, Modifiers::NONE, draw).0);
     }
     let sets = sets(&events);
     assert!(sets.len() >= 2, "{sets:?}");
@@ -181,7 +181,7 @@ fn shift_scrubs_a_tenth_as_fast_over_the_soft_range() {
     let schema = builtin::transform();
     let values = schema.defaults();
     let mut h = Harness::new();
-    let mut draw = |ui: &mut egui::Ui| Section::new(&schema, &values).show(ui);
+    let draw = |ui: &mut egui::Ui| Section::new(&schema, &values).show(ui);
     let y = row_y(1);
     let start = pos2(100.0, y);
     let mut events = Vec::new();
@@ -192,7 +192,7 @@ fn shift_scrubs_a_tenth_as_fast_over_the_soft_range() {
         vec![button(pos2(140.0, y), false)],
     ];
     for frame in frames {
-        events.extend(h.frame(frame, Modifiers::SHIFT, &mut draw).0);
+        events.extend(h.frame(frame, Modifiers::SHIFT, draw).0);
     }
     let (id, value, commit) = sets(&events).pop().expect("a commit");
     assert_eq!((id.as_str(), commit), ("scale", true));
@@ -454,7 +454,7 @@ fn inspector_column(ui: &mut egui::Ui, frame: usize, schemas: &[ParamSchema]) {
                         _ => KeyframeMark::AtPlayhead,
                     },
                     previous: true,
-                    next: frame % 2 == 0,
+                    next: frame.is_multiple_of(2),
                 };
                 let _ = Section::new(schema, &values)
                     .keyframes(&keys)

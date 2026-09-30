@@ -587,7 +587,12 @@ impl FieldCx<'_> {
         with_alpha: bool,
         events: &mut Vec<ParamEvent>,
     ) {
-        let mut rgba = egui::Rgba::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]);
+        // The parameter's value, not a UI colour: egui keeps it premultiplied.
+        let mut rgba = egui::Rgba::TRANSPARENT;
+        for i in 0..3 {
+            rgba[i] = c[i] * c[3];
+        }
+        rgba[3] = c[3];
         let alpha = if with_alpha {
             egui::color_picker::Alpha::OnlyBlend
         } else {
