@@ -193,18 +193,11 @@ Done when: a sequence with 5 video layers, blend modes, transforms, text, shapes
 
 - [x] Render graph: per-frame DAG compiled into `wgpu` passes with resource aliasing
 - [x] Linear-light working space, `Rgba16Float` intermediates, dithered 8-bit output
-- [ ] Layer compositing with blend modes: normal, multiply, screen, overlay, add, subtract, difference, soft light, hard light, colour dodge, colour burn
-- [ ] Transform node: position, scale, rotation, anchor, bicubic resampling, motion-blur ready
-- [ ] Opacity, crop with feather
-- [ ] Shader hot reload in debug builds
-- [~] Effect parameter system: typed params, ranges, defaults, units, keyframeable flag, UI auto-generated from the schema
-- [ ] Text rendering via `cosmic-text`: glyph atlas, outlines, shadows, per-glyph transform hooks
-- [ ] Linear-light working space, `Rgba16Float` intermediates, dithered 8-bit output
 - [x] Layer compositing with blend modes: normal, multiply, screen, overlay, add, subtract, difference, soft light, hard light, colour dodge, colour burn
 - [x] Transform node: position, scale, rotation, anchor, bicubic resampling, motion-blur ready
 - [x] Opacity, crop with feather
 - [x] Shader hot reload in debug builds
-- [ ] Effect parameter system: typed params, ranges, defaults, units, keyframeable flag, UI auto-generated from the schema
+- [~] Effect parameter system: typed params, ranges, defaults, units, keyframeable flag, UI auto-generated from the schema
 - [x] Text rendering via `cosmic-text`: glyph atlas, outlines, shadows, per-glyph transform hooks
 - [ ] Vector shapes: rect, ellipse, polygon, path, stroke, fill, gradients
 - [ ] Mask node: shape masks, feather, invert, intersection and union
