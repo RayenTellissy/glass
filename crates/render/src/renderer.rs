@@ -345,6 +345,12 @@ impl Uniform {
         self
     }
 
+    /// Appends another uniform's words (a nested record).
+    pub fn extend(mut self, other: &Uniform) -> Self {
+        self.0.extend_from_slice(&other.0);
+        self
+    }
+
     pub fn bytes(&self) -> &[u8] {
         &self.0
     }
