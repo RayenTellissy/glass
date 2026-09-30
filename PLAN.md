@@ -193,7 +193,7 @@ Done when: a sequence with 5 video layers, blend modes, transforms, text, shapes
 
 - [x] Render graph: per-frame DAG compiled into `wgpu` passes with resource aliasing
 - [ ] Linear-light working space, `Rgba16Float` intermediates, dithered 8-bit output
-- [ ] Layer compositing with blend modes: normal, multiply, screen, overlay, add, subtract, difference, soft light, hard light, colour dodge, colour burn
+- [~] Layer compositing with blend modes: normal, multiply, screen, overlay, add, subtract, difference, soft light, hard light, colour dodge, colour burn
 - [ ] Transform node: position, scale, rotation, anchor, bicubic resampling, motion-blur ready
 - [ ] Opacity, crop with feather
 - [ ] Shader hot reload in debug builds
