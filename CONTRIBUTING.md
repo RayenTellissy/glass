@@ -34,12 +34,14 @@ Several tasks can be worked on at once, each in its own git worktree, while the 
    ```
 
    `scripts/worktree-setup.sh` generates the worktree's own test media (git-ignored, about 25 MB) and prints the resolved `CARGO_TARGET_DIR` and `FFMPEG_DIR`. Running it again is harmless.
-2. **Source the environment** in every shell: `source scripts/dev-env.sh`. In any worktree it points `CARGO_TARGET_DIR` at the main checkout's `target/` and `FFMPEG_DIR` at the main checkout's `.glass-cache/ffmpeg/<host-triple>/`, so dependencies and `ffmpeg-sys` compile once for all worktrees (workspace crates still get their own artifacts per worktree).
+2. **Source the environment** in every shell: `source scripts/dev-env.sh`. In any worktree it points `CARGO_TARGET_DIR` at the main checkout's `target/` and `FFMPEG_DIR` at the main checkout's `.glass-cache/ffmpeg/<host-triple>/`, so dependencies and `ffmpeg-sys` compile once for all worktrees. Workspace crates do not get their own artifacts per worktree: cargo names them by their path relative to the workspace root, so `project` built in one worktree has the same fingerprint and artifact names as `project` built in any other, and a stale build from another worktree can look fresh (Decision 23). `scripts/cargo-serial` handles this (next step); a plain `cargo` command in a worktree does not.
 3. **Run every cargo command through `scripts/cargo-serial`**: build, test, clippy, run and bench. It waits for any cargo command running in another checkout, prints what it is waiting for and for how long, and holds the lock until its own command, test runs included, has finished:
 
    ```sh
    source scripts/dev-env.sh && scripts/cargo-serial test --workspace
    ```
+
+   When the previous `cargo-serial` command ran in a different checkout (recorded in `<git common dir>/glass-cargo-last-checkout`), it first deletes the workspace packages' fingerprints in the shared target directory and prints one line saying so, so cargo recompiles this checkout's workspace crates; dependencies are not rebuilt. Switching checkouts therefore costs a rebuild of the workspace crates the command needs.
 
    `cargo fmt` does not compile and may run directly. Stop a run with Ctrl-C or `SIGTERM`, which reach cargo and release the lock; `SIGKILL` releases the lock but can leave cargo running.
 4. **Benchmarks only when nothing else is building.** `cargo-serial` keeps other builds out while a benchmark runs, but also check that no other heavy work is going on first (see [Benchmarks](#benchmarks)).
