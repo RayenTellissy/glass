@@ -180,6 +180,8 @@ fn every_fixture_decodes() {
             let expected_type = match codec {
                 "pcm_s16le" => SampleType::I16,
                 "pcm_s24le" => SampleType::I32,
+                // FFmpeg decodes FLAC to integers at its bit depth; the fixtures are 16-bit.
+                "flac" => SampleType::I16,
                 _ => SampleType::F32,
             };
             assert_eq!(

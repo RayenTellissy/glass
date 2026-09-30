@@ -1,11 +1,12 @@
 //! Analysis algorithms that run on the analysis pool (`engine::analysis`): thumbnail
-//! strips, waveform peaks, scene cuts and proxies. They take a [`Control`] for
+//! strips, waveform peaks, scene cuts, silences and proxies. They take a [`Control`] for
 //! cancellation, pause and progress, and write their files through a
 //! [`CacheEntry`](crate::CacheEntry).
 
 pub mod peaks;
 pub mod proxy;
 pub mod scenes;
+pub mod silence;
 pub mod thumbnails;
 
 use crate::error::MediaError;
