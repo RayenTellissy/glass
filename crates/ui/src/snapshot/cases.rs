@@ -4,6 +4,7 @@
 
 use egui::{Align2, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 use engine::media_mgmt::{DropSummary, Unreadable};
+use project::media_pool::{Facts, Gps, Metadata};
 
 use super::{SnapshotCase, pool_cases};
 use crate::panels::format;
@@ -11,6 +12,7 @@ use crate::panels::import::{
     self, DropArea, FOLDER_DIALOG_WIDTH, FolderImport, FolderRow, ImportProgress,
     PROGRESS_STRIP_HEIGHT,
 };
+use crate::panels::metadata::{self, METADATA_PANEL_HEIGHT, MetadataView};
 use crate::panels::widgets::{Icon, Paint, Type, icon, size};
 use crate::t;
 use crate::theme::{self, Role};
@@ -58,6 +60,18 @@ pub(super) fn all() -> Vec<SnapshotCase> {
             module: "panels/import",
             size: vec2(320.0, 64.0),
             draw: import_drag_ghost,
+        },
+        SnapshotCase {
+            name: "metadata_panel",
+            module: "panels/metadata",
+            size: vec2(880.0, METADATA_PANEL_HEIGHT),
+            draw: metadata_panel,
+        },
+        SnapshotCase {
+            name: "metadata_panel_empty",
+            module: "panels/metadata",
+            size: vec2(880.0, METADATA_PANEL_HEIGHT),
+            draw: metadata_panel_empty,
         },
         SnapshotCase {
             name: "file_picker_entry",
@@ -392,6 +406,71 @@ fn import_progress_strip(ui: &mut egui::Ui) {
 fn import_drag_ghost(ui: &mut egui::Ui) {
     bare_panel(ui, |ui, rect| {
         import::drag_ghost(ui, rect.min, &t!("sample.file.a_cam"), 12);
+    });
+}
+
+/// The metadata strip for an A-cam clip with every field the board shows.
+fn metadata_panel(ui: &mut egui::Ui) {
+    bare_panel(ui, |ui, rect| {
+        let facts = Facts {
+            width: 3840,
+            height: 2160,
+            bit_depth: 10,
+            chroma: Some("4:2:2".into()),
+            primaries: Some("bt709".into()),
+            audio_channels: 2,
+            sample_rate: 48_000,
+            audio_bit_depth: Some(24),
+            ..Facts::default()
+        };
+        let data = Metadata {
+            camera_make: Some("Sony".into()),
+            camera_model: Some("ILME-FX6V".into()),
+            focal_length_mm: Some(35.0),
+            f_number: Some(2.8),
+            iso: Some(800),
+            reel: Some("A014".into()),
+            timecode: Some("19:48:07:11".into()),
+            created: Some("2026-08-12T19:48:07+02:00".into()),
+            gps: Some(Gps {
+                latitude: 60.391234,
+                longitude: 5.322345,
+                altitude_m: Some(12.0),
+            }),
+            ..Metadata::default()
+        };
+        let view = MetadataView::new(
+            &t!("sample.clip.harbour"),
+            Some(&t!("sample.file.harbour")),
+            Some(2_100_000_000),
+            &facts,
+            &data,
+        );
+        let _ = metadata::metadata_panel(ui, rect, &view);
+    });
+}
+
+/// A voice memo: no camera, lens, reel, timecode or position, so those rows show the
+/// empty mark.
+fn metadata_panel_empty(ui: &mut egui::Ui) {
+    bare_panel(ui, |ui, rect| {
+        let facts = Facts {
+            audio_channels: 1,
+            sample_rate: 48_000,
+            ..Facts::default()
+        };
+        let data = Metadata {
+            created: Some("2026-08-14T08:02:51Z".into()),
+            ..Metadata::default()
+        };
+        let view = MetadataView::new(
+            &t!("sample.clip.voice_memo"),
+            Some(&t!("sample.file.voice_memo")),
+            Some(1_800_000),
+            &facts,
+            &data,
+        );
+        let _ = metadata::metadata_panel(ui, rect, &view);
     });
 }
 

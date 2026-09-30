@@ -12,6 +12,8 @@ assets.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 wgpu.workspace = true
+naga.workspace = true
+notify.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
