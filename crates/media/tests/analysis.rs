@@ -5,6 +5,7 @@ mod common;
 
 use std::cell::Cell;
 
+use media::analysis::loudness::{self, LoudnessSettings};
 use media::analysis::scenes::{self, CutKind, SceneSettings};
 use media::analysis::silence::{self, SilenceSettings};
 use media::analysis::{AnalysisError, Control, Stopped, Unattended};
@@ -207,4 +208,97 @@ fn silence_detection_reports_progress_and_stops_when_cancelled() {
     assert!(matches!(result, Err(AnalysisError::Stopped)), "{result:?}");
     let progress = control.progress.get();
     assert!(progress > 0.2 && progress < 0.5, "progress {progress}");
+}
+
+/// Integrated loudness, loudness range and true peak against FFmpeg's `ebur128` filter
+/// (MANIFEST, one decimal, so its own measurement is within 0.05 of what it prints):
+/// integrated within 0.1 LU, true peak within 0.3 dB (FFmpeg oversamples to 192 kHz,
+/// libebur128 4x with a 49-tap filter; the 44.1 kHz file is measured at its own rate
+/// while FFmpeg's filter resamples it to 48 kHz first), loudness range within 0.5 LU:
+/// FFmpeg's filter bins short-term values into a histogram and its percentiles on the
+/// program's level steps land 0.3 to 0.4 LU above libebur128's, which passes EBU Tech
+/// 3342 (unit tests).
+#[test]
+fn loudness_matches_ffmpeg_ebur128() {
+    for file in [
+        "loudness_program_48k_stereo.wav",
+        "loudness_program_44k1_stereo.flac",
+        "loudness_51_48k.wav",
+    ] {
+        let (Some(path), Some(entry)) = (common::fixture(file), entry(file)) else {
+            return;
+        };
+        let reference = &entry["ebur128"];
+        let want = |k: &str| reference[k].as_f64().expect("reference");
+        let found = loudness::measure(&path, &LoudnessSettings, &Unattended).expect("measure");
+        let integrated = found.integrated_lufs.expect("integrated");
+        let tp = found.true_peak_dbtp.expect("true peak");
+        println!(
+            "{file}: I {integrated:.3} LUFS (FFmpeg {}), LRA {:.3} LU (FFmpeg {}), TP {tp:.3} dBTP (FFmpeg {}), max S {:.2}, max M {:.2}",
+            want("integrated"),
+            found.range_lu,
+            want("lra"),
+            want("true_peak"),
+            found.max_short_term_lufs.unwrap_or(f64::NAN),
+            found.max_momentary_lufs.unwrap_or(f64::NAN),
+        );
+        let rate = entry["audio"]["sample_rate"].as_u64().expect("rate") as u32;
+        let channels = entry["audio"]["channels"].as_u64().expect("channels") as usize;
+        assert_eq!((found.sample_rate, found.channels), (rate, channels.min(6)));
+        assert!(
+            (integrated - want("integrated")).abs() <= 0.1,
+            "{file}: I {integrated}"
+        );
+        assert!(
+            (found.range_lu - want("lra")).abs() <= 0.5,
+            "{file}: LRA {}",
+            found.range_lu
+        );
+        assert!((tp - want("true_peak")).abs() <= 0.3, "{file}: TP {tp}");
+        let seconds = entry["duration"].as_f64().expect("duration");
+        let points = (seconds * 10.0).round() as usize;
+        assert_eq!(found.short_term.len(), points, "{file}");
+        assert_eq!(found.momentary.len(), points, "{file}");
+        assert!(found.short_term[29..].iter().all(Option::is_some), "{file}");
+    }
+}
+
+/// The program fixture's levels change every 8 s (noise gain 0.4, 0.08, 0.2, 0.6): the
+/// short-term curve settles to steps whose differences are those gains in dB.
+#[test]
+fn loudness_curve_follows_the_program() {
+    let Some(path) = common::fixture("loudness_program_48k_stereo.wav") else {
+        return;
+    };
+    let found = loudness::measure(&path, &LoudnessSettings, &Unattended).expect("measure");
+    // Windows ending at 7.5, 15.5 and 23.5 s lie inside one level (the tone at 12-14 s
+    // is inside the second window, so it is skipped there: 11.5 s ends before it).
+    let at = |s: f64| f64::from(found.short_term[(s * 10.0) as usize - 1].expect("level"));
+    let db = |g: f64| 20.0 * g.log10();
+    let steps = [
+        (at(11.5) - at(7.5), db(0.08 / 0.4)),
+        (at(23.5) - at(11.5), db(0.2 / 0.08)),
+        (at(29.5) - at(23.5), db(0.6 / 0.2)),
+    ];
+    for (got, want) in steps {
+        assert!(
+            (got - want).abs() < 0.5,
+            "step {got:.2} dB, expected {want:.2}"
+        );
+    }
+}
+
+#[test]
+fn loudness_reports_progress_and_stops_when_cancelled() {
+    let Some(path) = common::fixture("loudness_program_48k_stereo.wav") else {
+        return;
+    };
+    let control = StopAfter {
+        left: Cell::new(60),
+        progress: Cell::new(0.0),
+    };
+    let result = loudness::measure(&path, &LoudnessSettings, &control);
+    assert!(matches!(result, Err(AnalysisError::Stopped)), "{result:?}");
+    let progress = control.progress.get();
+    assert!(progress > 0.2 && progress < 0.6, "progress {progress}");
 }

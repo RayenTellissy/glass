@@ -20,6 +20,7 @@ bench = false
 assets.workspace = true
 audioadapter-buffers.workspace = true
 blake3.workspace = true
+ebur128.workspace = true
 ffmpeg-next.workspace = true
 gif.workspace = true
 image.workspace = true
@@ -76,6 +77,10 @@ harness = false
 
 [[bench]]
 name = "silence"
+harness = false
+
+[[bench]]
+name = "loudness"
 harness = false
 
 [lints]
