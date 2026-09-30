@@ -15,7 +15,8 @@
 //! order, culling, intermediate aliasing through a [`graph::TexturePool`]) and executed
 //! with a [`renderer::Renderer`], timed per pass by a [`profiler::GpuProfiler`]. Layers
 //! are stacked by [`nodes::CompositeNode`] with the [`blend::BlendMode`]s, whose CPU
-//! reference lives in [`blend`].
+//! reference lives in [`blend`]. Vector shapes ([`shape`]) are rasterised as exact
+//! coverage by [`shape::ShapeNode`] into a layer, or by [`shape::CoverageNode`] for masks.
 
 pub mod blend;
 pub mod colour;
@@ -26,6 +27,7 @@ pub mod nodes;
 pub mod profiler;
 pub mod renderer;
 pub mod shaders;
+pub mod shape;
 pub mod upload;
 pub mod yuv;
 

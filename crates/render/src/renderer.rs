@@ -20,6 +20,9 @@ pub struct EffectKey {
     pub inputs: u8,
 }
 
+/// Shader, name and target format of a pipeline a node builds itself.
+type CustomKey = (&'static str, &'static str, wgpu::TextureFormat);
+
 /// Which sampler binding 1 holds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Filter {
@@ -44,6 +47,7 @@ pub struct Renderer {
     queue: wgpu::Queue,
     layouts: Mutex<HashMap<u8, wgpu::BindGroupLayout>>,
     pipelines: Mutex<HashMap<EffectKey, wgpu::RenderPipeline>>,
+    custom: Mutex<HashMap<CustomKey, wgpu::RenderPipeline>>,
     shaders: ShaderLibrary,
     linear: wgpu::Sampler,
     nearest: wgpu::Sampler,
@@ -84,6 +88,7 @@ impl Renderer {
             queue: queue.clone(),
             layouts: Mutex::default(),
             pipelines: Mutex::default(),
+            custom: Mutex::default(),
             shaders,
             linear: sampler(wgpu::FilterMode::Linear),
             nearest: sampler(wgpu::FilterMode::Nearest),
@@ -140,6 +145,10 @@ impl Renderer {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .retain(|key, _| !all && !changed.iter().any(|n| n == key.shader));
+            self.custom
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|key, _| !all && !changed.iter().any(|n| n == key.0));
         }
         changed
     }
@@ -199,6 +208,41 @@ impl Renderer {
         let layout = self.layout(key.inputs);
         let pipeline = self.build(key, &layout);
         self.pipelines
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, pipeline.clone());
+        pipeline
+    }
+
+    /// A pipeline a node describes itself (its own vertex stage, bindings or blending),
+    /// made by `build` from `shader` (with `common.wgsl` prepended) on first use, cached
+    /// under `name` and `format`, and dropped like the effect pipelines when `shader`
+    /// reloads.
+    pub fn custom_pipeline(
+        &self,
+        shader: &'static str,
+        name: &'static str,
+        format: wgpu::TextureFormat,
+        build: impl FnOnce(&wgpu::Device, &wgpu::ShaderModule) -> wgpu::RenderPipeline,
+    ) -> wgpu::RenderPipeline {
+        let key = (shader, name, format);
+        if let Some(p) = self
+            .custom
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&key)
+        {
+            return p.clone();
+        }
+        let source = self.shaders.composed(shader).unwrap_or_default();
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(shader),
+                source: wgpu::ShaderSource::Wgsl(source.into()),
+            });
+        let pipeline = build(&self.device, &module);
+        self.custom
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(key, pipeline.clone());
