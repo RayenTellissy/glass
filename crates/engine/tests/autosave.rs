@@ -120,7 +120,8 @@ fn ticks_only_when_the_tree_changed() {
     assert!(matches!(
         next_event(&events),
         AutosaveEvent::Written {
-            tick: files::Tick::Appended { upserts: 1, .. },
+            // The new item and the project header (its next id).
+            tick: files::Tick::Appended { upserts: 2, .. },
             ..
         }
     ));
