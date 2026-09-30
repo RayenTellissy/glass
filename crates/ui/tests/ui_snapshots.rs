@@ -81,6 +81,9 @@ fn ui_snapshots_match_their_goldens() {
     let Some(mut headless) = HeadlessUi::new_or_skip("ui snapshots", Viewport::default()) else {
         return;
     };
+    // One context draws every case, so egui's clock would otherwise depend on how many
+    // cases come first, and time-driven drawing (the recovery spinner) would move.
+    headless.set_time(Some(0.0));
     let tolerance = if headless.is_software() {
         Tolerance::SOFTWARE
     } else {
