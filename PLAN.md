@@ -160,7 +160,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [x] Scene cut detection
 - [x] Silence detection with threshold and minimum length
 - [ ] Beat and tempo detection
-- [ ] Loudness analysis (EBU R128 integrated and short-term)
+- [~] Loudness analysis (EBU R128 integrated and short-term)
 
 ### Media management
 - [x] Import from drag-drop, file dialog, and folders, recursive, with camera card structures recognised (AVCHD, XDCAM, Sony, Canon, DJI)
