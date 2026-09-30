@@ -212,7 +212,7 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** A media pool item maps one to one onto a source media reference, so the pool keys items by `project::MediaId` (the draft's own `ItemId` is gone) and bins by a new `project::BinId` node id. Until the project root embeds the pool (Phase 5 schema work) the pool hands out ids from its own counter, and `MediaPool::insert_item` accepts ids chosen by the caller. The five colour labels are drawn in the clip roles: amber `clip/title`, blue `clip/video`, green `clip/audio`, red `clip/offline`, violet `clip/adjustment`, and always shown with their names.
 - **Reason:** `project` already exports an `ItemId` for timeline items, and a clip's media reference and its pool entry are the same thing, so one id avoids a mapping table. The colour label menu on the `Sheet / Media pool` board uses exactly these clip colours, and the theme has no separate label roles.
 - **Consequences:** Embedding the pool into `Project.media` later only swaps the id source. The search index is a derived cache and is never saved.
-## 26. Frame queues: rtrb for one producer, crossbeam's ArrayQueue for the decode pool
+## 27. Frame queues: rtrb for one producer, crossbeam's ArrayQueue for the decode pool
 
 - **Date:** 2026-09-30
 - **Decision:** `engine::frame_queue` uses `rtrb` 0.4 for single-producer queues (render → present, one decoder → render) and `crossbeam-queue`'s bounded `ArrayQueue` for the multi-producer decode → render queue, with `crossbeam-utils`' `Parker` for waiting. Stale frames are flushed through a shared generation counter carried in every frame's stamp rather than by draining the queue under a lock.
