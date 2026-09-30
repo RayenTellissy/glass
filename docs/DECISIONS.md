@@ -174,7 +174,7 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** players decode BT.709-tagged video with BT.1886, so the inverse EOTF makes display light round-trip with the working space, which is display-referred (the same convention `render::yuv` decodes with); the BT.709 OETF stays available (`OutputTransfer::Bt709`) for scene-referred delivery. Straight alpha is the delivery convention of ProRes 4444, PNG and most encoders. TPDF dither makes the quantisation error independent of the signal, removing banding without bias; varying the seed per frame keeps the pattern from sitting still.
 - **Consequences:** Round trips through `media::TransferFn` are exact for sRGB, BT.1886, PQ and HLG. The dithered 8-bit output has no run of equal codes longer than a few pixels on a gradient that bands in 320-pixel steps undithered (`crates/render/tests/output.rs`).
 
-## 21. Autosave in the per-user cache folder until projects have their own
+## 22. Autosave in the per-user cache folder until projects have their own
 
 - **Date:** 2026-09-30
 - **Decision:** Autosaves go to `<cache>/autosave/<project uid>/`, where `<cache>` is the per-user cache folder (`~/Library/Caches/Glass` on macOS, `%LOCALAPPDATA%\Glass` on Windows, `$XDG_CACHE_HOME/Glass` on Linux, `GLASS_CACHE_DIR` to override) until the Phase 5 project settings task adds the per-project cache folder. The autosave format has its own version (`project::autosave::FORMAT_VERSION`, in every snapshot, log header and marker), separate from the project schema version, and autosaves of another format version are not read or migrated. The recovery prompt shows ages (`12 min ago`) instead of clock times.
