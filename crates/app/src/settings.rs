@@ -12,6 +12,8 @@ use serde::Deserialize;
 pub const CONFIG_DIR_ENV: &str = "GLASS_CONFIG_DIR";
 /// Overrides the user data folder (crash reports, later models and asset packs).
 pub const DATA_DIR_ENV: &str = "GLASS_DATA_DIR";
+/// Overrides the user cache folder (autosaves until projects have their own cache folder).
+pub const CACHE_DIR_ENV: &str = "GLASS_CACHE_DIR";
 /// `1`/`on`/`true` or `0`/`off`/`false`: overrides the crash report setting.
 pub const CRASH_REPORTS_ENV: &str = "GLASS_CRASH_REPORTS";
 
@@ -23,12 +25,14 @@ const APP_DIR: &str = "Glass";
 pub struct Paths {
     pub config: PathBuf,
     pub data: PathBuf,
+    pub cache: PathBuf,
 }
 
 impl Paths {
     /// The platform folders (`~/Library/Application Support/Glass` on macOS,
     /// `%APPDATA%\Glass` on Windows, `$XDG_CONFIG_HOME/Glass` and `$XDG_DATA_HOME/Glass`
-    /// on Linux), unless the environment overrides them.
+    /// on Linux), and the cache folder (`~/Library/Caches/Glass`, `%LOCALAPPDATA%\Glass`,
+    /// `$XDG_CACHE_HOME/Glass`), unless the environment overrides them.
     pub fn from_env() -> Self {
         let pick = |env: &str, base: Option<PathBuf>| {
             std::env::var_os(env)
@@ -40,6 +44,7 @@ impl Paths {
         Self {
             config: pick(CONFIG_DIR_ENV, dirs::config_dir()),
             data: pick(DATA_DIR_ENV, dirs::data_dir()),
+            cache: pick(CACHE_DIR_ENV, dirs::cache_dir()),
         }
     }
 

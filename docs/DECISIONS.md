@@ -143,3 +143,11 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** The project edit tree uses `imbl` 7 instead of `im` 15, the Phase 0 default.
 - **Reason:** `cargo deny check` rejects `im`: it is unmaintained (RUSTSEC-2026-0248) and has an unsoundness advisory in `OrdSet` insertion with no fixed release (RUSTSEC-2023-0126). `imbl` is the maintained fork, with the same persistent `Vector` and `OrdMap`, the same structural sharing and the same licence (MPL-2.0, allowed by `deny.toml`).
 - **Consequences:** Only `project` depends on it. The architecture doc's defaults table records the change.
+
+
+## 18. Autosave in the per-user cache folder until projects have their own
+
+- **Date:** 2026-09-30
+- **Decision:** Autosaves go to `<cache>/autosave/<project uid>/`, where `<cache>` is the per-user cache folder (`~/Library/Caches/Glass` on macOS, `%LOCALAPPDATA%\Glass` on Windows, `$XDG_CACHE_HOME/Glass` on Linux, `GLASS_CACHE_DIR` to override) until the Phase 5 project settings task adds the per-project cache folder. The autosave format has its own version (`project::autosave::FORMAT_VERSION`, in every snapshot, log header and marker), separate from the project schema version, and autosaves of another format version are not read or migrated. The recovery prompt shows ages (`12 min ago`) instead of clock times.
+- **Reason:** Project files and settings do not exist yet, so there is no project cache folder to write into, and the launch scan needs one known place to look. Autosaves are short-lived (deleted on a clean quit, on Discard, or seven days after the session was last alive), so migrating them is not worth the code; the saved project file is what schema migrations cover. Local clock times need a time zone library, which no task has chosen yet.
+- **Consequences:** When project settings land, the app passes the project's cache folder to `engine::autosave` and the launch scan also looks in the recent projects' cache folders. The prompt's `autosave_time` and `saved_time` become local clock times once a date and time crate is added.
