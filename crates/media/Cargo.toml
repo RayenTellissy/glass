@@ -74,5 +74,9 @@ harness = false
 name = "scenes"
 harness = false
 
+[[bench]]
+name = "silence"
+harness = false
+
 [lints]
 workspace = true

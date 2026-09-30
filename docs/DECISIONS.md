@@ -151,3 +151,24 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** Autosaves go to `<cache>/autosave/<project uid>/`, where `<cache>` is the per-user cache folder (`~/Library/Caches/Glass` on macOS, `%LOCALAPPDATA%\Glass` on Windows, `$XDG_CACHE_HOME/Glass` on Linux, `GLASS_CACHE_DIR` to override) until the Phase 5 project settings task adds the per-project cache folder. The autosave format has its own version (`project::autosave::FORMAT_VERSION`, in every snapshot, log header and marker), separate from the project schema version, and autosaves of another format version are not read or migrated. The recovery prompt shows ages (`12 min ago`) instead of clock times.
 - **Reason:** Project files and settings do not exist yet, so there is no project cache folder to write into, and the launch scan needs one known place to look. Autosaves are short-lived (deleted on a clean quit, on Discard, or seven days after the session was last alive), so migrating them is not worth the code; the saved project file is what schema migrations cover. Local clock times need a time zone library, which no task has chosen yet.
 - **Consequences:** When project settings land, the app passes the project's cache folder to `engine::autosave` and the launch scan also looks in the recent projects' cache folders. The prompt's `autosave_time` and `saved_time` become local clock times once a date and time crate is added.
+## 18. Scoped checks on task branches, full test on the integration branch
+
+- **Date:** 2026-09-30
+- **Decision:** A task branch's finish check runs `cargo build --workspace`, `cargo test` for the crates it changed and every workspace crate that depends on them, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check` and the smoke binary, holding the cargo lock once for the whole sequence. The full `cargo test --workspace` runs on the integration branch after each batch of merges; a failure there is fixed before the next batch merges.
+- **Reason:** One full check takes about 30 minutes of cargo time on the M2 (the workspace test alone about 22 minutes) and about 65 minutes end to end with other agents queued, so running it on every task branch kept most agents waiting on the lock.
+- **Consequences:** A breakage that only shows in an unrelated crate's tests is caught one batch later, on the integration branch, instead of on the task branch. A phase still merges to `main` only after a full check passes on its branch.
+
+## 19. Shader hot reload dependencies are not profile-gated
+
+- **Date:** 2026-09-30
+- **Decision:** `render` depends on `notify` 8 (default features off, macOS FSEvents backend) and directly on `naga` 30 (the version wgpu 30 uses, `wgsl-in`) in every profile; the watcher (`shader-watch` thread, `ShaderLibrary::watching`) is compiled only under `debug_assertions`, and release builds use the embedded shaders.
+- **Reason:** Cargo cannot choose dependencies by build profile: it does not support `debug_assertions` in `[target.'cfg(...)'.dependencies]` tables. naga is already compiled for wgpu, so a direct dependency costs nothing, and naga validation stays usable in tests of every profile.
+- **Consequences:** Release binaries contain no watcher code. notify brings a second `windows-sys` version, which `cargo deny check` reports as a duplicate warning; `cargo deny check` passes.
+
+## 20. Blend modes on linear light, HDR-safe
+
+- **Date:** 2026-09-30
+- **Decision:** Layer blend modes are evaluated on premultiplied linear light in the working space (W3C Compositing and Blending Level 1, source-over with a separable blend function B, plus Add and Subtract). Where a W3C formula would clip or dim an HDR backdrop above 1, Glass keeps it: Screen takes max(Cb, Cs) once either is above 1, Colour dodge caps at max(1, Cb) instead of 1, Colour burn returns Cb for Cb >= 1.
+- **Reason:** The working space is linear light (Decision 15) and holds values above 1; a neutral screen, dodge or burn layer should leave highlights alone. For 0..1 values every mode equals the W3C function.
+- **Details:** `render::blend` (CPU reference, f64) and `crates/render/shaders/composite.wgsl`; `crates/render/tests/composite.rs` compares them for every mode.
+- **Consequences:** Overlay and Soft light look somewhat different from editors that blend encoded sRGB values. Soft light and the other modes extrapolate their 0..1 formulas above 1.
