@@ -79,6 +79,12 @@ eframe = { version = "0.36", default-features = false, features = ["accesskit", 
 pollster = "0.4"
 # The system file picker for importing (`ui::panels::file_dialog`), used asynchronously.
 rfd = "0.17"
+# Frame queues between decode, render and present (`engine::frame_queue`): `rtrb` for
+# single-producer rings, crossbeam's bounded array queue for the decode pool, and
+# crossbeam's parker so a waiting side sleeps instead of spinning.
+rtrb = "0.4"
+crossbeam-queue = "0.3"
+crossbeam-utils = "0.8"
 tracing = "0.1"
 # `tracing-log` routes `log` records (wgpu, winit, eframe) into tracing.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "ansi", "env-filter", "tracing-log", "smallvec"] }
