@@ -165,3 +165,10 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** The working space is linear light (Decision 15) and holds values above 1; a neutral screen, dodge or burn layer should leave highlights alone. For 0..1 values every mode equals the W3C function.
 - **Details:** `render::blend` (CPU reference, f64) and `crates/render/shaders/composite.wgsl`; `crates/render/tests/composite.rs` compares them for every mode.
 - **Consequences:** Overlay and Soft light look somewhat different from editors that blend encoded sRGB values. Soft light and the other modes extrapolate their 0..1 formulas above 1.
+
+## 21. Output encoding: inverse BT.1886 for SDR video, straight alpha, triangular dither
+
+- **Date:** 2026-09-30
+- **Decision:** `render::nodes::OutputNode` encodes SDR video tagged BT.709 with the inverse of the BT.1886 EOTF (a 1/2.4 power), not the BT.709 camera OETF; the preview and stills use sRGB; PQ is absolute (1.0 = 203 nits) and HLG goes through the inverse BT.2100 OOTF for a 1000-nit display. Outputs carry straight alpha unless a caller asks for premultiplied. 8, 10 and 16-bit integer targets get triangular-PDF dither of one code value from a PCG3D hash of pixel position and a per-frame seed; exact black and white are not dithered.
+- **Reason:** players decode BT.709-tagged video with BT.1886, so the inverse EOTF makes display light round-trip with the working space, which is display-referred (the same convention `render::yuv` decodes with); the BT.709 OETF stays available (`OutputTransfer::Bt709`) for scene-referred delivery. Straight alpha is the delivery convention of ProRes 4444, PNG and most encoders. TPDF dither makes the quantisation error independent of the signal, removing banding without bias; varying the seed per frame keeps the pattern from sitting still.
+- **Consequences:** Round trips through `media::TransferFn` are exact for sRGB, BT.1886, PQ and HLG. The dithered 8-bit output has no run of equal codes longer than a few pixels on a gradient that bands in 320-pixel steps undithered (`crates/render/tests/output.rs`).
