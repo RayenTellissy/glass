@@ -4,6 +4,7 @@
 
 use egui::{Align2, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 use engine::media_mgmt::{DropSummary, Unreadable};
+use project::params::{ParamDef, ParamSchema, ParamValue, ParamValues, Range, Unit, builtin};
 
 use super::SnapshotCase;
 use crate::panels::format;
@@ -12,6 +13,8 @@ use crate::panels::import::{
     PROGRESS_STRIP_HEIGHT,
 };
 use crate::panels::widgets::{Icon, Paint, Type, icon, size};
+use crate::params::paint::{self as param_paint, FieldState, SliderState, StepperHover};
+use crate::params::{KeyframeInfo, KeyframeMark, Section};
 use crate::t;
 use crate::theme::{self, Role};
 
@@ -76,6 +79,30 @@ pub(super) fn all() -> Vec<SnapshotCase> {
             module: "panels/widgets",
             size: vec2(480.0, 200.0),
             draw: widgets_controls,
+        },
+        SnapshotCase {
+            name: "params_inspector_video",
+            module: "params/fields",
+            size: vec2(320.0, 512.0),
+            draw: params_inspector_video,
+        },
+        SnapshotCase {
+            name: "params_every_kind",
+            module: "params/fields",
+            size: vec2(320.0, 326.0),
+            draw: params_every_kind,
+        },
+        SnapshotCase {
+            name: "params_row_states",
+            module: "params/paint",
+            size: vec2(480.0, 216.0),
+            draw: params_row_states,
+        },
+        SnapshotCase {
+            name: "params_typed_maths",
+            module: "params/expr",
+            size: vec2(320.0, 208.0),
+            draw: params_typed_maths,
         },
     ]
 }
@@ -610,6 +637,270 @@ fn widgets_controls(ui: &mut egui::Ui) {
         for (i, which) in icons.into_iter().enumerate() {
             let cell = Rect::from_min_size(pos2(x0 + i as f32 * 24.0, y), vec2(16.0, 16.0));
             icon(&painter, cell, which, paint.c(Role::TextSecondary), 1.8);
+        }
+    });
+}
+
+/// Sections stacked top to bottom at the case's width, like the inspector column.
+fn param_sections(ui: &mut egui::Ui, draw: impl FnOnce(&mut egui::Ui)) {
+    let fill = theme::current(ui.ctx()).color(Role::Bg1);
+    egui::CentralPanel::default()
+        .frame(egui::Frame::NONE.fill(fill))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            draw(ui);
+        });
+}
+
+/// `Sheet / Inspector video`, default column: Position between keyframes, Scale with a
+/// keyframe at the playhead, Opacity animated, crop and motion blur switched on.
+fn params_inspector_video(ui: &mut egui::Ui) {
+    param_sections(ui, |ui| {
+        let transform = builtin::transform();
+        let mut t_values = ParamValues::new();
+        t_values.set(&transform, "position", ParamValue::Point([1012.4, 548.0]));
+        t_values.set(&transform, "scale", ParamValue::Float(1.12));
+        let keys = |id: &str| match id {
+            "position" => KeyframeInfo {
+                mark: KeyframeMark::On,
+                previous: true,
+                next: true,
+            },
+            "scale" => KeyframeInfo {
+                mark: KeyframeMark::AtPlayhead,
+                previous: true,
+                next: true,
+            },
+            "opacity" => KeyframeInfo {
+                mark: KeyframeMark::On,
+                previous: true,
+                next: false,
+            },
+            _ => KeyframeInfo::default(),
+        };
+        let _ = Section::new(&transform, &t_values)
+            .keyframes(&keys)
+            .show(ui);
+
+        let compositing = builtin::compositing();
+        let mut c_values = ParamValues::new();
+        c_values.set(&compositing, "opacity", ParamValue::Float(0.86));
+        let _ = Section::new(&compositing, &c_values)
+            .keyframes(&keys)
+            .show(ui);
+
+        let crop = builtin::crop();
+        let mut crop_values = ParamValues::new();
+        crop_values.set(&crop, "top", ParamValue::Float(140.0));
+        crop_values.set(&crop, "bottom", ParamValue::Float(140.0));
+        crop_values.set(&crop, "feather", ParamValue::Float(12.0));
+        let _ = Section::new(&crop, &crop_values).show(ui);
+
+        let blur = builtin::motion_blur();
+        let mut b_values = ParamValues::new();
+        b_values.set(&blur, "enabled", ParamValue::Bool(true));
+        b_values.set(&blur, "samples", ParamValue::Int(16));
+        let _ = Section::new(&blur, &b_values).show(ui);
+    });
+}
+
+/// A made-up effect with one parameter of every kind the schema has, then the same
+/// effect bypassed.
+fn params_every_kind(ui: &mut egui::Ui) {
+    param_sections(ui, |ui| {
+        let caption = t!("sample.clip.lower_third");
+        let glow = ParamSchema::new(
+            "glow",
+            "sample.effect.glow",
+            vec![
+                ParamDef::colour("colour", "sample.param.colour", [1.0, 0.62, 0.2, 1.0], true),
+                ParamDef::text("caption", "sample.param.caption", &caption, false),
+                ParamDef::boolean("invert", "sample.param.invert", false),
+                ParamDef::choice(
+                    "falloff",
+                    "sample.param.falloff",
+                    &[
+                        ("smooth", "sample.param.falloff_smooth"),
+                        ("linear", "sample.param.falloff_linear"),
+                    ],
+                ),
+                ParamDef::int("copies", "sample.param.copies", 3, Range::new(1.0, 12.0)),
+                ParamDef::angle("angle", "sample.param.angle", 0.0),
+                ParamDef::float(
+                    "radius",
+                    "sample.param.radius",
+                    24.0,
+                    Range::new(0.0, 500.0),
+                )
+                .soft(Range::new(0.0, 100.0))
+                .unit(Unit::Pixels)
+                .decimals(0)
+                .slider(),
+            ],
+        );
+        let mut values = ParamValues::new();
+        values.set(&glow, "invert", ParamValue::Bool(true));
+        values.set(&glow, "angle", ParamValue::Angle(-12.5));
+        values.set(&glow, "radius", ParamValue::Float(36.0));
+        let _ = Section::new(&glow, &values).show(ui);
+
+        let vignette = ParamSchema::new(
+            "vignette",
+            "sample.effect.vignette",
+            vec![
+                ParamDef::point("centre", "sample.param.centre", [960.0, 540.0]),
+                ParamDef::float("amount", "sample.param.amount", 0.4, Range::new(0.0, 1.0))
+                    .unit(Unit::Percent)
+                    .decimals(0)
+                    .slider(),
+            ],
+        );
+        let _ = Section::new(&vignette, &vignette.defaults())
+            .enabled(false)
+            .show(ui);
+    });
+}
+
+/// Every state of the row parts, painted directly: keyframe lanes (off, hover, on with
+/// only an earlier keyframe, at the playhead, between keyframes), numeric fields (idle,
+/// hover, scrubbing with its delta chip, editing, error with its helper), sliders,
+/// switches, dropdowns and the stepper.
+fn params_row_states(ui: &mut egui::Ui) {
+    bare_panel(ui, |ui, rect| {
+        let paint = Paint::new(ui.ctx());
+        let painter = ui.painter_at(rect);
+        let x0 = rect.min.x + 16.0;
+        let col = 92.0;
+        let lanes = [
+            (KeyframeMark::Off, false, false, false),
+            (KeyframeMark::Off, false, false, true),
+            (KeyframeMark::On, true, false, false),
+            (KeyframeMark::AtPlayhead, true, true, false),
+            (KeyframeMark::On, true, true, false),
+        ];
+        let y = rect.min.y + 12.0;
+        for (i, (mark, previous, next, hover)) in lanes.into_iter().enumerate() {
+            let lane = Rect::from_min_size(pos2(x0 + i as f32 * col, y), vec2(40.0, 16.0));
+            let info = KeyframeInfo {
+                mark,
+                previous,
+                next,
+            };
+            param_paint::keyframe_lane(&paint, &painter, lane, info, hover);
+        }
+
+        let y = rect.min.y + 64.0;
+        let states = [
+            FieldState::Idle,
+            FieldState::Hover,
+            FieldState::Scrub,
+            FieldState::Editing,
+            FieldState::Error,
+        ];
+        for (i, state) in states.into_iter().enumerate() {
+            let field = Rect::from_min_size(pos2(x0 + i as f32 * col, y), vec2(76.0, 24.0));
+            param_paint::field_frame(&paint, &painter, field, state);
+            let value = match state {
+                FieldState::Scrub => "74",
+                FieldState::Error => "140",
+                _ => "86",
+            };
+            param_paint::field_text(&paint, &painter, field, "%", value);
+            if state == FieldState::Scrub {
+                param_paint::delta_chip(&paint, &painter, field, field.center().x, "\u{2212}12");
+            }
+            if state == FieldState::Error {
+                let text = t!("params.error.range", min = 0, max = 100);
+                param_paint::error_helper(
+                    &paint,
+                    &painter,
+                    pos2(field.left() - 16.0, field.bottom() + 12.0),
+                    &text,
+                );
+            }
+        }
+
+        let y = rect.min.y + 120.0;
+        let sliders = [
+            (0.6, SliderState::Idle),
+            (0.6, SliderState::Hover),
+            (0.75, SliderState::Drag),
+        ];
+        for (i, (f, state)) in sliders.into_iter().enumerate() {
+            let slider = Rect::from_min_size(pos2(x0 + i as f32 * col, y), vec2(76.0, 24.0));
+            param_paint::slider(&paint, &painter, slider, f, state);
+        }
+        for (i, (on, hover)) in [(false, false), (false, true), (true, false)]
+            .into_iter()
+            .enumerate()
+        {
+            let switch = Rect::from_min_size(
+                pos2(x0 + (3 + i) as f32 * col * 0.5 + 3.0 * col * 0.5, y + 5.0),
+                vec2(24.0, 14.0),
+            );
+            param_paint::switch(&paint, &painter, switch, on, hover);
+        }
+
+        let y = rect.min.y + 168.0;
+        let normal = t!("blend.normal");
+        let screen = t!("blend.screen");
+        let dropdowns = [
+            (&normal, false, false),
+            (&screen, true, false),
+            (&screen, false, true),
+        ];
+        for (i, (text, hover, open)) in dropdowns.into_iter().enumerate() {
+            let field = Rect::from_min_size(pos2(x0 + i as f32 * col, y), vec2(84.0, 24.0));
+            param_paint::dropdown(&paint, &painter, field, text, hover, open);
+        }
+        let stepper = Rect::from_min_size(
+            pos2(x0 + 3.0 * col, y),
+            vec2(param_paint::STEPPER_WIDTH, 24.0),
+        );
+        param_paint::stepper(
+            &paint,
+            &painter,
+            stepper,
+            "16",
+            StepperHover::Plus,
+            FieldState::Idle,
+        );
+    });
+}
+
+/// Maths typed into a field and what it commits to: plain numbers, sums, relative
+/// entries applied to the current value, products, parentheses and the typographic
+/// minus; division by zero commits nothing.
+fn params_typed_maths(ui: &mut egui::Ui) {
+    bare_panel(ui, |ui, rect| {
+        let paint = Paint::new(ui.ctx());
+        let painter = ui.painter_at(rect);
+        let current = 112.0;
+        let entries = [
+            "112",
+            "112+10",
+            "+10",
+            "*2",
+            "(1+2)*3 - 1",
+            "\u{2212}12",
+            "1/0",
+        ];
+        for (i, typed) in entries.into_iter().enumerate() {
+            let y = rect.min.y + 12.0 + i as f32 * 28.0;
+            let left = Rect::from_min_size(pos2(rect.min.x + 16.0, y), vec2(136.0, 24.0));
+            let right = Rect::from_min_size(pos2(rect.min.x + 168.0, y), vec2(136.0, 24.0));
+            param_paint::field_frame(&paint, &painter, left, FieldState::Editing);
+            param_paint::field_text(&paint, &painter, left, "%", typed);
+            match crate::params::evaluate(typed, current) {
+                Some(v) => {
+                    param_paint::field_frame(&paint, &painter, right, FieldState::Idle);
+                    param_paint::field_text(&paint, &painter, right, "%", &format!("{v:.1}"));
+                }
+                None => {
+                    param_paint::field_frame(&paint, &painter, right, FieldState::Error);
+                    param_paint::field_text(&paint, &painter, right, "%", &format!("{current:.1}"));
+                }
+            }
         }
     });
 }

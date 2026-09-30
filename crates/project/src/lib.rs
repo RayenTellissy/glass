@@ -9,6 +9,7 @@ pub mod history;
 pub mod id;
 pub mod media_pool;
 pub mod model;
+pub mod params;
 pub mod time;
 
 pub use edit::ClipSpec;
