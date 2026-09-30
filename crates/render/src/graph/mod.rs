@@ -502,7 +502,9 @@ impl<'a> CompiledGraph<'a> {
         self.steps.iter().map(|s| s.node.label()).collect()
     }
 
-    /// Records every pass into `encoder`, taking intermediates from `pool`.
+    /// Records every pass into `encoder`, taking intermediates from `pool`, after
+    /// picking up any shader reloaded since the last frame
+    /// ([`Renderer::begin_frame`]).
     pub fn record(
         &self,
         renderer: &Renderer,
@@ -510,6 +512,7 @@ impl<'a> CompiledGraph<'a> {
         encoder: &mut wgpu::CommandEncoder,
         mut profiler: Option<&mut GpuProfiler>,
     ) {
+        renderer.begin_frame();
         let slot_views = pool.acquire(renderer.device(), &self.slots);
         let view = |r: usize| -> &wgpu::TextureView {
             match self.resources[r].placement {
