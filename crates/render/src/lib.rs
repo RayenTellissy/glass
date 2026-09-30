@@ -29,8 +29,8 @@ pub mod profiler;
 pub mod readback;
 pub mod renderer;
 pub mod shaders;
-pub mod transform;
 pub mod text;
+pub mod transform;
 pub mod upload;
 pub mod yuv;
 
