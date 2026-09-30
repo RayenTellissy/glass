@@ -12,7 +12,8 @@
 //! let a = g.add(YuvSourceNode::uploaded(&frame_a, working), &[]);
 //! let b = g.import("cached frame", &cached_view);
 //! let c = g.add(GamutNode::new(Primaries::DisplayP3, Primaries::Bt709), &[b]);
-//! let out = g.add(CompositeNode::over(canvas, layers), &[a.out(0), c.out(0)]);
+//! let layers = vec![Layer::blended(BlendMode::Normal), Layer::blended(BlendMode::Screen)];
+//! let out = g.add(CompositeNode::new(canvas, false, layers), &[a.out(0), c.out(0)]);
 //! g.export(out.out(0), &target_view);
 //! let compiled = g.compile()?;
 //! compiled.execute(&renderer, &mut pool, Some(&mut profiler));
@@ -502,7 +503,9 @@ impl<'a> CompiledGraph<'a> {
         self.steps.iter().map(|s| s.node.label()).collect()
     }
 
-    /// Records every pass into `encoder`, taking intermediates from `pool`.
+    /// Records every pass into `encoder`, taking intermediates from `pool`, after
+    /// picking up any shader reloaded since the last frame
+    /// ([`Renderer::begin_frame`]).
     pub fn record(
         &self,
         renderer: &Renderer,
@@ -510,6 +513,7 @@ impl<'a> CompiledGraph<'a> {
         encoder: &mut wgpu::CommandEncoder,
         mut profiler: Option<&mut GpuProfiler>,
     ) {
+        renderer.begin_frame();
         let slot_views = pool.acquire(renderer.device(), &self.slots);
         let view = |r: usize| -> &wgpu::TextureView {
             match self.resources[r].placement {
