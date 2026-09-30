@@ -198,7 +198,7 @@ Done when: a sequence with 5 video layers, blend modes, transforms, text, shapes
 - [ ] Opacity, crop with feather
 - [ ] Shader hot reload in debug builds
 - [ ] Effect parameter system: typed params, ranges, defaults, units, keyframeable flag, UI auto-generated from the schema
-- [ ] Text rendering via `cosmic-text`: glyph atlas, outlines, shadows, per-glyph transform hooks
+- [~] Text rendering via `cosmic-text`: glyph atlas, outlines, shadows, per-glyph transform hooks
 - [ ] Vector shapes: rect, ellipse, polygon, path, stroke, fill, gradients
 - [ ] Mask node: shape masks, feather, invert, intersection and union
 - [ ] Async GPU readback ring for export and scopes
