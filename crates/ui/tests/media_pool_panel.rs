@@ -13,6 +13,7 @@ use ui::frame_time::FrameTimeMonitor;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::panels::media_pool::{
     BinSelection, ItemRow, MediaPoolView, PoolView, ProxyState, bin_rows, filter_chips, media_pool,
+    metadata_view,
 };
 use ui::theme::ThemeKind;
 
@@ -125,6 +126,7 @@ fn media_pool_draws_thousands_of_clips_within_budget() {
     };
     let mut list = MediaPoolView {
         view: PoolView::List,
+        metadata: pool.item(ids[0]).map(|item| metadata_view(item)),
         ..base
     };
     // The search results for what the user types, queried through the index up front:

@@ -19,7 +19,7 @@ use crate::theme::{self, Role};
 
 /// Sizes of the three cases.
 pub(super) const GRID_SIZE: egui::Vec2 = vec2(400.0, 580.0);
-pub(super) const LIST_SIZE: egui::Vec2 = vec2(888.0, 300.0);
+pub(super) const LIST_SIZE: egui::Vec2 = vec2(888.0, 410.0);
 pub(super) const MENU_SIZE: egui::Vec2 = vec2(232.0, 240.0);
 
 struct Clip {
@@ -185,6 +185,11 @@ fn sample_pool() -> (MediaPool, Vec<MediaId>) {
             item.metadata.camera_model = Some(c.camera);
             item.metadata.focal_length_mm = Some(c.focal);
             item.tags = c.tags;
+            item.size_bytes = (c.seconds * 22_000_000.0) as u64;
+            item.metadata.reel = Some(t!("sample.pool.reel"));
+            item.metadata.timecode = Some(t!("sample.timecode"));
+            item.facts.audio_channels = 2;
+            item.facts.sample_rate = 48_000;
             item.label = c.label;
             if c.offline {
                 item.status = MediaStatus::Offline {
@@ -312,6 +317,9 @@ pub(super) fn list(ui: &mut egui::Ui) {
             bin_name: t!("sample.bin.selects"),
             total: 94,
             selected: BTreeSet::from([ids[0]]),
+            metadata: pool
+                .item(ids[0])
+                .map(|item| media_pool::metadata_view(item)),
             items,
             ..MediaPoolView::default()
         };

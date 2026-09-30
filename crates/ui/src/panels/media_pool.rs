@@ -19,6 +19,7 @@ use project::{BinId, MediaId};
 
 use super::format;
 use super::import::{self, DropArea, DropAreaAction};
+use super::metadata::{METADATA_PANEL_HEIGHT, MetadataAction, MetadataView, metadata_panel};
 use super::widgets::{Icon, Paint, Type, icon, icon_button, size};
 use crate::t;
 use crate::theme::Role;
@@ -251,6 +252,8 @@ pub struct MediaPoolView {
     /// Pixels scrolled in the clip area and in the bins tree.
     pub scroll: f32,
     pub bins_scroll: f32,
+    /// The selected clip's metadata, shown under the list ([`metadata_view`]).
+    pub metadata: Option<MetadataView>,
 }
 
 impl Default for MediaPoolView {
@@ -271,6 +274,7 @@ impl Default for MediaPoolView {
             selected: BTreeSet::new(),
             scroll: 0.0,
             bins_scroll: 0.0,
+            metadata: None,
         }
     }
 }
@@ -298,6 +302,20 @@ pub enum MediaPoolAction {
     NewBin,
     Import,
     More,
+    /// `Edit…` in the metadata strip under the list.
+    EditMetadata,
+}
+
+/// The metadata strip's view of a pool item.
+pub fn metadata_view(item: &MediaItem) -> MetadataView {
+    let file_name = item.path.file_name().map(|n| n.to_string_lossy());
+    MetadataView::new(
+        &item.name,
+        file_name.as_deref(),
+        (item.size_bytes > 0).then_some(item.size_bytes),
+        &item.facts,
+        &item.metadata,
+    )
 }
 
 /// The rows of the bins tree for `pool`, depth first in natural order, children of
@@ -1498,6 +1516,19 @@ fn list(
     view: &mut MediaPoolView,
     action: &mut MediaPoolAction,
 ) {
+    let rect = match &view.metadata {
+        Some(metadata) if rect.height() > METADATA_PANEL_HEIGHT + 3.0 * size::ROW => {
+            let strip = Rect::from_min_max(
+                pos2(rect.min.x, rect.max.y - METADATA_PANEL_HEIGHT),
+                rect.max,
+            );
+            if metadata_panel(ui, strip, metadata) == MetadataAction::Edit {
+                *action = MediaPoolAction::EditMetadata;
+            }
+            Rect::from_min_max(rect.min, pos2(rect.max.x, strip.min.y))
+        }
+        _ => rect,
+    };
     let painter = ui.painter_at(rect);
     let columns = list_columns(rect.min.x, rect.max.x);
     // Column header.
