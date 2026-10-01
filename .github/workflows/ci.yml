@@ -165,6 +165,23 @@ jobs:
             crates/ui/tests/snapshots/**/*.diff.png
           if-no-files-found: ignore
 
+      # Visual regression: reference sequences rendered through the render graph against
+      # the goldens in crates/render/tests/visual/goldens (CONTRIBUTING.md, "Visual
+      # regression tests"). macOS-only, like the UI snapshots: texts use the system Arial.
+      - name: Visual regression
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: cargo test -p render --test visual_regression -- --nocapture
+
+      - name: Upload visual regression differences
+        if: failure() && matrix.target == 'aarch64-apple-darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-differences
+          path: |
+            crates/render/tests/visual/goldens/**/*.actual.png
+            crates/render/tests/visual/goldens/**/*.diff.png
+          if-no-files-found: ignore
+
       - name: Smoke
         run: cargo run --bin smoke
 
