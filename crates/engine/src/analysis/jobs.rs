@@ -1,5 +1,7 @@
 //! The analysis kinds: each is a type implementing [`AnalysisJob`].
 
+use media::analysis::beats::{self, BEATS_VERSION, BeatSettings, Beats};
+use media::analysis::loudness::{self, LOUDNESS_VERSION, Loudness, LoudnessSettings};
 use media::analysis::peaks::{self, PEAKS_VERSION, PeakSettings, Peaks};
 use media::analysis::proxy::{self, PROXY_KIND, PROXY_VERSION, Proxy, ProxySettings};
 use media::analysis::scenes::{self, SCENES_VERSION, SceneCuts, SceneSettings};
@@ -290,5 +292,83 @@ impl AnalysisJob for SilenceJob {
 
     fn run(&self, ctx: &JobContext) -> Result<Silences, JobError> {
         Ok(silence::detect(&self.source.path, &self.settings, ctx)?)
+    }
+}
+
+/// Loudness ([`media::analysis::loudness`]), one JSON file.
+#[derive(Clone, Debug)]
+pub struct LoudnessJob {
+    pub source: SourceFile,
+    pub settings: LoudnessSettings,
+}
+
+impl Artifact for Loudness {
+    const EXTENSION: &'static str = "json";
+
+    fn encode(&self) -> std::io::Result<Vec<u8>> {
+        json_encode(self)
+    }
+
+    fn decode(bytes: &[u8], _: &CacheEntry) -> Option<Self> {
+        serde_json::from_slice::<Loudness>(bytes)
+            .ok()
+            .filter(|l| l.version == LOUDNESS_VERSION)
+    }
+}
+
+impl AnalysisJob for LoudnessJob {
+    type Output = Loudness;
+    const KIND: &'static str = "loudness";
+    const VERSION: u32 = LOUDNESS_VERSION;
+
+    fn source_hash(&self) -> ContentHash {
+        self.source.hash
+    }
+
+    fn params(&self) -> String {
+        self.settings.params()
+    }
+
+    fn run(&self, ctx: &JobContext) -> Result<Loudness, JobError> {
+        Ok(loudness::measure(&self.source.path, &self.settings, ctx)?)
+    }
+}
+
+/// Tempo and beats ([`media::analysis::beats`]), one JSON file.
+#[derive(Clone, Debug)]
+pub struct BeatsJob {
+    pub source: SourceFile,
+    pub settings: BeatSettings,
+}
+
+impl Artifact for Beats {
+    const EXTENSION: &'static str = "json";
+
+    fn encode(&self) -> std::io::Result<Vec<u8>> {
+        json_encode(self)
+    }
+
+    fn decode(bytes: &[u8], _: &CacheEntry) -> Option<Self> {
+        serde_json::from_slice::<Beats>(bytes)
+            .ok()
+            .filter(|b| b.version == BEATS_VERSION)
+    }
+}
+
+impl AnalysisJob for BeatsJob {
+    type Output = Beats;
+    const KIND: &'static str = "beats";
+    const VERSION: u32 = BEATS_VERSION;
+
+    fn source_hash(&self) -> ContentHash {
+        self.source.hash
+    }
+
+    fn params(&self) -> String {
+        self.settings.params()
+    }
+
+    fn run(&self, ctx: &JobContext) -> Result<Beats, JobError> {
+        Ok(beats::detect(&self.source.path, &self.settings, ctx)?)
     }
 }

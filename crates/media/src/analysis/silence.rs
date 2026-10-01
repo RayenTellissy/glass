@@ -36,7 +36,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::analysis::{AnalysisError, Control};
 use crate::audio::{AudioOptions, AudioReader, ChannelLayout};
-use crate::probe::probe;
 
 /// Bumped when the output or the algorithm changes.
 pub const SILENCE_VERSION: u32 = 1;
@@ -261,23 +260,18 @@ pub fn detect(
     settings: &SilenceSettings,
     control: &dyn Control,
 ) -> Result<Silences, AnalysisError> {
-    let info = probe(path)?;
-    let layout = match info.audio().map_or(2, |(_, a)| a.channels) {
-        1 => ChannelLayout::Mono,
-        2 => ChannelLayout::Stereo,
-        _ => ChannelLayout::Surround51,
-    };
-    let mut reader = AudioReader::open(
+    let mut reader = AudioReader::open_for_source(
         path,
         AudioOptions {
             sample_rate: settings.sample_rate,
-            layout,
             ..AudioOptions::default()
         },
+        |source, options| options.layout = ChannelLayout::for_channels(source.channels),
     )?;
     let channels = reader.channels();
     let first = reader.position();
-    let expected = info
+    let expected = reader
+        .source()
         .duration
         .map_or(0.0, |d| d.seconds() * f64::from(settings.sample_rate))
         .max(1.0);
