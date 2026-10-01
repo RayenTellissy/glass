@@ -436,7 +436,7 @@ Done when: a tagged build installs cleanly on a fresh macOS and Windows machine 
 
 - [ ] macOS: Universal binary, hardened runtime, DMG
 - [ ] macOS: notarisation (needs-human: Apple Developer account and certificate)
-- [ ] Windows: MSIX and portable EXE
+- [ ] Windows: MSIX and portable EXE (the portable zip ships an empty `Glass Data` folder beside `glass.exe` so it starts in portable mode; CONTRIBUTING.md, Portable mode)
 - [ ] Windows: code signing (needs-human: certificate)
 - [ ] Linux: AppImage and Flatpak
 - [ ] Auto-updater with delta updates and rollback
@@ -503,6 +503,7 @@ Append one line per decision: date, decision, reason. Add the same entry to `doc
 - 2026-09-30 — A layer's crop is four per-edge amounts in layer pixels applied before the transform, with a feather that ramps each crop edge inward by a smoothstep (the layer's own edges when uncropped); opacity scales the premultiplied layer before the blend. Reason: the cut stays attached to the picture as it moves, an inward feather never reveals cropped pixels, and premultiplied scaling fades every blend mode towards the backdrop.
 - 2026-09-30 — The output node encodes SDR video with the inverse BT.1886 EOTF (sRGB for the preview and stills, PQ absolute, HLG through the inverse 1000-nit OOTF), writes straight alpha by default, and dithers 8, 10 and 16-bit targets with one code of triangular noise seeded per frame. Reason: players decode BT.709 video with BT.1886, so display light round-trips with the display-referred working space; TPDF dither removes banding without bias.
 - 2026-09-30 — Frame queues use `rtrb` 0.4 (single producer: render → present) and `crossbeam-queue`'s `ArrayQueue` (decode pool → render), with `crossbeam-utils`' `Parker` for waiting and a shared generation counter in every frame stamp for flushing. Reason: both are lock-free, bounded and allocation-free per operation and pass `cargo deny`; `rtrb` is the faster ring and can peek for the present policy; `sync_channel` senders blocked on a full queue cannot be woken by a seek.
+- 2026-10-01 — Portable mode is on when a folder named `Glass Data` exists next to the executable (next to `Glass.app` on macOS) and holds `Settings/`, `Data/` and `Cache/`; one resolver, `app::locations`, picks each folder from environment override, portable folder, platform folder, temporary folder, skipping any that cannot be written with a logged warning. Reason: a folder is the one thing a user creates anyway to keep the files beside the app, and falling back keeps Glass starting from read-only media.
 
 ## Progress Log
 

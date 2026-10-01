@@ -139,7 +139,7 @@ GLASS_CRASH_REPORTS=1 GLASS_DATA_DIR=/tmp/glass-data GLASS_DEBUG_CRASH=segfault 
 ls /tmp/glass-data/crashes
 ```
 
-`GLASS_DEBUG_CRASH` also takes `abort` and `panic`, and works in debug builds only (release builds ignore it); `GLASS_CONFIG_DIR` and `GLASS_DATA_DIR` move the two folders. Read a minidump with `minidump-stackwalk` (`cargo install minidump-stackwalk`) and the matching build's debug symbols.
+`GLASS_DEBUG_CRASH` also takes `abort` and `panic`, and works in debug builds only (release builds ignore it); `GLASS_CONFIG_DIR`, `GLASS_DATA_DIR` and `GLASS_CACHE_DIR` move the config, data and cache folders, and win over portable mode (see [Portable mode](#portable-mode)). Read a minidump with `minidump-stackwalk` (`cargo install minidump-stackwalk`) and the matching build's debug symbols.
 
 ### Feature flags
 
@@ -262,6 +262,10 @@ scripts/package/make-dmg.sh --binary target/dist/glass
 ```
 
 It writes `target/package/<target>/Glass.app` and `glass-<version>-<target>.dmg`, signed ad hoc unless `GLASS_CODESIGN_IDENTITY` names a Developer ID identity, and fails if any bundled binary still references a library outside the bundle or the system. Icons are taken from `assets/icons/` when present.
+
+### Portable mode
+
+Glass runs portable, with nothing written to the user's own folders, when a folder named `Glass Data` sits next to the executable: next to `glass.exe` on Windows, next to the binary or AppImage on Linux, and next to `Glass.app` on macOS (not inside the bundle). Settings then live in `Glass Data/Settings/`, crash reports and later downloads in `Glass Data/Data/`, and the per-user cache (autosaves) in `Glass Data/Cache/`. Projects keep their own `.glass-cache/` beside the project file in both modes. To make a portable copy, put Glass on the drive and create the empty `Glass Data` folder beside it; delete the folder to go back to the normal per-user folders. If a portable folder cannot be written (a locked drive, read-only media, or macOS running a downloaded app from a randomised read-only location until it is moved), Glass logs a warning and uses the normal per-user folder for it instead. The code is `app::locations`.
 
 ### Size budget
 
