@@ -241,7 +241,7 @@ Done when: every tool below works with keyboard and mouse, the 200-clip benchmar
 - [ ] Drag from bin: insert vs overwrite, three-point edit
 - [ ] Linked audio and video with unlink and relink
 - [ ] Storyboard view: cards, drag to reorder, one transition per gap
-- [ ] Remappable shortcuts with presets for Premiere, Final Cut, and DaVinci
+- [~] Remappable shortcuts with presets for Premiere, Final Cut, and DaVinci
 - [ ] Command palette: effects, clips, commands, fuzzy search
 - [ ] Right-to-left layout and full i18n
 - [ ] Dockable panels, saveable workspaces, presets for Edit, Colour, Audio, Effects
