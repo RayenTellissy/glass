@@ -1,0 +1,131 @@
+{
+  "format": "glass.project",
+  "schema_version": 3,
+  "project": {
+    "uid": "fixture-tracks",
+    "name": "Night market",
+    "next_id": 14,
+    "media": {
+      "refs": [
+        {
+          "id": 1,
+          "content_hash": "0a0b0c",
+          "path": "/footage/market.mov"
+        }
+      ]
+    },
+    "sequences": [
+      {
+        "id": 2,
+        "name": "Edit",
+        "frame_rate": {
+          "num": 25,
+          "den": 1
+        },
+        "sample_rate": 48000,
+        "markers": [
+          {
+            "id": 11,
+            "start": "1",
+            "duration": "0",
+            "name": "Opening line",
+            "note": "",
+            "colour": "amber",
+            "chapter": true,
+            "todo": "off"
+          },
+          {
+            "id": 12,
+            "start": "12/5",
+            "duration": "4/5",
+            "name": "Fix wind noise",
+            "note": "Wind on the last word.",
+            "colour": "red",
+            "chapter": false,
+            "todo": "open"
+          }
+        ],
+        "tracks": [
+          {
+            "id": 3,
+            "kind": "adjustment",
+            "name": "FX",
+            "items": [
+              {
+                "id": 10,
+                "range": {
+                  "start": "2",
+                  "duration": "1"
+                },
+                "type": "adjustment"
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "kind": "subtitle",
+            "name": "S1",
+            "items": [
+              {
+                "id": 9,
+                "range": {
+                  "start": "6/5",
+                  "duration": "8/5"
+                },
+                "type": "subtitle",
+                "text": "The boats go out at five."
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "kind": "video",
+            "name": "V1",
+            "items": [
+              {
+                "id": 7,
+                "range": {
+                  "start": "1",
+                  "duration": "3"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "2",
+                "markers": [
+                  {
+                    "id": 13,
+                    "start": "5/2",
+                    "duration": "0",
+                    "name": "Harbourmaster",
+                    "note": "",
+                    "colour": "blue",
+                    "chapter": false,
+                    "todo": "off"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": 6,
+            "kind": "audio",
+            "name": "A1",
+            "items": [
+              {
+                "id": 8,
+                "range": {
+                  "start": "1",
+                  "duration": "3"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "2",
+                "markers": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

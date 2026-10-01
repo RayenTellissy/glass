@@ -1,6 +1,6 @@
 //! Typed errors for edit operations.
 
-use crate::id::{ItemId, MediaId, SequenceId, TrackId};
+use crate::id::{ItemId, MarkerId, MediaId, SequenceId, TrackId};
 use crate::model::TrackKind;
 use crate::time::{Time, TimeError};
 
@@ -16,6 +16,12 @@ pub enum EditError {
     UnknownItem(ItemId),
     #[error("no media {0}")]
     UnknownMedia(MediaId),
+    #[error("no marker {0}")]
+    UnknownMarker(MarkerId),
+    #[error("item {0} is not a clip")]
+    NotAClip(ItemId),
+    #[error("a {kind:?} track cannot hold a {item} item")]
+    ItemNotAllowed { kind: TrackKind, item: &'static str },
     #[error("item would overlap item {other} on track {track}")]
     Overlap { track: TrackId, other: ItemId },
     #[error("{time} s is not on the {grid} s grid of a {kind:?} track")]
@@ -28,6 +34,12 @@ pub enum EditError {
     EmptyRange(Time),
     #[error("items cannot start before zero, got {0} s")]
     NegativeStart(Time),
+    #[error("markers cannot start before zero, got {0} s")]
+    MarkerBeforeZero(Time),
+    #[error("a marker's duration cannot be negative, got {0} s")]
+    NegativeDuration(Time),
+    #[error("{time} s is not on the {grid} s frame grid of the sequence")]
+    MarkerOffGrid { time: Time, grid: Time },
     #[error("invalid frame rate {num}/{den}")]
     InvalidFrameRate { num: i32, den: i32 },
     #[error("invalid sample rate {0}")]

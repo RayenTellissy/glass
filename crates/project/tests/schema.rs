@@ -11,7 +11,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use project::schema::{self, LoadError, OLDEST_VERSION, SCHEMA_VERSION};
-use project::{ClipSpec, MediaId, Project, Rational, Time, TimeRange, TrackKind};
+use project::{
+    ClipSpec, ColourLabel, MarkerOwner, MarkerSpec, MediaId, Project, Rational, Time, TimeRange,
+    TodoState, TrackKind,
+};
 use serde_json::Value;
 
 const FPS: Rational = Rational::new(25, 1);
@@ -54,6 +57,79 @@ fn basic() -> Project {
         .insert_clip(a1, clip(b, Time::ZERO, Time::seconds(2), Time::ZERO))
         .expect("clip");
     p
+}
+
+/// The project in every `*-tracks.json` fixture (from v3): every track kind, implicit
+/// gaps, sequence markers (point, range, chapter, to-do) and clip markers.
+fn tracks() -> Project {
+    let p = Project::new("fixture-tracks", "Night market");
+    let (p, a) = p.add_media("0a0b0c", "/footage/market.mov").expect("media");
+    let (p, seq) = p.add_sequence("Edit", FPS, 48_000).expect("sequence");
+    let (p, fx) = p
+        .add_track(seq, TrackKind::Adjustment, "FX", None)
+        .expect("fx");
+    let (p, s1) = p
+        .add_track(seq, TrackKind::Subtitle, "S1", None)
+        .expect("s1");
+    let (p, v1) = p.add_track(seq, TrackKind::Video, "V1", None).expect("v1");
+    let (p, a1) = p.add_track(seq, TrackKind::Audio, "A1", None).expect("a1");
+    let (p, shot) = p
+        .insert_clip(v1, clip(a, frames(25), frames(75), Time::seconds(2)))
+        .expect("clip");
+    let (p, _) = p
+        .insert_clip(a1, clip(a, frames(25), frames(75), Time::seconds(2)))
+        .expect("clip");
+    let (p, _) = p
+        .insert_subtitle(
+            s1,
+            TimeRange::new(frames(30), frames(40)),
+            "The boats go out at five.",
+        )
+        .expect("cue");
+    let (p, _) = p
+        .insert_adjustment(fx, TimeRange::new(frames(50), frames(25)))
+        .expect("adjustment");
+    let (p, _) = p
+        .add_marker(
+            MarkerOwner::Sequence(seq),
+            MarkerSpec {
+                name: "Opening line".into(),
+                chapter: true,
+                ..MarkerSpec::at(frames(25), ColourLabel::Amber)
+            },
+        )
+        .expect("marker");
+    let (p, _) = p
+        .add_marker(
+            MarkerOwner::Sequence(seq),
+            MarkerSpec {
+                duration: frames(20),
+                name: "Fix wind noise".into(),
+                note: "Wind on the last word.".into(),
+                todo: TodoState::Open,
+                ..MarkerSpec::at(frames(60), ColourLabel::Red)
+            },
+        )
+        .expect("marker");
+    let (p, _) = p
+        .add_marker(
+            MarkerOwner::Clip(shot),
+            MarkerSpec {
+                name: "Harbourmaster".into(),
+                ..MarkerSpec::at(Time::new(5, 2).expect("time"), ColourLabel::Blue)
+            },
+        )
+        .expect("marker");
+    p
+}
+
+/// The project each fixture name was saved from.
+fn builder(name: &str) -> Project {
+    match name {
+        "basic" => basic(),
+        "tracks" => tracks(),
+        other => panic!("no builder for {other} fixtures"),
+    }
 }
 
 /// Fixture files by name (`basic`), then by version.
@@ -107,17 +183,19 @@ fn every_version_has_fixtures_and_their_versions_match_the_names() {
 }
 
 #[test]
-fn the_current_version_fixture_is_what_save_writes() {
-    let bytes = schema::save(&basic());
-    let path = fixtures_dir().join(format!("v{SCHEMA_VERSION}-basic.json"));
-    if std::env::var_os("GLASS_UPDATE_FIXTURES").is_some() {
-        fs::write(&path, &bytes).expect("write fixture");
+fn the_current_version_fixtures_are_what_save_writes() {
+    for name in ["basic", "tracks"] {
+        let bytes = schema::save(&builder(name));
+        let path = fixtures_dir().join(format!("v{SCHEMA_VERSION}-{name}.json"));
+        if std::env::var_os("GLASS_UPDATE_FIXTURES").is_some() {
+            fs::write(&path, &bytes).expect("write fixture");
+        }
+        assert_eq!(
+            String::from_utf8(bytes).expect("UTF-8"),
+            String::from_utf8(read(&path)).expect("UTF-8"),
+            "{name}: save output changed; a model change needs a schema bump and a migration"
+        );
     }
-    assert_eq!(
-        String::from_utf8(bytes).expect("UTF-8"),
-        String::from_utf8(read(&path)).expect("UTF-8"),
-        "save output changed; a model change needs a schema bump and a migration"
-    );
 }
 
 #[test]
@@ -157,6 +235,59 @@ fn v1_media_list_becomes_media_refs() {
         vec![(1, "/footage/harbour.mov"), (2, "/footage/gulls.wav")]
     );
     assert!(loaded.content_eq(&basic()));
+}
+
+#[test]
+fn v2_gains_empty_marker_lists() {
+    let path = fixtures_dir().join("v2-basic.json");
+    let v2: Value = serde_json::from_slice(&read(&path)).expect("JSON");
+    let seq = &v2["project"]["sequences"][0];
+    assert!(seq.get("markers").is_none());
+    let migrated = schema::migrate(2, v2["project"].clone()).expect("migrates");
+    let seq = &migrated["sequences"][0];
+    assert_eq!(seq["markers"], Value::Array(Vec::new()));
+    let mut clips = 0;
+    for track in seq["tracks"].as_array().expect("tracks") {
+        for item in track["items"].as_array().expect("items") {
+            assert_eq!(item["markers"], Value::Array(Vec::new()));
+            clips += 1;
+        }
+    }
+    assert_eq!(clips, 3);
+    // Migrated, it is the project the v3 build saves, and saving it writes v3.
+    let loaded = schema::load(&read(&path)).expect("loads");
+    assert!(loaded.content_eq(&basic()));
+    let saved: Value = serde_json::from_slice(&schema::save(&loaded)).expect("JSON");
+    assert_eq!(saved["schema_version"], Value::from(3));
+}
+
+#[test]
+fn the_tracks_fixture_round_trips_markers_and_every_track_kind() {
+    let p = tracks();
+    let loaded = schema::load(&schema::save(&p)).expect("loads");
+    assert!(loaded.content_eq(&p));
+    let seq = &loaded.sequences()[0];
+    let kinds: Vec<_> = seq.tracks.iter().map(|t| t.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            TrackKind::Adjustment,
+            TrackKind::Subtitle,
+            TrackKind::Video,
+            TrackKind::Audio
+        ]
+    );
+    assert_eq!(seq.markers.len(), 2);
+    let video = seq
+        .tracks
+        .iter()
+        .find(|t| t.kind == TrackKind::Video)
+        .expect("v1");
+    assert_eq!(
+        video.gaps().expect("gaps"),
+        vec![TimeRange::new(Time::ZERO, frames(25))]
+    );
+    assert_eq!(video.items[0].clip().expect("clip").markers.len(), 1);
 }
 
 #[test]

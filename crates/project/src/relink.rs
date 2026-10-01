@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::error::EditError;
 use crate::id::MediaId;
-use crate::model::{ItemKind, MediaRef, Project};
+use crate::model::{MediaRef, Project};
 use crate::time::Time;
 
 /// One reference to point at a new file.
@@ -35,12 +35,11 @@ impl Project {
         for sequence in &self.sequences {
             for track in &sequence.tracks {
                 for item in &track.items {
-                    match &item.kind {
-                        ItemKind::Clip(clip) if clip.media == media => {
-                            let e = clip.source_start.checked_add(item.range.duration)?;
-                            end = Some(end.map_or(e, |x| x.max(e)));
-                        }
-                        ItemKind::Clip(_) => {}
+                    if let Some(clip) = item.clip()
+                        && clip.media == media
+                    {
+                        let e = clip.source_range(item.range).end()?;
+                        end = Some(end.map_or(e, |x| x.max(e)));
                     }
                 }
             }

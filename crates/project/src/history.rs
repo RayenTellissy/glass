@@ -32,12 +32,35 @@ pub enum EditLabel {
     Nudge,
     Properties,
     AddMarker,
+    ChangeMarker,
+    DeleteMarker,
+    ChangeTrackKind,
     Transition,
     Recover,
     Relink,
 }
 
 impl EditLabel {
+    pub const ALL: [EditLabel; 17] = [
+        EditLabel::AddMedia,
+        EditLabel::AddSequence,
+        EditLabel::AddTrack,
+        EditLabel::RemoveTrack,
+        EditLabel::Insert,
+        EditLabel::Delete,
+        EditLabel::Move,
+        EditLabel::Trim,
+        EditLabel::Nudge,
+        EditLabel::Properties,
+        EditLabel::AddMarker,
+        EditLabel::ChangeMarker,
+        EditLabel::DeleteMarker,
+        EditLabel::ChangeTrackKind,
+        EditLabel::Transition,
+        EditLabel::Recover,
+        EditLabel::Relink,
+    ];
+
     pub fn i18n_key(self) -> &'static str {
         match self {
             EditLabel::AddMedia => "edit.label.add_media",
@@ -51,6 +74,9 @@ impl EditLabel {
             EditLabel::Nudge => "edit.label.nudge",
             EditLabel::Properties => "edit.label.properties",
             EditLabel::AddMarker => "edit.label.add_marker",
+            EditLabel::ChangeMarker => "edit.label.change_marker",
+            EditLabel::DeleteMarker => "edit.label.delete_marker",
+            EditLabel::ChangeTrackKind => "edit.label.change_track_kind",
             EditLabel::Transition => "edit.label.transition",
             EditLabel::Recover => "edit.label.recover",
             EditLabel::Relink => "edit.label.relink",

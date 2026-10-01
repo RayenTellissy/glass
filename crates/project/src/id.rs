@@ -1,6 +1,6 @@
 //! Stable node ids.
 //!
-//! Every node in a project (media reference, sequence, track, item, and later markers,
+//! Every node in a project (media reference, sequence, track, item, marker, and later
 //! transitions and effects) gets a `u64` from the project's own counter, so ids are unique
 //! across node kinds within a project, never reused, and stable across save and load.
 //! Autosave diffs and undo compare nodes by these ids. Pasting into another project
@@ -22,8 +22,8 @@ impl fmt::Display for NodeId {
 }
 
 macro_rules! id_type {
-    ($(#[$doc:meta] $name:ident),* $(,)?) => {$(
-        #[$doc]
+    ($($(#[$doc:meta])+ $name:ident),* $(,)?) => {$(
+        $(#[$doc])+
         #[derive(
             Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
         )]
@@ -57,8 +57,11 @@ id_type!(
     SequenceId,
     /// A track in a sequence.
     TrackId,
-    /// An item on a track: a clip or a gap.
+    /// An item on a track: a clip, a subtitle or an adjustment item. Gaps are empty
+    /// space between items and have no id.
     ItemId,
+    /// A marker on a sequence or on a clip.
+    MarkerId,
     /// A bin (folder) in the media pool.
     BinId,
 );
