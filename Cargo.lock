@@ -2480,6 +2480,7 @@ dependencies = [
  "assets",
  "cosmic-text",
  "criterion",
+ "image",
  "media",
  "naga",
  "notify",

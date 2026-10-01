@@ -26,6 +26,7 @@ objc2-foundation.workspace = true
 
 [dev-dependencies]
 pollster.workspace = true
+image.workspace = true
 criterion.workspace = true
 
 [lib]
