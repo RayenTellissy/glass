@@ -61,6 +61,8 @@ pub enum Role {
     Analysis,
     /// `glass-import`: an import scan or import.
     Import,
+    /// `glass-relink`: a relink search over picked folders.
+    Relink,
     /// `glass-io`: autosave and project save.
     Io,
     /// `glass-export`: a running export.
@@ -79,6 +81,7 @@ impl Role {
             Self::AudioCallback => "glass-audio",
             Self::Analysis => "glass-analysis",
             Self::Import => "glass-import",
+            Self::Relink => "glass-relink",
             Self::Io => "glass-io",
             Self::Export => "glass-export",
         }

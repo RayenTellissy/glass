@@ -789,9 +789,9 @@ impl RelinkSearch {
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, events) = mpsc::channel::<RelinkEvent>();
         let flag = cancel.clone();
-        let thread = std::thread::Builder::new()
-            .name("glass-relink".into())
-            .spawn(move || run(&request, &tx, &flag))?;
+        let thread = crate::threads::spawn(crate::threads::Role::Relink, None, move || {
+            run(&request, &tx, &flag)
+        })?;
         Ok(Self {
             cancel,
             events,
