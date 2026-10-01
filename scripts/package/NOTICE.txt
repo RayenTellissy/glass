@@ -15,6 +15,7 @@ The licence texts of every bundled library are in LICENSES/:
   x265-COPYING                              x265 (GPL version 2 or later)
   dav1d-COPYING                             dav1d (BSD 2-clause)
   nv-codec-headers-LICENSE, zlib-LICENSE    Windows and Linux builds only
+  third-party-crates.txt                    the Rust crates compiled into Glass
 
 Corresponding source: every Glass release attaches the exact FFmpeg, x264,
 x265 and dav1d source archives this build was made from, with their SHA-256 checksums and

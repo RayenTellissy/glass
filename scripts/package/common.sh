@@ -36,7 +36,9 @@ placeholder_png() {
     printf "%s" "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" | base64 -d >"$1"
 }
 
-# Copies the licence texts and the GPL notice into DIR (DIR/LICENSES/, DIR/NOTICE.txt).
+# Copies the licence texts and the GPL notice into DIR (DIR/LICENSES/, DIR/NOTICE.txt),
+# with the texts of every Rust crate compiled into the app gathered from the crates'
+# sources into DIR/LICENSES/third-party-crates.txt (needs cargo and python3).
 copy_licences() {
     local ffmpeg="$1" dir="$2"
     mkdir -p "$dir/LICENSES"
@@ -44,4 +46,8 @@ copy_licences() {
     [ -f "$ffmpeg/SOURCES.txt" ] && cp "$ffmpeg/SOURCES.txt" "$dir/LICENSES/FFmpeg-SOURCES.txt"
     cp "$REPO_ROOT/LICENSE" "$dir/LICENSES/Glass-LICENSE"
     cp "$REPO_ROOT/scripts/package/NOTICE.txt" "$dir/NOTICE.txt"
+    python3 "$REPO_ROOT/scripts/licences/third-party.py" --check ||
+        die "assets/licences/third-party.tsv is out of date; run scripts/licences/third-party.py"
+    python3 "$REPO_ROOT/scripts/licences/third-party.py" --texts "$dir/LICENSES/third-party-crates.txt" ||
+        die "could not gather the crates' licence texts"
 }
