@@ -20,6 +20,24 @@ pub use assets::theme::{FontRole, Mode, Role, ThemeKind};
 /// multiplies the texture; it is not a colour the design uses.
 pub const TEXTURE_TINT: Color32 = Color32::WHITE;
 
+/// The app icon's own colours from the Brand page, the same in every theme: the icon is
+/// artwork (its Graphite appearance), not UI chrome, and the mark only ever changes size.
+pub mod brand {
+    use egui::Color32;
+
+    /// The graphite tile's gradient: oklab 28.9% to 18.2% lightness (neutral grey), as
+    /// drawn in the Brand page's About window.
+    pub const TILE_TOP: Color32 = Color32::from_gray(43);
+    pub const TILE_BOTTOM: Color32 = Color32::from_gray(18);
+    /// Inset top highlight (`#FFFFFF33`) and edge ring (`#FFFFFF14`), premultiplied.
+    pub const TILE_HIGHLIGHT: Color32 = Color32::from_rgba_premultiplied(51, 51, 51, 51);
+    pub const TILE_EDGE: Color32 = Color32::from_rgba_premultiplied(20, 20, 20, 20);
+    /// The tile's drop shadow (`#00000066`).
+    pub const TILE_SHADOW: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 102);
+    /// The mark's slices are white at the opacities in its SVG.
+    pub const MARK: Color32 = Color32::WHITE;
+}
+
 /// Named text styles for the type-scale steps egui has no built-in style for.
 pub const DISPLAY: &str = "display";
 pub const TITLE: &str = "title";

@@ -7,6 +7,7 @@ use engine::media_mgmt::{DropSummary, Unreadable};
 use project::media_pool::{Facts, Gps, Metadata};
 
 use super::{SnapshotCase, pool_cases};
+use crate::dialogs::about::{self, AboutDialog, AboutInfo, Licence, View};
 use crate::dialogs::recovery::{self, RecoveryDialog, RecoveryPrompt, RecoveryState};
 use crate::panels::format;
 use crate::panels::import::{
@@ -127,6 +128,24 @@ pub(super) fn all() -> Vec<SnapshotCase> {
             module: "dialogs/recovery",
             size: vec2(recovery::WIDTH + 32.0, RECOVERY_CASE_HEIGHT),
             draw: recovery_restoring,
+        },
+        SnapshotCase {
+            name: "about_main",
+            module: "dialogs/about",
+            size: vec2(about::WIDTH + 32.0, 528.0),
+            draw: about_main,
+        },
+        SnapshotCase {
+            name: "about_third_party",
+            module: "dialogs/about",
+            size: vec2(about::WIDTH + 32.0, 448.0),
+            draw: about_third_party,
+        },
+        SnapshotCase {
+            name: "about_gpl_notice",
+            module: "dialogs/about",
+            size: vec2(about::WIDTH + 32.0, 440.0),
+            draw: about_gpl_notice,
         },
     ]
 }
@@ -355,6 +374,43 @@ fn recovery_confirm_discard(ui: &mut egui::Ui) {
 /// After Restore: progress in the footer.
 fn recovery_restoring(ui: &mut egui::Ui) {
     recovery_in(ui, RecoveryState::Restoring { progress: 0.62 });
+}
+
+/// A release build with everything the dialog can show about this copy.
+fn about_sample() -> AboutInfo {
+    AboutInfo {
+        commit: Some("a7f3c1e".into()),
+        build_date: Some("2026.09.30".into()),
+        machine: Some(t!("sample.about.machine")),
+        installed: Some(t!("sample.about.installed")),
+        settings_folder: Some(t!("sample.about.settings")),
+        ..AboutInfo::new("0.1.0", "https://github.com/OWNER/glass")
+    }
+}
+
+fn about_in(ui: &mut egui::Ui, dialog: &mut AboutDialog) {
+    bare_panel(ui, |ui, rect| {
+        let _ = dialog.draw(ui, rect.min + vec2(16.0, 16.0), &about_sample());
+    });
+}
+
+fn about_main(ui: &mut egui::Ui) {
+    about_in(ui, &mut AboutDialog::new());
+}
+
+/// View list: the third-party list one level in, FFmpeg selected.
+fn about_third_party(ui: &mut egui::Ui) {
+    let mut dialog = AboutDialog::new();
+    dialog.set_view(View::ThirdParty);
+    dialog.select(Some(0));
+    about_in(ui, &mut dialog);
+}
+
+/// Read on "This build": the GPLv3 notice one level in.
+fn about_gpl_notice(ui: &mut egui::Ui) {
+    let mut dialog = AboutDialog::new();
+    dialog.set_view(View::Licence(Licence::Gpl));
+    about_in(ui, &mut dialog);
 }
 
 fn bare_panel(ui: &mut egui::Ui, draw: impl FnOnce(&mut egui::Ui, Rect)) {
