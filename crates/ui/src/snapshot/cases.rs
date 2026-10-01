@@ -7,7 +7,7 @@ use engine::media_mgmt::{DropSummary, Unreadable};
 use project::media_pool::{Facts, Gps, Metadata};
 use project::params::{ParamDef, ParamSchema, ParamValue, ParamValues, Range, Unit, builtin};
 
-use super::{SnapshotCase, pool_cases};
+use super::{SnapshotCase, pool_cases, relink_cases};
 use crate::dialogs::recovery::{self, RecoveryDialog, RecoveryPrompt, RecoveryState};
 use crate::panels::format;
 use crate::panels::import::{
@@ -154,6 +154,24 @@ pub(super) fn all() -> Vec<SnapshotCase> {
             module: "dialogs/recovery",
             size: vec2(recovery::WIDTH + 32.0, RECOVERY_CASE_HEIGHT),
             draw: recovery_restoring,
+        },
+        SnapshotCase {
+            name: "relink_found",
+            module: "dialogs/relink",
+            size: relink_cases::FOUND_SIZE,
+            draw: relink_cases::found,
+        },
+        SnapshotCase {
+            name: "relink_searching_no_match",
+            module: "dialogs/relink",
+            size: relink_cases::STATES_SIZE,
+            draw: relink_cases::searching_and_no_match,
+        },
+        SnapshotCase {
+            name: "relink_relinking",
+            module: "dialogs/relink",
+            size: relink_cases::FOUND_SIZE,
+            draw: relink_cases::relinking,
         },
     ]
 }
