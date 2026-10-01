@@ -94,6 +94,9 @@ pub enum Source {
     Shapes(Vec<Shape>),
 }
 
+/// The per-glyph transform hook a text animator hands `GlyphAtlas::prepare`.
+pub type GlyphHook = Box<dyn Fn(&GlyphInfo) -> GlyphTransform>;
+
 /// A text in Arial.
 pub struct TextSpec {
     pub text: &'static str,
@@ -101,7 +104,7 @@ pub struct TextSpec {
     pub size: f32,
     pub paint: TextPaint,
     /// The per-glyph transform hook (the text animator's).
-    pub glyphs: Option<Box<dyn Fn(&GlyphInfo) -> GlyphTransform>>,
+    pub glyphs: Option<GlyphHook>,
 }
 
 /// The device, the shared sources, and what the renders reuse across frames.

@@ -80,11 +80,9 @@ fn every_golden_folder_has_a_case() {
 fn reference_sequences_match_their_goldens() {
     let update = env_is(UPDATE_ENV);
     if !Path::new(visual::ARIAL).exists() {
-        assert!(
-            !cfg!(target_os = "macos"),
-            "visual regression: {} is missing",
-            visual::ARIAL
-        );
+        if cfg!(target_os = "macos") {
+            panic!("visual regression: {} is missing", visual::ARIAL);
+        }
         eprintln!(
             "SKIPPED visual regression: the goldens use {}, which only macOS ships",
             visual::ARIAL
