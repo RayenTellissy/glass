@@ -20,6 +20,9 @@
 //!
 //! Looks come from [`lut`] files (`.cube`), uploaded once as a [`nodes::GpuLut`] and
 //! applied by [`nodes::LutNode`] in the LUT's declared input space with an intensity mix.
+//!
+//! A clip whose source is offline shows a [`slate`]: rendered once per size and label,
+//! cached, and imported into each frame's graph like a decoded frame.
 
 pub mod blend;
 pub mod colour;
@@ -33,6 +36,7 @@ pub mod profiler;
 pub mod readback;
 pub mod renderer;
 pub mod shaders;
+pub mod slate;
 pub mod text;
 pub mod transform;
 pub mod upload;
