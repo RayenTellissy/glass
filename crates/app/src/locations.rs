@@ -135,6 +135,10 @@ impl Locations {
     pub fn from_env() -> Self {
         let locations = Self::resolve(&Inputs::from_env());
         match &locations.portable {
+            Some(root) if !locations.fallbacks.is_empty() => tracing::warn!(
+                "portable mode: {} cannot hold every folder; some files go elsewhere",
+                root.display()
+            ),
             Some(root) => tracing::info!("portable mode: files in {}", root.display()),
             None => tracing::debug!("files in {}", locations.data.display()),
         }
