@@ -2,6 +2,7 @@
 //! then hands control to `ui`. Owns command-line flags, safe mode, portable mode and
 //! crash minidumps.
 
+mod about;
 mod crash;
 mod ffi;
 mod recovery;
@@ -20,6 +21,12 @@ fn main() -> ExitCode {
         eprintln!("glass: logging disabled: {error}");
     }
     let paths = settings::Paths::from_env();
+    let about = about::info(&paths);
+    tracing::info!("Glass {}", about.version_line());
+    if args.get(1).is_some_and(|a| a == "--version") {
+        println!("{}", about.details());
+        return ExitCode::SUCCESS;
+    }
     let settings = settings::Settings::load(&paths);
     let _crash_reporting = settings
         .crash_reports
