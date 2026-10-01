@@ -113,10 +113,8 @@ fn vertical_gradient(
         Vec::new(),
     );
     let mut mesh = Mesh::default();
-    tessellator.tessellate_shape(
-        Shape::rect_filled(rect, corner, egui::Color32::WHITE),
-        &mut mesh,
-    );
+    // Opaque, so each vertex's alpha is its anti-aliasing coverage.
+    tessellator.tessellate_shape(Shape::rect_filled(rect, corner, top.to_opaque()), &mut mesh);
     for v in &mut mesh.vertices {
         let t = ((v.pos.y - rect.min.y) / rect.height()).clamp(0.0, 1.0);
         let coverage = v.color.a();

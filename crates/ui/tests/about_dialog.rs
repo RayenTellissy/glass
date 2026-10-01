@@ -218,7 +218,9 @@ fn every_view_within_the_frame_budget() {
         let mut dialog = AboutDialog::new();
         let mut monitor = FrameTimeMonitor::default();
         headless
-            .run(30, 240, &mut monitor, |ui, frame| {
+            // Each view is drawn for 20 frames; warming up through all of them keeps
+            // first-show text layout out of the measured frames.
+            .run(20 * views.len(), 240, &mut monitor, |ui, frame| {
                 dialog.set_view(views[(frame / 20) % views.len()]);
                 dialog.select(Some(frame % 7));
                 egui::CentralPanel::default().show(ui, |_| {});
