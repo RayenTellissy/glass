@@ -220,7 +220,7 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** Both are lock-free, bounded and allocation-free per operation, and both pass `cargo deny check` (MIT or Apache-2.0, no new transitive crates; `crossbeam-utils` was already in the tree). `rtrb` is the fastest SPSC ring and can peek, which the present policy needs; it cannot take several producers, so the decode pool uses `ArrayQueue`. `std::sync::mpsc::sync_channel` (crossbeam's channel in std) was not used because a sender blocked on a full channel cannot be woken by a seek, and blocking decoders must return at once when the generation moves on.
 - **Consequences:** Order is kept per producer only on the decode queue; render matches frames to requests by stamp. Push and pop fence once (`SeqCst`) to pair with the waiting flags.
 
-## 28. Portable mode: a `Glass Data` folder beside the executable
+## 32. Portable mode: a `Glass Data` folder beside the executable
 
 - **Date:** 2026-10-01
 - **Decision:** Portable mode is on when a folder named `Glass Data` exists next to the executable; on macOS, when the executable is a bundle's `Contents/MacOS/` binary, next to `Glass.app` instead. In portable mode the config, data and per-user cache folders are `Glass Data/Settings/`, `Glass Data/Data/` and `Glass Data/Cache/`. `app::locations::Locations` is the only place that decides folders: each is the first writable candidate of its environment override (`GLASS_CONFIG_DIR`, `GLASS_DATA_DIR`, `GLASS_CACHE_DIR`), the portable folder, the platform folder (`dirs`), then `Glass` in the temporary folder. Candidates are created and probed with a test file; a read-only one is skipped with a logged warning.
