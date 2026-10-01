@@ -17,10 +17,14 @@
 //! are stacked by [`nodes::CompositeNode`] with the [`blend::BlendMode`]s, whose CPU
 //! reference lives in [`blend`]; each layer is sampled through its [`transform`], cut by its
 //! [`crop`] and scaled by its opacity inside the same pass.
+//!
+//! Rendered preview frames are kept by [`frame_cache::FrameCache`]: an LRU of textures in
+//! VRAM that spills to RAM through the async readback ring.
 
 pub mod blend;
 pub mod colour;
 pub mod crop;
+pub mod frame_cache;
 pub mod graph;
 #[allow(unsafe_code)]
 pub mod interop;
