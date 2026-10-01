@@ -241,3 +241,10 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** `media::analysis::loudness` measures with the `ebur128` crate (a Rust port of libebur128, MIT) instead of an in-house BS.1770-4 meter. Fixture references come from FFmpeg's `ebur128` filter and are matched within 0.1 LU integrated, 0.3 dB true peak and 0.5 LU loudness range.
 - **Reason:** A maintained, reference-tested implementation of the standard; `cargo deny check` passes (it adds `bitflags` 1 beside 2, a duplicate warning only).
 - **Consequences:** Loudness range differs from FFmpeg's by 0.3 to 0.4 LU on the stepped program fixtures (FFmpeg bins short-term values into a histogram); libebur128's values pass EBU Tech 3342, so the fixture tolerance is 0.5 LU rather than 0.1.
+
+## 31. Project files: a versioned envelope, migrations on untyped JSON, newer files refused
+
+- **Date:** 2026-09-30
+- **Decision:** A project file is `{"format": "glass.project", "schema_version": N, "project": {...}}`. Loading migrates the `project` value one version at a time with pure `serde_json::Value` functions (`project::schema::migrate_vN_to_vN+1`), then deserialises the current model and validates it; saving always writes the current version. A file with a newer schema version is refused (`project.open_error.newer_version`), never read best-effort. Schema v2 stores `media` as `{"refs": [...]}` instead of a bare list.
+- **Reason:** Migrating untyped values keeps only one set of model types (the current one) in the code, and each step stays small and testable. Reading a newer file would silently drop fields the newer build relies on, and saving it would destroy them. An object for `media` lets the media pool add its bins and metadata beside the references with a small, additive migration.
+- **Consequences:** Every model change that alters the saved JSON bumps `SCHEMA_VERSION`, adds a migration and a `v<N+1>` fixture in `tests/fixtures/projects/`; old fixtures are never edited. `crates/project/tests/schema.rs` fails when `save` output changes without a fixture update.
