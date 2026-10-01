@@ -234,3 +234,10 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** Keeping availability out of the tree means loading, editing, undo and saving never depend on the disk, and a relink or a remounted drive changes nothing in the document. One cached texture per size and label costs one layout and a few passes per offline file, then only an import per frame.
 - **Details:** `engine::media_mgmt::offline`, `render::slate` (CPU reference `slate::reference`), `crates/render/shaders/slate.wgsl`; `crates/engine/tests/offline_media.rs`, `crates/render/tests/slate.rs`.
 - **Consequences:** The design's glow blur (18 px) and backdrop blur are approximated analytically (the glows are already soft; the card's backdrop is the dot screen at its average cover). The file size is not stored on `MediaRef`, so the only content check is the hash (at most 2.5 MiB read per file). The slate uses Geist and Geist Mono when installed and falls back to system faces until they are bundled.
+
+## 30. Loudness through the `ebur128` crate
+
+- **Date:** 2026-09-30
+- **Decision:** `media::analysis::loudness` measures with the `ebur128` crate (a Rust port of libebur128, MIT) instead of an in-house BS.1770-4 meter. Fixture references come from FFmpeg's `ebur128` filter and are matched within 0.1 LU integrated, 0.3 dB true peak and 0.5 LU loudness range.
+- **Reason:** A maintained, reference-tested implementation of the standard; `cargo deny check` passes (it adds `bitflags` 1 beside 2, a duplicate warning only).
+- **Consequences:** Loudness range differs from FFmpeg's by 0.3 to 0.4 LU on the stepped program fixtures (FFmpeg bins short-term values into a histogram); libebur128's values pass EBU Tech 3342, so the fixture tolerance is 0.5 LU rather than 0.1.

@@ -6,9 +6,11 @@ use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use engine::analysis::{
-    AnalysisJob, AnalysisPool, JobEvent, JobEventKind, Outcome, PoolConfig, Priority, SceneJob,
-    SilenceJob,
+    AnalysisJob, AnalysisPool, BeatsJob, JobEvent, JobEventKind, LoudnessJob, Outcome, PoolConfig,
+    Priority, SceneJob, SilenceJob,
 };
+use media::analysis::beats::BeatSettings;
+use media::analysis::loudness::LoudnessSettings;
 use media::analysis::scenes::SceneSettings;
 use media::analysis::silence::SilenceSettings;
 use media::{CacheDir, SourceFile};
@@ -126,4 +128,48 @@ fn silence_job_caches_by_settings() {
     for (got, ms) in starts.iter().zip([0, 1500, 3500, 5020, 7200]) {
         assert!(got.abs_diff(ms) <= 3, "{silences:?}");
     }
+}
+
+#[test]
+fn loudness_job_caches_by_source() {
+    let (Some(wav), Some(flac)) = (
+        fixture("loudness_program_48k_stereo.wav"),
+        fixture("loudness_program_44k1_stereo.flac"),
+    ) else {
+        return;
+    };
+    let job = LoudnessJob {
+        source: SourceFile::open(&wav).expect("hash"),
+        settings: LoudnessSettings,
+    };
+    let other = LoudnessJob {
+        source: SourceFile::open(&flac).expect("hash"),
+        settings: LoudnessSettings,
+    };
+    let loudness = computed_cached_rekeyed("loudness", job, other).expect("loudness");
+    let integrated = loudness.integrated_lufs.expect("integrated");
+    assert!((integrated + 26.1).abs() <= 0.1, "{integrated}");
+    assert_eq!(loudness.short_term.len(), 300);
+}
+
+#[test]
+fn beats_job_caches_by_settings() {
+    let Some(path) = fixture("beats_120_clicks.flac") else {
+        return;
+    };
+    let source = SourceFile::open(&path).expect("hash");
+    let job = BeatsJob {
+        source: source.clone(),
+        settings: BeatSettings::default(),
+    };
+    let other = BeatsJob {
+        source,
+        settings: BeatSettings {
+            min_bpm: 70.0,
+            max_bpm: 180.0,
+        },
+    };
+    let beats = computed_cached_rekeyed("beats", job, other).expect("beats");
+    assert!((beats.bpm - 120.0).abs() <= 1.0, "{}", beats.bpm);
+    assert!(beats.beats.len() >= 38, "{}", beats.beats.len());
 }
