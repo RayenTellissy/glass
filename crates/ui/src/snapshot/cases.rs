@@ -2,6 +2,9 @@
 //! line to [`all`] pointing at a draw function with realistic sample content (its own
 //! `snapshot_cases()` or a function here that calls its public API).
 
+use std::sync::OnceLock;
+
+use assets::licences::{Component, Kind};
 use egui::{Align2, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 use engine::media_mgmt::{DropSummary, Unreadable};
 use project::media_pool::{Facts, Gps, Metadata};
@@ -415,6 +418,131 @@ fn about_sample() -> AboutInfo {
     }
 }
 
+/// A fixed third-party list, so the goldens do not change with every dependency update.
+fn about_components() -> &'static [&'static Component] {
+    const fn line(
+        kind: Kind,
+        name: &'static str,
+        version: &'static str,
+        licence: &'static str,
+        repository: &'static str,
+        description: &'static str,
+    ) -> Component {
+        Component {
+            kind,
+            name,
+            version,
+            licence,
+            repository,
+            description,
+        }
+    }
+    static LINES: [Component; 12] = [
+        line(
+            Kind::Native,
+            "FFmpeg",
+            "9.0.2",
+            "GPL-3.0-or-later",
+            "https://ffmpeg.org",
+            "",
+        ),
+        line(
+            Kind::Native,
+            "x264",
+            "b35605a",
+            "GPL-2.0-or-later",
+            "https://x264.example",
+            "",
+        ),
+        line(
+            Kind::Native,
+            "x265",
+            "4.2",
+            "GPL-2.0-or-later",
+            "https://x265.example",
+            "",
+        ),
+        line(
+            Kind::Native,
+            "dav1d",
+            "1.5.4",
+            "BSD-2-Clause",
+            "https://dav1d.example",
+            "",
+        ),
+        line(
+            Kind::Native,
+            "nv-codec-headers",
+            "13.0.19.1",
+            "MIT",
+            "https://nv.example",
+            "",
+        ),
+        line(
+            Kind::Native,
+            "zlib",
+            "1.3.2",
+            "Zlib",
+            "https://zlib.net",
+            "",
+        ),
+        line(
+            Kind::Crate,
+            "accesskit",
+            "0.24.1",
+            "MIT OR Apache-2.0",
+            "https://a.example",
+            "",
+        ),
+        line(
+            Kind::Crate,
+            "adler2",
+            "2.0.1",
+            "0BSD OR MIT OR Apache-2.0",
+            "https://b.example",
+            "",
+        ),
+        line(
+            Kind::Crate,
+            "ahash",
+            "0.8.12",
+            "MIT OR Apache-2.0",
+            "https://c.example",
+            "",
+        ),
+        line(
+            Kind::Crate,
+            "aho-corasick",
+            "1.1.5",
+            "Unlicense OR MIT",
+            "https://d.example",
+            "",
+        ),
+        line(
+            Kind::Crate,
+            "allocator-api2",
+            "0.2.21",
+            "MIT OR Apache-2.0",
+            "https://e.example",
+            "",
+        ),
+        line(
+            Kind::Crate,
+            "android_system_properties",
+            "0.1.6",
+            "MIT OR Apache-2.0",
+            "https://f.example",
+            "",
+        ),
+    ];
+    static LIST: OnceLock<Vec<&'static Component>> = OnceLock::new();
+    LIST.get_or_init(|| LINES.iter().collect())
+}
+
+fn about_dialog() -> AboutDialog {
+    AboutDialog::new().with_components(about_components())
+}
+
 fn about_in(ui: &mut egui::Ui, dialog: &mut AboutDialog) {
     bare_panel(ui, |ui, rect| {
         let _ = dialog.draw(ui, rect.min + vec2(16.0, 16.0), &about_sample());
@@ -422,12 +550,12 @@ fn about_in(ui: &mut egui::Ui, dialog: &mut AboutDialog) {
 }
 
 fn about_main(ui: &mut egui::Ui) {
-    about_in(ui, &mut AboutDialog::new());
+    about_in(ui, &mut about_dialog());
 }
 
 /// View list: the third-party list one level in, FFmpeg selected.
 fn about_third_party(ui: &mut egui::Ui) {
-    let mut dialog = AboutDialog::new();
+    let mut dialog = about_dialog();
     dialog.set_view(View::ThirdParty);
     dialog.select(Some(0));
     about_in(ui, &mut dialog);
@@ -435,7 +563,7 @@ fn about_third_party(ui: &mut egui::Ui) {
 
 /// Read on "This build": the GPLv3 notice one level in.
 fn about_gpl_notice(ui: &mut egui::Ui) {
-    let mut dialog = AboutDialog::new();
+    let mut dialog = about_dialog();
     dialog.set_view(View::Licence(Licence::Gpl));
     about_in(ui, &mut dialog);
 }

@@ -136,7 +136,7 @@ pub enum Control {
     SourceArchives,
     CopyDetails,
     Done,
-    /// A row of the third-party list, by index into [`components`].
+    /// A row of the third-party list, by index into the dialog's list.
     Component(usize),
     ComponentSource,
     FullLicence,
@@ -156,6 +156,8 @@ pub struct AboutDialog {
     selected: Option<usize>,
     copied_at: Option<f64>,
     controls: Vec<(Control, Rect)>,
+    /// The third-party list: [`components`], or a fixed sample in snapshots.
+    list: &'static [&'static Component],
 }
 
 impl Default for AboutDialog {
@@ -172,7 +174,20 @@ impl AboutDialog {
             selected: None,
             copied_at: None,
             controls: Vec::new(),
+            list: components(),
         }
+    }
+
+    /// Shows `list` instead of what this build ships, so snapshots stay the same when
+    /// dependencies change.
+    pub fn with_components(mut self, list: &'static [&'static Component]) -> Self {
+        self.list = list;
+        self
+    }
+
+    /// The third-party list the dialog shows.
+    pub fn list(&self) -> &'static [&'static Component] {
+        self.list
     }
 
     pub fn view(&self) -> View {
@@ -183,13 +198,13 @@ impl AboutDialog {
         self.view = view;
     }
 
-    /// The expanded row of the third-party list (index into [`components`]).
+    /// The expanded row of the third-party list (index into [`AboutDialog::list`]).
     pub fn selected(&self) -> Option<usize> {
         self.selected
     }
 
     pub fn select(&mut self, index: Option<usize>) {
-        self.selected = index.filter(|&i| i < components().len());
+        self.selected = index.filter(|&i| i < self.list.len());
     }
 
     pub fn filter(&self) -> &str {
@@ -555,7 +570,7 @@ impl AboutDialog {
             mid,
             &t!("about.licence.third_party"),
         );
-        let count = components().len().to_string();
+        let count = self.list.len().to_string();
         let n = paint.text(
             &painter,
             pos2(value_x, mid),
@@ -825,7 +840,7 @@ impl AboutDialog {
 
     fn draw_third_party(&mut self, ui: &mut Ui, paint: &Paint, rect: Rect) -> Option<AboutAction> {
         let s = *paint.s();
-        let all = components();
+        let all = self.list;
         let (back, close) = self.sub_header(ui, paint, rect, &t!("about.third_party.title"));
         let mut action = close.then_some(AboutAction::Close);
         if back {
