@@ -2,6 +2,7 @@
 //! then hands control to `ui`. Owns command-line flags, safe mode, portable mode and
 //! crash minidumps.
 
+mod about;
 mod crash;
 mod ffi;
 mod locations;
@@ -23,6 +24,12 @@ fn main() -> ExitCode {
     // The UI thread is the process main thread; it registers for the debug panel.
     let _ui_thread = engine::threads::global().register_current(engine::threads::Role::Ui, None);
     let locations = locations::Locations::from_env();
+    let about = about::info(&locations);
+    tracing::info!("Glass {}", about.version_line());
+    if args.get(1).is_some_and(|a| a == "--version") {
+        println!("{}", about.details());
+        return ExitCode::SUCCESS;
+    }
     let settings = settings::Settings::load(&locations);
     let _crash_reporting = settings
         .crash_reports

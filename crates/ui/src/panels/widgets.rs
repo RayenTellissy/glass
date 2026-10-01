@@ -596,6 +596,9 @@ pub enum Icon {
     Grid,
     ChevronDown,
     ChevronRight,
+    ChevronLeft,
+    /// An outbound link (opens in the browser).
+    ArrowUpRight,
     Plus,
     Filter,
     WifiOff,
@@ -671,6 +674,11 @@ pub fn icon(painter: &Painter, rect: Rect, icon: Icon, color: Color32, stroke_24
             .collect(),
         Icon::ChevronDown => vec![line(vec![p(6.0, 9.0), p(12.0, 15.0), p(18.0, 9.0)])],
         Icon::ChevronRight => vec![line(vec![p(9.0, 6.0), p(15.0, 12.0), p(9.0, 18.0)])],
+        Icon::ChevronLeft => vec![line(vec![p(15.0, 18.0), p(9.0, 12.0), p(15.0, 6.0)])],
+        Icon::ArrowUpRight => vec![
+            line(vec![p(7.0, 7.0), p(17.0, 7.0), p(17.0, 17.0)]),
+            line(vec![p(7.0, 17.0), p(17.0, 7.0)]),
+        ],
         Icon::Plus => vec![
             line(vec![p(12.0, 5.0), p(12.0, 19.0)]),
             line(vec![p(5.0, 12.0), p(19.0, 12.0)]),

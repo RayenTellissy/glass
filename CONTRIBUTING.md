@@ -68,7 +68,7 @@ Every task passes the full check. Depending on what it touched, also run:
 
 | If the change touches | Run | See |
 | --- | --- | --- |
-| A dependency | `cargo deny check` | [Licences and advisories](#licences-and-advisories) |
+| A dependency | `cargo deny check`, then `scripts/licences/third-party.py` and commit `assets/licences/third-party.tsv` | [Licences and advisories](#licences-and-advisories) |
 | UI text | `cargo test -p app --test ui_source -- --nocapture` (fails on missing keys, warns on unused ones) | [User-facing strings](#user-facing-strings) |
 | Theme tokens or colours | `python3 assets/theme/check.py` and the same `ui_source` test | [Colours and theme](#colours-and-theme) |
 | A UI screen | its headless frame-budget test (p99 under 8 ms) | [UI frame budget](#ui-frame-budget) |
@@ -241,6 +241,8 @@ cargo deny check
 ```
 
 CI runs the same check. If a new dependency is rejected, pick another crate; extend the allow-list only for a licence that is GPLv3-compatible, with a comment saying why.
+
+The About dialog's third-party list is `assets/licences/third-party.tsv`, generated from `cargo metadata` and `scripts/ffmpeg/versions.env` by `scripts/licences/third-party.py` (`--check` only compares). Rerun it whenever `Cargo.lock` or the FFmpeg pins change: `cargo test -p assets` fails while the file and `Cargo.lock` disagree. The licence texts of the shipped crates are not committed; the packaging scripts gather them from the crates' sources into `LICENSES/third-party-crates.txt` in every installer.
 
 ## FFmpeg
 
