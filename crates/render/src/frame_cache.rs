@@ -659,10 +659,13 @@ fn pack(view: &FrameView<'_>, format: SpillFormat) -> RamFrame {
     }
 }
 
+/// Colour and alpha lookup tables, one byte per f16 bit pattern.
+type Srgb8Tables = (Box<[u8]>, Box<[u8]>);
+
 /// f16 bit pattern to an 8-bit code: sRGB-encoded (colour) and linear (alpha), values
 /// clamped to 0..1, NaN to 0.
-fn srgb8_tables() -> &'static (Box<[u8]>, Box<[u8]>) {
-    static TABLES: OnceLock<(Box<[u8]>, Box<[u8]>)> = OnceLock::new();
+fn srgb8_tables() -> &'static Srgb8Tables {
+    static TABLES: OnceLock<Srgb8Tables> = OnceLock::new();
     TABLES.get_or_init(|| {
         let unit = |bits: usize| {
             let v = readback::f16_to_f32(bits as u16);
