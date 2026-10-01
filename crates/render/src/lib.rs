@@ -23,6 +23,9 @@
 //! Rendered preview frames are kept by [`frame_cache::FrameCache`]: an LRU of textures in
 //! VRAM that spills to RAM through the async readback ring.
 //!
+//! Looks come from [`lut`] files (`.cube`), uploaded once as a [`nodes::GpuLut`] and
+//! applied by [`nodes::LutNode`] in the LUT's declared input space with an intensity mix.
+//!
 //! A clip whose source is offline shows a [`slate`]: rendered once per size and label,
 //! cached, and imported into each frame's graph like a decoded frame.
 
@@ -33,6 +36,7 @@ pub mod frame_cache;
 pub mod graph;
 #[allow(unsafe_code)]
 pub mod interop;
+pub mod lut;
 pub mod nodes;
 pub mod profiler;
 pub mod readback;
