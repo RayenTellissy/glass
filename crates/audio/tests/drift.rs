@@ -80,11 +80,11 @@ fn run(ratio: f64, seconds: f64, settle: f64, seed: u64) -> Report {
         let mut t = cb.now;
         while t < end {
             let frames = line.frames_at(t);
-            if let Some((pt, pf)) = previous {
-                if t - pt > 1e-6 {
-                    let slope = (frames - pf) / (t - pt) / true_rate;
-                    slope_range = (slope_range.0.min(slope), slope_range.1.max(slope));
-                }
+            if let Some((pt, pf)) = previous
+                && t - pt > 1e-6
+            {
+                let slope = (frames - pf) / (t - pt) / true_rate;
+                slope_range = (slope_range.0.min(slope), slope_range.1.max(slope));
             }
             previous = Some((t, frames));
             if t > settle {

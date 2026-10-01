@@ -50,9 +50,9 @@ fn planar_audio_comes_out_interleaved_in_order() {
     assert_eq!(feeder.push_planar(&[&left, &right]), 800);
     let mut out = vec![9.0f32; 2 * 1000];
     output.render(&mut out);
-    for (i, frame) in out.chunks_exact(2).enumerate() {
+    for (i, frame) in out.as_chunks::<2>().0.iter().enumerate() {
         let n = (500 + i) as f32;
-        assert_eq!(frame, [n, -n]);
+        assert_eq!(*frame, [n, -n]);
     }
     assert_eq!(clock.underruns(), 0);
 }
@@ -100,12 +100,12 @@ fn feeder_channels_map_onto_the_output() {
     assert_eq!(feeder.push_planar(&[&a]), 16);
     let mut out = vec![9.0f32; 32];
     output.render(&mut out);
-    assert!(out.chunks_exact(2).all(|f| f == [1.0, 0.0]));
+    assert!(out.as_chunks::<2>().0.iter().all(|f| *f == [1.0, 0.0]));
     let b = [2.0f32; 16];
     let c = [3.0f32; 16];
     assert_eq!(feeder.push_planar(&[&a, &b, &c]), 16);
     output.render(&mut out);
-    assert!(out.chunks_exact(2).all(|f| f == [1.0, 2.0]));
+    assert!(out.as_chunks::<2>().0.iter().all(|f| *f == [1.0, 2.0]));
 }
 
 #[test]
