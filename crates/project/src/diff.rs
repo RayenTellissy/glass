@@ -2,7 +2,8 @@
 //!
 //! A root is flattened into one record per node ([`Node`]): the project header, each
 //! media reference, each sequence and track without its children (plus the order of its
-//! children), and each item whole. A [`Diff`] lists the records added or changed and the
+//! children), each sequence marker, and each item whole (a clip's markers travel with
+//! it). A [`Diff`] lists the records added or changed and the
 //! ids removed; applying it to the flat form of the old root gives the flat form of the
 //! new root, which rebuilds into an equal tree.
 //!
@@ -15,6 +16,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::id::{NodeId, SequenceId, TrackId};
+use crate::marker::Marker;
 use crate::model::{Item, MediaRef, MediaRefs, Project, Sequence, Track};
 use crate::validate::ValidationError;
 
@@ -35,7 +37,7 @@ pub enum Node {
         media: Arc<MediaRef>,
     },
     Sequence {
-        /// The sequence with its tracks left out.
+        /// The sequence with its markers and tracks left out.
         sequence: Arc<Sequence>,
         tracks: Vec<TrackId>,
     },
@@ -48,6 +50,11 @@ pub enum Node {
         track: TrackId,
         item: Arc<Item>,
     },
+    /// A marker on a sequence's ruler (schema v3; autosave format 3).
+    Marker {
+        sequence: SequenceId,
+        marker: Arc<Marker>,
+    },
 }
 
 impl Node {
@@ -58,6 +65,7 @@ impl Node {
             Node::Sequence { sequence, .. } => sequence.id.node(),
             Node::Track { track, .. } => track.id.node(),
             Node::Item { item, .. } => item.id.node(),
+            Node::Marker { marker, .. } => marker.id.node(),
         }
     }
 
@@ -68,6 +76,16 @@ impl Node {
             (Node::Item { track: ta, item: a }, Node::Item { track: tb, item: b }) => {
                 ta == tb && (Arc::ptr_eq(a, b) || a == b)
             }
+            (
+                Node::Marker {
+                    sequence: sa,
+                    marker: a,
+                },
+                Node::Marker {
+                    sequence: sb,
+                    marker: b,
+                },
+            ) => sa == sb && (Arc::ptr_eq(a, b) || a == b),
             _ => self == other,
         }
     }
@@ -98,6 +116,7 @@ pub fn flatten(project: &Project) -> Flat {
     }
     for seq in &project.sequences {
         let mut bare = Sequence::clone(seq);
+        bare.markers = imbl::Vector::new();
         bare.tracks = imbl::Vector::new();
         flat.insert(
             seq.id.node(),
@@ -106,6 +125,15 @@ pub fn flatten(project: &Project) -> Flat {
                 tracks: seq.tracks.iter().map(|t| t.id).collect(),
             },
         );
+        for marker in &seq.markers {
+            flat.insert(
+                marker.id.node(),
+                Node::Marker {
+                    sequence: seq.id,
+                    marker: marker.clone(),
+                },
+            );
+        }
         for track in &seq.tracks {
             let mut bare = Track::clone(track);
             bare.items = imbl::Vector::new();
@@ -183,12 +211,16 @@ pub fn rebuild(flat: &Flat) -> Result<Project, ValidationError> {
     };
     let mut media = MediaRefs::default();
     let mut items: BTreeMap<TrackId, Vec<Arc<Item>>> = BTreeMap::new();
+    let mut markers: BTreeMap<SequenceId, Vec<Arc<Marker>>> = BTreeMap::new();
     for node in flat.values() {
         match node {
             Node::Media { media: m } => {
                 media.0.insert(m.id, m.clone());
             }
             Node::Item { track, item } => items.entry(*track).or_default().push(item.clone()),
+            Node::Marker { sequence, marker } => {
+                markers.entry(*sequence).or_default().push(marker.clone())
+            }
             _ => {}
         }
     }
@@ -205,6 +237,9 @@ pub fn rebuild(flat: &Flat) -> Result<Project, ValidationError> {
             return Err(missing(seq_id.node()));
         };
         let mut seq = Sequence::clone(sequence);
+        let mut list = markers.remove(seq_id).unwrap_or_default();
+        list.sort_by_key(|m| (m.start, m.id));
+        seq.markers = list.into_iter().collect();
         for track_id in tracks {
             let Some(Node::Track { track, .. }) = flat.get(&track_id.node()) else {
                 return Err(missing(track_id.node()));
@@ -220,6 +255,11 @@ pub fn rebuild(flat: &Flat) -> Result<Project, ValidationError> {
     if let Some((track, _)) = items.into_iter().next() {
         return Err(ValidationError::Structure(format!(
             "items on track {track}, which is not in any sequence"
+        )));
+    }
+    if let Some((sequence, _)) = markers.into_iter().next() {
+        return Err(ValidationError::Structure(format!(
+            "markers on sequence {sequence}, which is not in the project"
         )));
     }
     project.validate()?;
