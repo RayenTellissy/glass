@@ -400,9 +400,10 @@ fn track(strength: &[f32], period: f64) -> Vec<usize> {
         let mut best = f32::NEG_INFINITY;
         let mut arg = usize::MAX;
         if i >= lo {
-            for t in i.saturating_sub(hi)..=i - lo {
+            let earliest = i.saturating_sub(hi);
+            for (t, &prev) in score[..=i - lo].iter().enumerate().skip(earliest) {
                 let r = ((i - t) as f64 / period).ln() as f32;
-                let v = score[t] - TIGHTNESS * r * r;
+                let v = prev - TIGHTNESS * r * r;
                 if v > best {
                     best = v;
                     arg = t;

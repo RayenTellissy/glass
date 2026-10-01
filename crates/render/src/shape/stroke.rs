@@ -395,7 +395,7 @@ fn dash(line: &Polyline, dash: &Dash) -> Vec<Polyline> {
         }
     }
     if on && !current.points.is_empty() {
-        if line.closed && starts_on && out.len() > 0 {
+        if line.closed && starts_on && !out.is_empty() {
             let first = out.remove(0);
             current.corners.pop();
             current.points.pop();
