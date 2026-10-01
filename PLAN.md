@@ -204,7 +204,7 @@ Done when: a sequence with 5 video layers, blend modes, transforms, text, shapes
 - [ ] Vector shapes: rect, ellipse, polygon, path, stroke, fill, gradients
 - [ ] Mask node: shape masks, feather, invert, intersection and union
 - [x] Async GPU readback ring for export and scopes
-- [ ] Visual regression tests: render reference sequences, compare against golden PNGs with a tolerance
+- [~] Visual regression tests: render reference sequences, compare against golden PNGs with a tolerance
 
 ## Phase 5 — Project model (M2)
 
