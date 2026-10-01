@@ -513,6 +513,36 @@ impl Paint {
         response
     }
 
+    /// The boards' spinner in `rect`: a `bg/3` ring with a quarter arc in the accent that
+    /// turns once a second (asks for the next frame).
+    pub fn spinner(&self, painter: &Painter, rect: Rect) {
+        const STEPS: usize = 24;
+        let k = rect.width() / 24.0;
+        let width = 3.0 * k;
+        painter.circle_stroke(
+            rect.center(),
+            9.0 * k,
+            Stroke::new(width, self.c(Role::Bg3)),
+        );
+        let turn = (painter.ctx().input(|i| i.time) as f32 * std::f32::consts::TAU)
+            % std::f32::consts::TAU;
+        let (a0, a1) = (turn - std::f32::consts::FRAC_PI_2, turn);
+        let points = (0..=STEPS)
+            .map(|i| {
+                let a = a0 + (a1 - a0) * i as f32 / STEPS as f32;
+                pos2(
+                    rect.min.x + (12.0 + 9.0 * a.cos()) * k,
+                    rect.min.y + (12.0 + 9.0 * a.sin()) * k,
+                )
+            })
+            .collect();
+        painter.add(Shape::line(
+            points,
+            Stroke::new(width, self.c(Role::Accent)),
+        ));
+        painter.ctx().request_repaint();
+    }
+
     /// A text-only button (`Change…`, `Stop`, `Leave offline`).
     pub fn ghost_button(&self, ui: &mut Ui, rect: Rect, label: &str) -> Response {
         let response = ui.allocate_rect(rect, Sense::click());

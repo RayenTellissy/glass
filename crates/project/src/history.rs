@@ -37,10 +37,11 @@ pub enum EditLabel {
     ChangeTrackKind,
     Transition,
     Recover,
+    Relink,
 }
 
 impl EditLabel {
-    pub const ALL: [EditLabel; 16] = [
+    pub const ALL: [EditLabel; 17] = [
         EditLabel::AddMedia,
         EditLabel::AddSequence,
         EditLabel::AddTrack,
@@ -57,6 +58,7 @@ impl EditLabel {
         EditLabel::ChangeTrackKind,
         EditLabel::Transition,
         EditLabel::Recover,
+        EditLabel::Relink,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -77,6 +79,7 @@ impl EditLabel {
             EditLabel::ChangeTrackKind => "edit.label.change_track_kind",
             EditLabel::Transition => "edit.label.transition",
             EditLabel::Recover => "edit.label.recover",
+            EditLabel::Relink => "edit.label.relink",
         }
     }
 }

@@ -10,7 +10,7 @@ use engine::media_mgmt::{DropSummary, Unreadable};
 use project::media_pool::{Facts, Gps, Metadata};
 use project::params::{ParamDef, ParamSchema, ParamValue, ParamValues, Range, Unit, builtin};
 
-use super::{SnapshotCase, pool_cases};
+use super::{SnapshotCase, pool_cases, relink_cases};
 use crate::dialogs::about::{self, AboutDialog, AboutInfo, Licence, View};
 use crate::dialogs::recovery::{self, RecoveryDialog, RecoveryPrompt, RecoveryState};
 use crate::dialogs::shortcuts::{self, ShortcutsEditor};
@@ -178,6 +178,24 @@ pub(super) fn all() -> Vec<SnapshotCase> {
             module: "dialogs/about",
             size: vec2(about::WIDTH + 32.0, 440.0),
             draw: about_gpl_notice,
+        },
+        SnapshotCase {
+            name: "relink_found",
+            module: "dialogs/relink",
+            size: relink_cases::FOUND_SIZE,
+            draw: relink_cases::found,
+        },
+        SnapshotCase {
+            name: "relink_searching_no_match",
+            module: "dialogs/relink",
+            size: relink_cases::STATES_SIZE,
+            draw: relink_cases::searching_and_no_match,
+        },
+        SnapshotCase {
+            name: "relink_relinking",
+            module: "dialogs/relink",
+            size: relink_cases::FOUND_SIZE,
+            draw: relink_cases::relinking,
         },
         SnapshotCase {
             name: "shortcuts_editor",
