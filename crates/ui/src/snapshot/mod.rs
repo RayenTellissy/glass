@@ -11,6 +11,7 @@ mod cases;
 pub mod compare;
 pub mod fonts;
 mod pool_cases;
+mod relink_cases;
 
 use std::path::Path;
 

@@ -6,7 +6,7 @@
 //! whose content hash no longer matches the one recorded at import are offline, each with
 //! an [`OfflineReason`]. Nothing in the project changes: availability is a separate map
 //! the engine and UI read, so an offline clip keeps its place, trims and effects, and the
-//! project loads, edits, saves and undoes exactly as before. Relinking (a later task)
+//! project loads, edits, saves and undoes exactly as before. Relinking ([`super::relink`])
 //! points the reference at a new path, after which a new check brings it back online.
 //!
 //! In place of an offline clip's pictures the compositor imports a

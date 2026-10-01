@@ -50,6 +50,16 @@ pub enum EditError {
     TrackKindMismatch { from: TrackKind, to: TrackKind },
     #[error("source time would go before the start of the media: {0} s")]
     SourceBeforeStart(Time),
+    #[error("media {0} is relinked twice in one batch")]
+    RelinkTwice(MediaId),
+    #[error("media {0} cannot be relinked to an empty path")]
+    RelinkNoPath(MediaId),
+    #[error("the new file for media {media} is {found} s long, but its clips use {needed} s")]
+    RelinkTooShort {
+        media: MediaId,
+        needed: Time,
+        found: Time,
+    },
     #[error(transparent)]
     Time(#[from] TimeError),
 }

@@ -5,7 +5,7 @@
 //! While restoring, the footer shows progress and a Cancel button. Closing the dialog
 //! (the close button or Escape) decides nothing: the autosave stays for next time.
 
-use std::f32::consts::{FRAC_PI_2, TAU};
+use std::f32::consts::FRAC_PI_2;
 
 use egui::{
     Align2, Color32, CornerRadius, FontId, Id, Key, Order, Painter, Pos2, Rect, Sense, Shape,
@@ -597,8 +597,7 @@ impl RecoveryDialog {
             mid,
         );
         let left = footer.min.x + s.s16;
-        icon_spinner(
-            paint,
+        paint.spinner(
             &painter,
             Rect::from_min_size(pos2(left, mid - ICON / 2.0), Vec2::splat(ICON)),
         );
@@ -844,22 +843,4 @@ fn icon_return(painter: &Painter, rect: Rect, color: Color32) {
         vec![g(9.0, 10.0), g(5.0, 14.0), g(9.0, 18.0)],
         st,
     ));
-}
-
-/// The board's spinner: a `bg/3` ring with a quarter arc in the accent that turns with
-/// time while restoring.
-fn icon_spinner(paint: &Paint, painter: &Painter, rect: Rect) {
-    let g = grid(rect);
-    let width = 3.0 * rect.width() / 24.0;
-    painter.circle_stroke(
-        rect.center(),
-        9.0 * rect.width() / 24.0,
-        Stroke::new(width, paint.c(Role::Bg3)),
-    );
-    let turn = (painter.ctx().input(|i| i.time) as f32 * TAU) % TAU;
-    painter.add(Shape::line(
-        arc(&g, (12.0, 12.0), 9.0, turn - FRAC_PI_2, turn),
-        Stroke::new(width, paint.c(Role::Accent)),
-    ));
-    painter.ctx().request_repaint();
 }

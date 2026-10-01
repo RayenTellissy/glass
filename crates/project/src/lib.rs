@@ -13,6 +13,7 @@ pub mod marker;
 pub mod media_pool;
 pub mod model;
 pub mod params;
+pub mod relink;
 pub mod schema;
 pub mod time;
 pub mod validate;
@@ -27,6 +28,7 @@ pub use model::{
     Adjustment, Clip, Item, ItemKind, MediaRef, MediaRefs, Project, Sequence, Subtitle, Track,
     TrackKind,
 };
+pub use relink::Relink;
 pub use schema::LoadError;
 pub use time::{Rational, Time, TimeError, TimeRange};
 pub use validate::ValidationError;

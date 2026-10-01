@@ -7,6 +7,7 @@ pub mod cards;
 pub mod classify;
 pub mod import;
 pub mod offline;
+pub mod relink;
 pub mod scan;
 pub mod sidecar;
 pub mod tags;
