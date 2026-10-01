@@ -304,7 +304,7 @@ Done when: the transition browser has 150+ items, the title browser 60+, the LUT
 - [ ] Save any graphic as a reusable template with editable fields
 
 ### Looks and effects
-- [ ] LUT framework: `.cube` loader, GPU 3D LUT node, intensity slider
+- [~] LUT framework: `.cube` loader, GPU 3D LUT node, intensity slider
 - [ ] 50+ LUTs grouped by mood, thumbnails rendered from the current frame
 - [ ] Film grain, halation, bloom, vignette, chromatic aberration, lens distortion
 - [ ] Blur (gaussian, directional, radial, zoom), sharpen, glow, mosaic, posterise
