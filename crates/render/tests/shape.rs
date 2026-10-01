@@ -863,6 +863,11 @@ fn mixed_shapes() -> Vec<Shape> {
 /// after a warm-up (the node rebuilt every frame, as the engine will). Prints the median
 /// and p99 GPU time and the CPU time to build the node, and holds the median under the
 /// whole Phase 4 budget.
+///
+/// The next frame's node is built while the GPU renders the current one, as the render
+/// thread pipelines frames. Building it between frames instead left the GPU idle for the
+/// build time (about 5 ms in a debug build), and the GPU then clocked down: the median
+/// moved between about 3.4 and 9.3 ms from run to run.
 #[test]
 fn fifty_shapes_4k_gpu_time() {
     let Some(mut gpu) = Gpu::new() else { return };
@@ -877,11 +882,15 @@ fn fifty_shapes_4k_gpu_time() {
     let view = out.create_view(&Default::default());
     let mut times = Vec::new();
     let mut build = Vec::new();
-    let mut stats = (0, 0, 0);
-    for frame in 0..70 {
+    let build_node = |gpu: &Gpu, build: &mut Vec<f64>| {
         let started = std::time::Instant::now();
         let node = gpu.node(canvas, &shapes);
         build.push(started.elapsed().as_secs_f64() * 1e3);
+        node
+    };
+    let mut stats = (0, 0, 0);
+    let mut node = build_node(&gpu, &mut build);
+    for frame in 0..70 {
         stats = (node.outline_count(), node.edge_count(), node.batch_count());
         let mut g = Graph::new();
         let id = g.add(node, &[]);
@@ -889,6 +898,7 @@ fn fifty_shapes_4k_gpu_time() {
         g.compile()
             .expect("compiles")
             .execute(&gpu.renderer, &mut gpu.pool, Some(&mut profiler));
+        node = build_node(&gpu, &mut build);
         let timings = profiler.wait(&gpu.device).expect("timed");
         if frame >= 10 {
             times.push(timings.total_ms.expect("total"));
