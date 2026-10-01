@@ -242,7 +242,7 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** A maintained, reference-tested implementation of the standard; `cargo deny check` passes (it adds `bitflags` 1 beside 2, a duplicate warning only).
 - **Consequences:** Loudness range differs from FFmpeg's by 0.3 to 0.4 LU on the stepped program fixtures (FFmpeg bins short-term values into a histogram); libebur128's values pass EBU Tech 3342, so the fixture tolerance is 0.5 LU rather than 0.1.
 
-## 30. Rendered-frame cache: one LRU across VRAM and RAM, ceilings from the machine
+## 31. Rendered-frame cache: one LRU across VRAM and RAM, ceilings from the machine
 
 - **Date:** 2026-10-01
 - **Decision:** `render::frame_cache::FrameCache` keys frames by segment hash, frame index and a `RenderVariant` (size, quality step, settings hash), keeps one recency order across both tiers, spills VRAM evictions to RAM through a lossless `ReadbackRing` without waiting, stores them bit-exact by default (`SpillFormat::Srgb8` halves `Rgba16Float` frames as an option), and drops a frame whose spill cannot start. Default ceilings: a sixth of Metal's recommended GPU working set for VRAM, an eighth of physical memory for RAM (a sixteenth on unified memory), 1 GiB when the platform reports nothing. Physical memory comes from `objc2-foundation` (`NSProcessInfo`), already in the dependency tree.
