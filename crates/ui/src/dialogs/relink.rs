@@ -1226,7 +1226,7 @@ fn draw_thumbnail(
     let clipped = painter.with_clip_rect(rect);
     // The board's glows sit in an 80 x 52 box 8 pt outside the 64 x 36 thumbnail.
     let at = |fx: f32, fy: f32| rect.min + vec2(-8.0 + 80.0 * fx, -8.0 + 52.0 * fy);
-    let (first, second) = if index % 2 == 0 {
+    let (first, second) = if index.is_multiple_of(2) {
         (
             (
                 at(0.30, 0.40),
