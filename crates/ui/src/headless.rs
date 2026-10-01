@@ -132,6 +132,7 @@ pub struct HeadlessUi {
     adapter: String,
     device_type: wgpu::DeviceType,
     has_text: bool,
+    time: Option<f64>,
 }
 
 impl HeadlessUi {
@@ -177,6 +178,7 @@ impl HeadlessUi {
             adapter: format!("wgpu {:?} on {}", info.backend, info.name),
             device_type: info.device_type,
             has_text,
+            time: None,
         })
     }
 
@@ -241,6 +243,13 @@ impl HeadlessUi {
         self.has_text
     }
 
+    /// Pins egui's input time for the following frames, so anything drawn from
+    /// `i.time` (spinners) looks the same whatever ran before; `None` lets egui advance
+    /// it by 1/60 s per frame.
+    pub fn set_time(&mut self, time: Option<f64>) {
+        self.time = time;
+    }
+
     /// Runs one frame and returns its UI-thread time.
     pub fn frame(&mut self, draw: impl FnMut(&mut egui::Ui)) -> Result<Duration, HeadlessError> {
         if self.in_flight.len() >= FRAMES_IN_FLIGHT
@@ -260,6 +269,7 @@ impl HeadlessUi {
         );
         let mut raw = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, points)),
+            time: self.time,
             ..Default::default()
         };
         raw.viewports

@@ -161,6 +161,12 @@ impl FrameReader {
         self.stream.kind
     }
 
+    /// The container's duration (what [`probe`](crate::probe::probe) reports), else the
+    /// stream's.
+    pub fn duration(&self) -> Option<Timestamp> {
+        self.demuxer.duration().or(self.stream.duration)
+    }
+
     /// True while video frames come out as hardware surfaces.
     pub fn is_hardware(&self) -> bool {
         self.decoder.is_hardware()

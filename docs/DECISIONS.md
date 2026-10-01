@@ -133,7 +133,7 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Date:** 2026-09-29
 - **Decision:** Independent tasks now run in parallel in separate git worktrees, including tasks from the next phases whose inputs are already built. Cargo commands are serialised by `scripts/cargo-serial` and every worktree shares the main checkout's target directory. The hard limits stay: at most 10 agents, one cargo command at a time, 4 compiler jobs, serial benchmarks.
 - **Reason:** The user asked for faster progress, and most agent time is spent outside the compiler (reading, writing, reviewing), so only the compiler needs to wait its turn.
-- **Details:** `scripts/cargo-serial` holds an exclusive `flock` on `<git common dir>/glass-cargo.lock` for the whole cargo command, test runs included. `scripts/dev-env.sh` points `CARGO_TARGET_DIR` at `<main checkout>/target` and `FFMPEG_DIR` at `<main checkout>/.glass-cache/ffmpeg/<host>`, so crates.io dependencies and `ffmpeg-sys` build once for all worktrees; workspace crates get separate artifacts per worktree because their paths differ. `scripts/worktree-setup.sh` prepares a new worktree. `PLAN.md` and `docs/DECISIONS.md` use git's union merge driver (`.gitattributes`) so branches that each append log lines merge without conflicts.
+- **Details:** `scripts/cargo-serial` holds an exclusive `flock` on `<git common dir>/glass-cargo.lock` for the whole cargo command, test runs included. `scripts/dev-env.sh` points `CARGO_TARGET_DIR` at `<main checkout>/target` and `FFMPEG_DIR` at `<main checkout>/.glass-cache/ffmpeg/<host>`, so crates.io dependencies and `ffmpeg-sys` build once for all worktrees. (Corrected by Decision 28: workspace crates do not get separate artifacts per worktree, because cargo hashes their path relative to the workspace root.) `scripts/worktree-setup.sh` prepares a new worktree. `PLAN.md` and `docs/DECISIONS.md` use git's union merge driver (`.gitattributes`) so branches that each append log lines merge without conflicts.
 - **Consequences:** Replaces the earlier rule that only `(parallel)` tasks run beside the current phase task. With union merges, a line changed differently on two branches (the same checkbox marked `[~]` on one and `[x]` on the other) ends up in the file twice, so check `PLAN.md` after each merge. Killing `cargo-serial` with `SIGKILL` releases the lock while its cargo child may still run; stop it with Ctrl-C or `SIGTERM` instead.
 
 
@@ -199,19 +199,20 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Details:** `render::crop` (CPU reference), `nodes::Layer::{opacity, crop}`, `crates/render/shaders/composite.wgsl`; `crates/render/tests/crop_opacity.rs`.
 - **Consequences:** A proxy at a lower resolution than the source needs its crop, feather and transform scaled into proxy pixels by the caller (the same mapping as the transform's anchor).
 
-
 ## 25. Text: coverage atlas, vector outline strokes, graph shadow
 
 - **Date:** 2026-09-30
 - **Decision:** `render::text` rasterises glyphs to 8-bit coverage in one `R8Unorm` atlas (shelf packed, doubling up to 4096, then evicting glyphs unused this frame and repacking on the GPU). Outlines are round-join strokes rasterised by swash at twice the outline width, cached per glyph and width in the same atlas, instead of a signed distance field. The drop shadow is a separable Gaussian of the fill-and-outline union, as render-graph passes. cosmic-text 0.19 is built without its `fontconfig` feature.
 - **Reason:** Coverage matches the CPU rasteriser exactly (GPU vs CPU max difference 0.0005), strokes stay crisp at any width without an SDF's range limit, and fontdb scans the standard font folders without fontconfig.
 - **Consequences:** Each outline width is a separate atlas entry, so animating the outline width re-rasterises per step (quantised to 1/16 px). Per-glyph scale above 1 samples the atlas bilinearly; the text animator should lay out at the final size for large zooms. Colour glyphs (emoji) keep only their alpha and take the fill colour.
+
 ## 26. Media pool items are keyed by `MediaId`; colour labels use the clip palette
 
 - **Date:** 2026-09-30
 - **Decision:** A media pool item maps one to one onto a source media reference, so the pool keys items by `project::MediaId` (the draft's own `ItemId` is gone) and bins by a new `project::BinId` node id. Until the project root embeds the pool (Phase 5 schema work) the pool hands out ids from its own counter, and `MediaPool::insert_item` accepts ids chosen by the caller. The five colour labels are drawn in the clip roles: amber `clip/title`, blue `clip/video`, green `clip/audio`, red `clip/offline`, violet `clip/adjustment`, and always shown with their names.
 - **Reason:** `project` already exports an `ItemId` for timeline items, and a clip's media reference and its pool entry are the same thing, so one id avoids a mapping table. The colour label menu on the `Sheet / Media pool` board uses exactly these clip colours, and the theme has no separate label roles.
 - **Consequences:** Embedding the pool into `Project.media` later only swaps the id source. The search index is a derived cache and is never saved.
+
 ## 27. Frame queues: rtrb for one producer, crossbeam's ArrayQueue for the decode pool
 
 - **Date:** 2026-09-30
@@ -225,3 +226,31 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** The compositor's visual regression suite lives in `render`'s integration tests (`crates/render/tests/visual_regression.rs`, registry in `tests/visual/cases.rs`), not in the library. A case is a scene per frame index (layers of procedural sources: NV12 bars through `YuvSourceNode`, uploaded stills, fills, text) rendered at 320 x 180 through `composite_stack` and `OutputNode::preview` with the frame index as the dither seed, compared with RGB golden PNGs. The comparison is `ui::snapshot::compare`, included by `#[path]`, with the compositor's own thresholds: 6 levels on up to 0.05% of the pixels on a GPU, 24 levels on up to 0.5% on a software adapter. Goldens are macOS-only (texts use the system Arial), like the UI snapshots.
 - **Reason:** `ui` depends on `render`, so `render`'s tests cannot depend on `ui`, and one comparison is easier to keep right than two. Compositing is float maths without CPU text rasterisation differences, so it can be held tighter than egui: one pixel of movement along a layer edge fails, one dither code does not. Small frames with two or three indices per case keep the goldens near 50 KB each despite the dither noise.
 - **Consequences:** Phase 4 shapes and masks and Phase 13 keying and tracking add a `Source` variant (or layer setting) and a case. When Geist is bundled, the texts and goldens can move to it and the suite can run on every platform.
+## 28. `cargo-serial` forgets workspace fingerprints when the checkout changes
+
+- **Date:** 2026-09-30
+- **Decision:** `scripts/cargo-serial` records the top-level path of the checkout that last ran a cargo command in `<git common dir>/glass-cargo-last-checkout`. When a command comes from a different checkout (or the record is missing), after taking the lock and before running cargo it deletes the fingerprint directories of every workspace package (`cargo metadata --no-deps`) under every profile in the target directory (`CARGO_TARGET_DIR`, else `<main checkout>/target`), prints one line, and records the new path. Dependencies' fingerprints stay.
+- **Reason:** Every worktree shares the main checkout's target directory (Decision 16), and cargo hashes a workspace member's path relative to the workspace root, so the same crate in two worktrees gets the same `.fingerprint/<pkg>-<hash>` directory and the same `deps/lib<pkg>-<hash>.rlib`. After worktree B builds a crate, worktree A's next build compares A's older source mtimes with B's newer outputs and treats them as fresh, so A compiles and tests against B's code: false "unresolved import" errors, or tests silently running another branch's build. Decision 16 wrongly said workspace crates get separate artifacts per worktree.
+- **Consequences:** The first command after switching checkouts recompiles the workspace crates it needs (dependencies and `ffmpeg-sys` are not rebuilt). Only commands run through `cargo-serial` are protected: a plain `cargo` build in a worktree, or a worktree whose branch still has the old script, neither records its checkout nor clears the fingerprints, so every worktree should merge the phase branch to pick up the new script.
+
+## 29. Offline media is runtime state, shown as a cached slate
+
+- **Date:** 2026-09-30
+- **Decision:** Whether a source file is available is checked by the engine (`engine::media_mgmt::offline`: missing, unreadable, or content hash changed) and kept in a map beside the project, never in the document. An offline clip renders `render::slate`: the viewer's offline state from the error and warning states sheet, drawn at the clip's size with sizes scaled from the 640 x 360 design frame, colours from the dark theme's roles (whatever the UI theme, since the slate is picture content that exports carry), without the design's Relink button (the preview draws controls over the picture). Each slate is rendered once per size and label and cached; frames import the cached texture.
+- **Reason:** Keeping availability out of the tree means loading, editing, undo and saving never depend on the disk, and a relink or a remounted drive changes nothing in the document. One cached texture per size and label costs one layout and a few passes per offline file, then only an import per frame.
+- **Details:** `engine::media_mgmt::offline`, `render::slate` (CPU reference `slate::reference`), `crates/render/shaders/slate.wgsl`; `crates/engine/tests/offline_media.rs`, `crates/render/tests/slate.rs`.
+- **Consequences:** The design's glow blur (18 px) and backdrop blur are approximated analytically (the glows are already soft; the card's backdrop is the dot screen at its average cover). The file size is not stored on `MediaRef`, so the only content check is the hash (at most 2.5 MiB read per file). The slate uses Geist and Geist Mono when installed and falls back to system faces until they are bundled.
+
+## 30. Loudness through the `ebur128` crate
+
+- **Date:** 2026-09-30
+- **Decision:** `media::analysis::loudness` measures with the `ebur128` crate (a Rust port of libebur128, MIT) instead of an in-house BS.1770-4 meter. Fixture references come from FFmpeg's `ebur128` filter and are matched within 0.1 LU integrated, 0.3 dB true peak and 0.5 LU loudness range.
+- **Reason:** A maintained, reference-tested implementation of the standard; `cargo deny check` passes (it adds `bitflags` 1 beside 2, a duplicate warning only).
+- **Consequences:** Loudness range differs from FFmpeg's by 0.3 to 0.4 LU on the stepped program fixtures (FFmpeg bins short-term values into a histogram); libebur128's values pass EBU Tech 3342, so the fixture tolerance is 0.5 LU rather than 0.1.
+
+## 31. Project files: a versioned envelope, migrations on untyped JSON, newer files refused
+
+- **Date:** 2026-09-30
+- **Decision:** A project file is `{"format": "glass.project", "schema_version": N, "project": {...}}`. Loading migrates the `project` value one version at a time with pure `serde_json::Value` functions (`project::schema::migrate_vN_to_vN+1`), then deserialises the current model and validates it; saving always writes the current version. A file with a newer schema version is refused (`project.open_error.newer_version`), never read best-effort. Schema v2 stores `media` as `{"refs": [...]}` instead of a bare list.
+- **Reason:** Migrating untyped values keeps only one set of model types (the current one) in the code, and each step stays small and testable. Reading a newer file would silently drop fields the newer build relies on, and saving it would destroy them. An object for `media` lets the media pool add its bins and metadata beside the references with a small, additive migration.
+- **Consequences:** Every model change that alters the saved JSON bumps `SCHEMA_VERSION`, adds a migration and a `v<N+1>` fixture in `tests/fixtures/projects/`; old fixtures are never edited. `crates/project/tests/schema.rs` fails when `save` output changes without a fixture update.
