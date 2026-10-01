@@ -79,6 +79,27 @@ impl ChannelLayout {
             Self::Surround51 => "5.1",
         }
     }
+
+    /// The layout that keeps a source's channels: mono, stereo, 5.1 for anything wider
+    /// (folded by the rules above), stereo when the count is unknown (0).
+    pub fn for_channels(channels: usize) -> Self {
+        match channels {
+            1 => Self::Mono,
+            0 | 2 => Self::Stereo,
+            _ => Self::Surround51,
+        }
+    }
+}
+
+/// What an audio stream holds, known once [`AudioReader`] has opened it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SourceAudio {
+    /// The stream's own sample rate.
+    pub sample_rate: u32,
+    /// The stream's channel count (0 for a stream without frames).
+    pub channels: usize,
+    /// The container's duration, else the stream's.
+    pub duration: Option<Timestamp>,
 }
 
 /// How to decode an audio stream.
@@ -134,6 +155,7 @@ const CONTIGUITY_SECONDS: f64 = 0.002;
 pub struct AudioReader {
     path: PathBuf,
     reader: FrameReader,
+    source: SourceAudio,
     in_rate: u32,
     out_rate: u32,
     layout: ChannelLayout,
@@ -209,6 +231,18 @@ fn gcd(a: i64, b: i64) -> i64 {
 
 impl AudioReader {
     pub fn open(path: impl AsRef<Path>, options: AudioOptions) -> Result<Self> {
+        Self::open_for_source(path, options, |_, _| {})
+    }
+
+    /// Opens like [`open`](Self::open), letting `adjust` change the options once the
+    /// stream's rate, channel count and duration are known (measure at the source rate,
+    /// keep its layout), so a caller needs no separate [`probe`](crate::probe::probe) and
+    /// the file is opened once.
+    pub fn open_for_source(
+        path: impl AsRef<Path>,
+        mut options: AudioOptions,
+        adjust: impl FnOnce(&SourceAudio, &mut AudioOptions),
+    ) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let mut reader = FrameReader::open(&path, options.stream)?;
         if reader.kind() != MediaKind::Audio {
@@ -230,9 +264,15 @@ impl AudioReader {
                 None => break None,
             }
         };
-        let in_rate = first
-            .as_ref()
-            .map_or(options.sample_rate, |f| f.sample_rate());
+        let source = SourceAudio {
+            sample_rate: first
+                .as_ref()
+                .map_or(options.sample_rate, |f| f.sample_rate()),
+            channels: first.as_ref().map_or(0, |f| usize::from(f.channels())),
+            duration: reader.duration(),
+        };
+        adjust(&source, &mut options);
+        let in_rate = source.sample_rate;
         let out_rate = options.sample_rate.max(1);
         let g = gcd(i64::from(in_rate), i64::from(out_rate));
         let channels = options.layout.channels();
@@ -260,6 +300,7 @@ impl AudioReader {
         let mut this = Self {
             path,
             reader,
+            source,
             in_rate,
             out_rate,
             layout: options.layout,
@@ -326,6 +367,11 @@ impl AudioReader {
     /// The stream's own sample rate.
     pub fn source_rate(&self) -> u32 {
         self.in_rate
+    }
+
+    /// The stream's rate, channel count and duration.
+    pub fn source(&self) -> &SourceAudio {
+        &self.source
     }
 
     pub fn layout(&self) -> ChannelLayout {

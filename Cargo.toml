@@ -46,14 +46,23 @@ image-webp = "0.2"
 # the FFT resampler's dependencies stay out; audioadapter-buffers wraps planar buffers.
 rubato = { version = "5", default-features = false }
 audioadapter-buffers = { version = "5.1", default-features = false, features = ["std"] }
+# Loudness after BS.1770-4 and EBU R128 (`media::analysis::loudness`): a Rust port of
+# libebur128.
+ebur128 = { version = "0.1", default-features = false }
+# Real FFTs for onset strength in beat detection (`media::analysis::beats`).
+realfft = "3.5"
 
-# Audio output (`audio`): device I/O through cpal (Phase 0 default) and rtrb, the
-# wait-free single-producer single-consumer ring that feeds the audio callback.
+# Audio output (`audio`): device I/O through cpal (Phase 0 default); the callback's feed
+# is an `rtrb` ring (declared with the frame queues below).
 cpal = "0.18"
-rtrb = "0.4"
 
 # GPU: the wgpu version egui-wgpu 0.36 uses, so `render` shares eframe's device.
 wgpu = "30"
+# Text (`render::text`): cosmic-text shapes and lays out (bidi, font fallback, system fonts
+# through fontdb); swash, which cosmic-text already uses, rasterises fills and outline
+# strokes. fontconfig stays off: fontdb scans the standard font folders itself.
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
+swash = "0.2"
 # Shader hot reload in debug builds (`render::shaders`): naga validates an edited shader
 # before its pipelines rebuild (the naga version wgpu 30 uses) and notify watches the
 # shader folder. Cargo cannot gate dependencies on the build profile, so both are always
@@ -79,6 +88,12 @@ eframe = { version = "0.36", default-features = false, features = ["accesskit", 
 pollster = "0.4"
 # The system file picker for importing (`ui::panels::file_dialog`), used asynchronously.
 rfd = "0.17"
+# Frame queues between decode, render and present (`engine::frame_queue`): `rtrb` for
+# single-producer rings, crossbeam's bounded array queue for the decode pool, and
+# crossbeam's parker so a waiting side sleeps instead of spinning.
+rtrb = "0.4"
+crossbeam-queue = "0.3"
+crossbeam-utils = "0.8"
 tracing = "0.1"
 # `tracing-log` routes `log` records (wgpu, winit, eframe) into tracing.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "ansi", "env-filter", "tracing-log", "smallvec"] }

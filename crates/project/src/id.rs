@@ -59,4 +59,6 @@ id_type!(
     TrackId,
     /// An item on a track: a clip or a gap.
     ItemId,
+    /// A bin (folder) in the media pool.
+    BinId,
 );
