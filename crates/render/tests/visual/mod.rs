@@ -23,6 +23,7 @@ use render::colour::WorkingSpace;
 use render::graph::{Graph, Port, TexturePool};
 use render::nodes::{Layer, OutputNode, YuvSourceNode, composite_stack};
 use render::renderer::Renderer;
+use render::shape::{Shape, ShapeNode};
 use render::text::{
     self, FontFamily, GlyphAtlas, GlyphInfo, GlyphTransform, PreparedText, TextEngine, TextFormat,
     TextPaint,
@@ -89,6 +90,8 @@ pub enum Source {
     Fill { colour: [f32; 4], size: (u32, u32) },
     /// Text drawn onto a transparent canvas-sized layer.
     Text(TextSpec),
+    /// Vector shapes drawn in order onto a transparent canvas-sized layer.
+    Shapes(Vec<Shape>),
 }
 
 /// A text in Arial.
@@ -129,8 +132,12 @@ impl Studio {
         }))
         .ok()?;
         let info = adapter.get_info();
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&Default::default())).ok()?;
+        // Shapes accumulate coverage in `R32Float` where it blends (every Apple GPU).
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: adapter.features() & wgpu::Features::FLOAT32_BLENDABLE,
+            ..Default::default()
+        }))
+        .ok()?;
         let renderer = Renderer::new(&device, &queue);
         let engine = TextEngine::with_font_files(&[Path::new(ARIAL)]).expect("Arial loads");
         let atlas = GlyphAtlas::new(&device, &queue);
@@ -220,6 +227,9 @@ impl Studio {
                     text.next().expect("prepared above"),
                     CANVAS,
                 ),
+                Source::Shapes(shapes) => g
+                    .add(ShapeNode::new(&self.renderer, CANVAS, shapes), &[])
+                    .out(0),
             };
             layers.push((port, layer.clone()));
         }
