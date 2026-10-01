@@ -3,10 +3,16 @@
 
 use std::collections::HashSet;
 
-use crate::edit::check_range;
+use std::sync::Arc;
+
+use imbl::Vector;
+
+use crate::edit::check_item;
 use crate::error::EditError;
 use crate::id::{NodeId, TrackId};
+use crate::marker::{Marker, check_marker, is_sorted};
 use crate::model::{ItemKind, Project};
+use crate::time::Time;
 
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum ValidationError {
@@ -24,8 +30,9 @@ pub enum ValidationError {
 
 impl Project {
     /// Checks every invariant the edit operations maintain: unique allocated ids, valid
-    /// rates, items on their track's grid, sorted and not overlapping, clips pointing at
-    /// known media.
+    /// rates, items of a kind their track accepts, on its grid, sorted and not
+    /// overlapping, clips pointing at known media, markers sorted, not before zero and
+    /// (on sequences) on the frame grid.
     pub fn validate(&self) -> Result<(), ValidationError> {
         let mut ids = HashSet::new();
         let mut claim = |id: NodeId| -> Result<(), ValidationError> {
@@ -61,6 +68,8 @@ impl Project {
             if seq.sample_rate == 0 {
                 return Err(EditError::InvalidSampleRate(seq.sample_rate).into());
             }
+            let frame = seq.frame_rate.frame_duration().map_err(EditError::from)?;
+            check_markers(&seq.markers, Some(frame), &mut claim)?;
             for track in &seq.tracks {
                 claim(track.id.node())?;
                 let in_track = |error: EditError| ValidationError::Track {
@@ -71,7 +80,7 @@ impl Project {
                 let mut previous: Option<&crate::model::Item> = None;
                 for item in &track.items {
                     claim(item.id.node())?;
-                    check_range(grid, track.kind, item.range).map_err(in_track)?;
+                    check_item(grid, track.kind, item).map_err(in_track)?;
                     if let Some(prev) = previous {
                         let prev_end = prev.range.end().map_err(|e| in_track(e.into()))?;
                         if prev_end > item.range.start {
@@ -86,7 +95,9 @@ impl Project {
                             if self.media.get(clip.media).is_none() {
                                 return Err(in_track(EditError::UnknownMedia(clip.media)));
                             }
+                            check_markers(&clip.markers, None, &mut claim)?;
                         }
+                        ItemKind::Subtitle(_) | ItemKind::Adjustment(_) => {}
                     }
                     previous = Some(item);
                 }
@@ -94,4 +105,22 @@ impl Project {
         }
         Ok(())
     }
+}
+
+/// Claims each marker's id and checks its span and the list's order.
+fn check_markers(
+    markers: &Vector<Arc<Marker>>,
+    grid: Option<Time>,
+    claim: &mut impl FnMut(NodeId) -> Result<(), ValidationError>,
+) -> Result<(), ValidationError> {
+    for marker in markers {
+        claim(marker.id.node())?;
+        check_marker(grid, marker.range())?;
+    }
+    if !is_sorted(markers) {
+        return Err(ValidationError::Structure(
+            "markers are not ordered by start".into(),
+        ));
+    }
+    Ok(())
 }

@@ -5,7 +5,7 @@
 //! - `snapshot-<g>.json`: the whole project at the start of generation `g`, written to a
 //!   `.partial` name, flushed to disk and renamed, so a snapshot is either complete or
 //!   absent.
-//! - `log-<g>.jsonl`: a header line (`{"autosave_format":1,"generation":g}`), then one
+//! - `log-<g>.jsonl`: a header line (`{"autosave_format":2,"generation":g}`), then one
 //!   [`Record`] per line, each a [`Diff`] from the previous state, appended and flushed to
 //!   disk (`sync_data`) before the next. A crash can only tear the last line; recovery
 //!   ignores a torn or unreadable tail and reports it.
@@ -42,7 +42,8 @@ pub const INTERVAL_MS: u64 = 10_000;
 /// Records per generation before a new snapshot (five minutes of ticks with changes).
 pub const SNAPSHOT_EVERY: u64 = 30;
 /// Version of the autosave folder layout and record format (not the project schema).
-pub const FORMAT_VERSION: u32 = 1;
+/// 2: sequence markers are records of their own (`diff::Node::Marker`).
+pub const FORMAT_VERSION: u32 = 2;
 
 /// How long the autosave of a session that did not quit normally is kept (the recovery
 /// dialog promises seven days).

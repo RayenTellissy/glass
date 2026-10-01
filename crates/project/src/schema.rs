@@ -6,7 +6,7 @@
 //! ```json
 //! {
 //!   "format": "glass.project",
-//!   "schema_version": 2,
+//!   "schema_version": 3,
 //!   "project": { "uid": "...", "name": "...", "next_id": 7, "media": {...}, "sequences": [...] }
 //! }
 //! ```
@@ -37,6 +37,9 @@
 //! - v1: the first edit tree. `media` is a list of references.
 //! - v2: `media` is an object, `{"refs": [...]}`, so the media pool can add its bins and
 //!   metadata next to the references.
+//! - v3: sequences and clips carry `markers` (sequence markers in sequence time, clip
+//!   markers in source time); tracks may also be `subtitle` or `adjustment`, holding
+//!   `subtitle` and `adjustment` items. Gaps stay implicit (no gap items).
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -48,7 +51,7 @@ use crate::validate::ValidationError;
 pub const FORMAT: &str = "glass.project";
 
 /// The schema version this build writes, and the newest it reads.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// The oldest schema version this build reads.
 pub const OLDEST_VERSION: u32 = 1;
@@ -57,7 +60,8 @@ pub const OLDEST_VERSION: u32 = 1;
 pub type Migration = fn(Value) -> Result<Value, String>;
 
 /// `MIGRATIONS[i]` takes version `OLDEST_VERSION + i` to the next one.
-pub const MIGRATIONS: [Migration; (SCHEMA_VERSION - OLDEST_VERSION) as usize] = [migrate_v1_to_v2];
+pub const MIGRATIONS: [Migration; (SCHEMA_VERSION - OLDEST_VERSION) as usize] =
+    [migrate_v1_to_v2, migrate_v2_to_v3];
 
 /// Why a project file could not be read. [`LoadError::i18n_key`] names the message to
 /// show.
@@ -195,6 +199,56 @@ pub fn migrate_v1_to_v2(mut project: Value) -> Result<Value, String> {
     Ok(project)
 }
 
+/// v2 → v3: every sequence and every clip gets an empty `markers` list. v2 had only
+/// video and audio tracks holding clips, so nothing else changes.
+pub fn migrate_v2_to_v3(mut project: Value) -> Result<Value, String> {
+    let root = object(&mut project)?;
+    let Some(sequences) = root.get_mut("sequences") else {
+        return Ok(project);
+    };
+    let sequences = sequences
+        .as_array_mut()
+        .ok_or_else(|| "sequences is not a list".to_string())?;
+    for sequence in sequences {
+        let sequence = sequence
+            .as_object_mut()
+            .ok_or_else(|| "a sequence is not an object".to_string())?;
+        add_markers(sequence)?;
+        let Some(tracks) = sequence.get_mut("tracks") else {
+            continue;
+        };
+        for track in tracks
+            .as_array_mut()
+            .ok_or_else(|| "tracks is not a list".to_string())?
+        {
+            let Some(items) = track.get_mut("items") else {
+                continue;
+            };
+            for item in items
+                .as_array_mut()
+                .ok_or_else(|| "items is not a list".to_string())?
+            {
+                let item = item
+                    .as_object_mut()
+                    .ok_or_else(|| "an item is not an object".to_string())?;
+                if item.get("type").and_then(Value::as_str) == Some("clip") {
+                    add_markers(item)?;
+                }
+            }
+        }
+    }
+    Ok(project)
+}
+
+/// Adds an empty `markers` list to a v2 node, which never has one.
+fn add_markers(node: &mut Map<String, Value>) -> Result<(), String> {
+    if node.contains_key("markers") {
+        return Err("a v2 node already has markers".to_string());
+    }
+    node.insert("markers".to_string(), Value::Array(Vec::new()));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -224,5 +278,50 @@ mod tests {
         let err = migrate_v1_to_v2(json!({ "media": { "refs": [] } })).expect_err("rejects");
         assert_eq!(err, "media is not a list");
         assert!(migrate_v1_to_v2(json!([])).is_err());
+    }
+
+    #[test]
+    fn v2_to_v3_adds_markers_to_sequences_and_clips() {
+        let v2 = json!({
+            "media": { "refs": [] },
+            "sequences": [{
+                "id": 2,
+                "tracks": [{
+                    "id": 3,
+                    "kind": "video",
+                    "items": [{ "id": 4, "type": "clip", "media": 1 }]
+                }]
+            }]
+        });
+        let v3 = migrate_v2_to_v3(v2).expect("migrates");
+        assert_eq!(
+            v3,
+            json!({
+                "media": { "refs": [] },
+                "sequences": [{
+                    "id": 2,
+                    "markers": [],
+                    "tracks": [{
+                        "id": 3,
+                        "kind": "video",
+                        "items": [{ "id": 4, "type": "clip", "media": 1, "markers": [] }]
+                    }]
+                }]
+            })
+        );
+    }
+
+    #[test]
+    fn v2_to_v3_rejects_malformed_trees() {
+        assert!(migrate_v2_to_v3(json!({ "sequences": {} })).is_err());
+        assert!(migrate_v2_to_v3(json!({ "sequences": [1] })).is_err());
+        assert!(migrate_v2_to_v3(json!({ "sequences": [{ "markers": [] }] })).is_err());
+        assert!(
+            migrate_v2_to_v3(json!({ "sequences": [{ "tracks": [{ "items": [2] }] }] })).is_err()
+        );
+        assert_eq!(
+            migrate_v2_to_v3(json!({ "uid": "u" })).expect("no sequences"),
+            json!({ "uid": "u" })
+        );
     }
 }
