@@ -364,6 +364,7 @@ fn draw_text_pass(
         entry,
         format: target.texture().format(),
         inputs: inputs.len() as u8,
+        volumes: 0,
     });
     let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(label),

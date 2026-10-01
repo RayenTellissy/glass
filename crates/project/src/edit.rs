@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use crate::error::EditError;
 use crate::id::{ItemId, MediaId, SequenceId, TrackId};
-use crate::model::{Clip, Item, ItemKind, MediaRef, Project, Sequence, Track, TrackKind};
+use crate::model::{
+    Adjustment, Clip, Item, ItemKind, MediaRef, Project, Sequence, Subtitle, Track, TrackKind,
+};
 use crate::time::{Rational, Time, TimeRange};
 
 /// A new clip: which media, where it goes on the timeline, and the source time at its
@@ -61,6 +63,7 @@ impl Project {
             name: name.into(),
             frame_rate,
             sample_rate,
+            markers: imbl::Vector::new(),
             tracks: imbl::Vector::new(),
         }));
         Ok((next, id))
@@ -102,7 +105,24 @@ impl Project {
         Ok(next)
     }
 
-    /// Places a clip on a track. Fails if it would overlap another item.
+    /// Changes what a track holds. Every item on it must be accepted by the new kind and
+    /// sit on its grid (an empty track can become anything).
+    pub fn set_track_kind(&self, track: TrackId, kind: TrackKind) -> Result<Project, EditError> {
+        let mut next = self.clone();
+        let (si, ti) = next.locate_track(track)?;
+        let (seq, track) = next.track_at_mut(si, ti);
+        if track.kind == kind {
+            return Ok(self.clone());
+        }
+        let grid = seq_grid(seq, kind)?;
+        for item in &track.items {
+            check_item(grid, kind, item)?;
+        }
+        track.kind = kind;
+        Ok(next)
+    }
+
+    /// Places a clip on a video or audio track. Fails if it would overlap another item.
     pub fn insert_clip(
         &self,
         track: TrackId,
@@ -114,16 +134,43 @@ impl Project {
         if spec.source_start.is_negative() {
             return Err(EditError::SourceBeforeStart(spec.source_start));
         }
+        let clip = Clip {
+            media: spec.media,
+            source_start: spec.source_start,
+            markers: imbl::Vector::new(),
+        };
+        self.insert_item(track, spec.range, ItemKind::Clip(clip))
+    }
+
+    /// Places a subtitle cue on a subtitle track.
+    pub fn insert_subtitle(
+        &self,
+        track: TrackId,
+        range: TimeRange,
+        text: impl Into<String>,
+    ) -> Result<(Project, ItemId), EditError> {
+        let text = text.into();
+        self.insert_item(track, range, ItemKind::Subtitle(Subtitle { text }))
+    }
+
+    /// Places an adjustment item on an adjustment track.
+    pub fn insert_adjustment(
+        &self,
+        track: TrackId,
+        range: TimeRange,
+    ) -> Result<(Project, ItemId), EditError> {
+        self.insert_item(track, range, ItemKind::Adjustment(Adjustment::default()))
+    }
+
+    fn insert_item(
+        &self,
+        track: TrackId,
+        range: TimeRange,
+        kind: ItemKind,
+    ) -> Result<(Project, ItemId), EditError> {
         let mut next = self.clone();
         let id = ItemId(next.alloc_id());
-        let item = Item {
-            id,
-            range: spec.range,
-            kind: ItemKind::Clip(Clip {
-                media: spec.media,
-                source_start: spec.source_start,
-            }),
-        };
+        let item = Item { id, range, kind };
         let (si, ti) = next.locate_track(track)?;
         let (seq, track) = next.track_at_mut(si, ti);
         place(seq_grid(seq, track.kind)?, track, Arc::new(item))?;
@@ -169,7 +216,7 @@ impl Project {
 
     /// Changes an item's timeline range. For a clip, moving the start trims its head:
     /// the source start moves by the same amount, so the frames that stay on the
-    /// timeline do not move.
+    /// timeline do not move (nor do its markers, which are in source time).
     pub fn trim_item(&self, item: ItemId, range: TimeRange) -> Result<Project, EditError> {
         let mut next = self.clone();
         let (si, ti, ii) = next.locate_item(item)?;
@@ -186,6 +233,7 @@ impl Project {
                 }
                 clip.source_start = source_start;
             }
+            ItemKind::Subtitle(_) | ItemKind::Adjustment(_) => {}
         }
         node.range = range;
         place(grid, track, trimmed)?;
@@ -247,16 +295,29 @@ pub(crate) struct SequenceView {
 fn seq_grid(seq: SequenceView, kind: TrackKind) -> Result<Time, EditError> {
     Ok(match kind {
         TrackKind::Audio => Time::from_samples(1, seq.sample_rate)?,
-        TrackKind::Video => seq.frame_rate.frame_duration()?,
+        TrackKind::Video | TrackKind::Subtitle | TrackKind::Adjustment => {
+            seq.frame_rate.frame_duration()?
+        }
     })
 }
 
 /// Validates `item` against `track` and inserts it in start order.
 pub(crate) fn place(grid: Time, track: &mut Track, item: Arc<Item>) -> Result<(), EditError> {
-    check_range(grid, track.kind, item.range)?;
+    check_item(grid, track.kind, &item)?;
     let index = slot(track, item.range, None)?;
     track.items.insert(index, item);
     Ok(())
+}
+
+/// The item's kind is one a track of `kind` accepts and its range fits the grid.
+pub(crate) fn check_item(grid: Time, kind: TrackKind, item: &Item) -> Result<(), EditError> {
+    if !kind.accepts(&item.kind) {
+        return Err(EditError::ItemNotAllowed {
+            kind,
+            item: item.kind.name(),
+        });
+    }
+    check_range(grid, kind, item.range)
 }
 
 /// The range is non-empty, starts at or after zero and sits on the track's grid.

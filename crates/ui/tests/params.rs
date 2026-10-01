@@ -3,7 +3,9 @@
 //! an inspector column of about 30 parameters within the frame budget.
 
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, pos2, vec2};
-use project::params::{ParamDef, ParamSchema, ParamValue, ParamValues, Range, Unit, builtin};
+use project::params::{
+    ParamDef, ParamSchema, ParamValue, ParamValues, Range, Unit, builtin, effects,
+};
 use ui::frame_time::FrameTimeMonitor;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::params::{KeyframeInfo, KeyframeMark, ParamEvent, Section, apply};
@@ -399,9 +401,27 @@ fn apply_sets_resets_and_ignores_keyframe_events() {
 }
 
 #[test]
+fn lut_section_sets_intensity_in_percent() {
+    let schema = effects::lut();
+    let values = schema.defaults();
+    let draw = |ui: &mut egui::Ui| Section::new(&schema, &values).show(ui);
+    // File, input, then intensity with a slider (its field is the right 64 px).
+    let field = pos2(FIELDS_RIGHT - 20.0, row_y(2));
+    let (events, height) = type_into(&mut Harness::new(), field, "60", Key::Enter, draw);
+    assert_eq!(
+        sets(&events),
+        vec![("intensity".to_owned(), ParamValue::Float(0.6), true)]
+    );
+    assert!(
+        height >= row_y(2) + 14.0,
+        "three rows under the header: {height}"
+    );
+}
+
+#[test]
 fn builtin_labels_are_english_strings() {
     let english = assets::i18n::Locale::english();
-    for schema in builtin::all() {
+    for schema in builtin::all().into_iter().chain(effects::all()) {
         let mut keys = vec![schema.label.clone()];
         for p in &schema.params {
             keys.push(p.label.clone());
@@ -420,7 +440,8 @@ fn builtin_labels_are_english_strings() {
 }
 
 /// About 30 parameters: the four built-in sections, a second transform and crop (an
-/// effect's own), and an effect with one of every other kind, with values moving each frame.
+/// effect's own), the LUT effect, and an effect with one of every other kind, with values
+/// moving each frame.
 fn inspector_column(ui: &mut egui::Ui, frame: usize, schemas: &[ParamSchema]) {
     egui::Panel::left("inspector")
         .exact_size(320.0)
@@ -502,6 +523,7 @@ fn inspector_column_p99_is_within_budget() {
     let mut schemas = builtin::all();
     schemas.push(builtin::transform());
     schemas.push(builtin::crop());
+    schemas.push(effects::lut());
     schemas.push(every_kind);
     let params: usize = schemas.iter().map(|s| s.params.len()).sum();
     assert!(params >= 28, "{params} parameters");

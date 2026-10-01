@@ -338,6 +338,76 @@ fn every_file_carries_the_autosave_format_version() {
     fs::remove_dir_all(&dir).expect("cleanup");
 }
 
+/// Autosaves written before project schema v2 (format 1, `media` as a bare list) are
+/// refused by their format version, not as damaged JSON, at recovery and at the launch
+/// scan.
+#[test]
+fn a_format_1_autosave_from_before_schema_v2_is_refused_by_version() {
+    let s = setup();
+    let dir = temp_dir("format-1");
+    let (p, _) = s
+        .project
+        .insert_clip(s.v1, clip(s.media, 0, 5))
+        .expect("clip");
+    let mut writer = AutosaveWriter::open(&dir, &s.project, None, 0, 0).expect("open");
+    writer.tick(&p, 1, 10).expect("tick");
+    // Dropped without `close`: the session marker stays, as after a crash.
+    drop(writer);
+    let snapshot = dir.join("snapshot-00000001.json");
+    let mut old: serde_json::Value =
+        serde_json::from_slice(&fs::read(&snapshot).expect("snapshot")).expect("json");
+    old["autosave_format"] = 1.into();
+    let refs = old["project"]["media"]["refs"].take();
+    old["project"]["media"] = refs;
+    assert!(
+        serde_json::from_value::<Project>(old["project"].clone()).is_err(),
+        "a format 1 project no longer parses"
+    );
+    fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
+
+    assert_eq!(autosave::FORMAT_VERSION, 3);
+    assert!(matches!(
+        autosave::recover(&dir),
+        Err(autosave::AutosaveError::Format(1))
+    ));
+    assert!(matches!(
+        autosave::find_recovery(&dir),
+        Err(autosave::AutosaveError::Format(1))
+    ));
+    fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// Autosaves written before project schema v3 (format 2, no `markers`) are refused by
+/// their format version too.
+#[test]
+fn a_format_2_autosave_from_before_schema_v3_is_refused_by_version() {
+    let s = setup();
+    let dir = temp_dir("format-2");
+    let mut writer = AutosaveWriter::open(&dir, &s.project, None, 0, 0).expect("open");
+    writer.tick(&s.project, 1, 10).expect("tick");
+    drop(writer);
+    let snapshot = dir.join("snapshot-00000001.json");
+    let mut old: serde_json::Value =
+        serde_json::from_slice(&fs::read(&snapshot).expect("snapshot")).expect("json");
+    old["autosave_format"] = 2.into();
+    for seq in old["project"]["sequences"]
+        .as_array_mut()
+        .expect("sequences")
+    {
+        seq.as_object_mut().expect("sequence").remove("markers");
+    }
+    assert!(
+        serde_json::from_value::<Project>(old["project"].clone()).is_err(),
+        "a format 2 project no longer parses"
+    );
+    fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
+    assert!(matches!(
+        autosave::recover(&dir),
+        Err(autosave::AutosaveError::Format(2))
+    ));
+    fs::remove_dir_all(&dir).expect("cleanup");
+}
+
 #[test]
 fn generations_roll_and_fall_back() {
     let s = setup();

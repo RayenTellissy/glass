@@ -3,3 +3,4 @@
 
 pub mod about;
 pub mod recovery;
+pub mod shortcuts;

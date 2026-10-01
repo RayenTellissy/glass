@@ -13,6 +13,7 @@ use project::params::{ParamDef, ParamSchema, ParamValue, ParamValues, Range, Uni
 use super::{SnapshotCase, pool_cases};
 use crate::dialogs::about::{self, AboutDialog, AboutInfo, Licence, View};
 use crate::dialogs::recovery::{self, RecoveryDialog, RecoveryPrompt, RecoveryState};
+use crate::dialogs::shortcuts::{self, ShortcutsEditor};
 use crate::panels::format;
 use crate::panels::import::{
     self, DropArea, FOLDER_DIALOG_WIDTH, FolderImport, FolderRow, ImportProgress,
@@ -22,6 +23,7 @@ use crate::panels::metadata::{self, METADATA_PANEL_HEIGHT, MetadataView};
 use crate::panels::widgets::{Icon, Paint, Type, icon, size};
 use crate::params::paint::{self as param_paint, FieldState, SliderState, StepperHover};
 use crate::params::{KeyframeInfo, KeyframeMark, Section};
+use crate::shortcuts::{Chord, Keymap, Platform};
 use crate::t;
 use crate::theme::{self, Role};
 
@@ -177,7 +179,61 @@ pub(super) fn all() -> Vec<SnapshotCase> {
             size: vec2(about::WIDTH + 32.0, 440.0),
             draw: about_gpl_notice,
         },
+        SnapshotCase {
+            name: "shortcuts_editor",
+            module: "dialogs/shortcuts",
+            size: vec2(shortcuts::WIDTH + 32.0, SHORTCUTS_CASE_HEIGHT),
+            draw: shortcuts_editor,
+        },
+        SnapshotCase {
+            name: "shortcuts_editor_recording",
+            module: "dialogs/shortcuts",
+            size: SHORTCUTS_CROP,
+            draw: shortcuts_editor_recording,
+        },
     ]
+}
+
+/// The editor on the board: one change (Freeze frame on F) and a clash waiting.
+const SHORTCUTS_CASE_HEIGHT: f32 = 770.0;
+/// The right end of the editor: the preset menu and a key being recorded.
+const SHORTCUTS_CROP: egui::Vec2 = vec2(600.0, 400.0);
+
+fn shortcuts_sample() -> (ShortcutsEditor, Keymap) {
+    let mut keymap = Keymap::default();
+    keymap.set("edit.freeze_frame", vec![Chord::key(egui::Key::F)]);
+    (ShortcutsEditor::new(Platform::Mac), keymap)
+}
+
+/// `Window / Keyboard shortcuts` as drawn on `Sheet / Keyboard`.
+fn shortcuts_editor(ui: &mut egui::Ui) {
+    bare_panel(ui, |ui, rect| {
+        let (mut editor, mut keymap) = shortcuts_sample();
+        editor.start_recording(&keymap, "view.snapping", false);
+        editor.capture(Chord::key(egui::Key::S));
+        editor.keep(&mut keymap);
+        editor.select(&keymap, "tool.razor");
+        let height = editor.height(&keymap);
+        let at = Rect::from_min_size(rect.min + vec2(16.0, 16.0), vec2(shortcuts::WIDTH, height));
+        let _ = editor.show(ui, at, &mut keymap);
+    });
+}
+
+/// The preset menu open over the list while Roll trim records ⌃⌥J.
+fn shortcuts_editor_recording(ui: &mut egui::Ui) {
+    bare_panel(ui, |ui, rect| {
+        let (mut editor, mut keymap) = shortcuts_sample();
+        editor.start_recording(&keymap, "tool.roll", false);
+        editor.capture(Chord::key(egui::Key::J).ctrl().alt());
+        editor.set_preset_menu(true);
+        let height = editor.height(&keymap);
+        let left = rect.max.x - 16.0 - shortcuts::WIDTH;
+        let at = Rect::from_min_size(
+            pos2(left, rect.min.y + 16.0),
+            vec2(shortcuts::WIDTH, height),
+        );
+        let _ = editor.show(ui, at, &mut keymap);
+    });
 }
 
 const CLIP_ROLES: [Role; 6] = [

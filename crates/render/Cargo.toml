@@ -22,9 +22,11 @@ objc2.workspace = true
 objc2-core-foundation.workspace = true
 objc2-io-surface.workspace = true
 objc2-metal.workspace = true
+objc2-foundation.workspace = true
 
 [dev-dependencies]
 pollster.workspace = true
+image.workspace = true
 criterion.workspace = true
 
 [lib]

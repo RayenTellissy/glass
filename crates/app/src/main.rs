@@ -5,6 +5,7 @@
 mod about;
 mod crash;
 mod ffi;
+mod locations;
 mod recovery;
 mod settings;
 
@@ -20,20 +21,22 @@ fn main() -> ExitCode {
     if let Err(error) = engine::logging::init() {
         eprintln!("glass: logging disabled: {error}");
     }
-    let paths = settings::Paths::from_env();
-    let about = about::info(&paths);
+    // The UI thread is the process main thread; it registers for the debug panel.
+    let _ui_thread = engine::threads::global().register_current(engine::threads::Role::Ui, None);
+    let locations = locations::Locations::from_env();
+    let about = about::info(&locations);
     tracing::info!("Glass {}", about.version_line());
     if args.get(1).is_some_and(|a| a == "--version") {
         println!("{}", about.details());
         return ExitCode::SUCCESS;
     }
-    let settings = settings::Settings::load(&paths);
+    let settings = settings::Settings::load(&locations);
     let _crash_reporting = settings
         .crash_reports
-        .then(|| crash::install(&paths.crashes(), &paths.data));
+        .then(|| crash::install(&locations.crashes(), &locations.data));
     crash::trigger_debug_crash();
     // The window shell shows these one at a time over the welcome screen once it exists.
-    let pending = recovery::LaunchRecovery::scan(&paths.cache, engine::autosave::now_ms());
+    let pending = recovery::LaunchRecovery::scan(&locations.cache, engine::autosave::now_ms());
     for launch in &pending {
         tracing::info!(
             "autosave of {} with {} unsaved edits waits for the recovery prompt",

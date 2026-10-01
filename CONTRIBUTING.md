@@ -73,6 +73,7 @@ Every task passes the full check. Depending on what it touched, also run:
 | Theme tokens or colours | `python3 assets/theme/check.py` and the same `ui_source` test | [Colours and theme](#colours-and-theme) |
 | A UI screen | its headless frame-budget test (p99 under 8 ms) | [UI frame budget](#ui-frame-budget) |
 | A panel, dialog, parameter widget or theme | `cargo test -p ui --test ui_snapshots -- --nocapture`; a new module adds a snapshot case | [UI snapshots](#ui-snapshots) |
+| Compositor output (render nodes, shaders, colour) | `cargo test -p render --test visual_regression -- --nocapture`; a new compositor feature adds a case | [Visual regression tests](#visual-regression-tests) |
 | Performance-sensitive code | `cargo bench -p <crate> --bench "*"` against a saved baseline, alone on the machine | [Benchmarks](#benchmarks) |
 | Media decoding or tests that read media | `tests/fixtures/generate.sh --verify` | [Test media](#test-media) |
 | `scripts/ffmpeg/` or `versions.env` | `scripts/ffmpeg/build.sh`, then the full check against the new build | [FFmpeg](#ffmpeg) |
@@ -141,7 +142,7 @@ GLASS_CRASH_REPORTS=1 GLASS_DATA_DIR=/tmp/glass-data GLASS_DEBUG_CRASH=segfault 
 ls /tmp/glass-data/crashes
 ```
 
-`GLASS_DEBUG_CRASH` also takes `abort` and `panic`, and works in debug builds only (release builds ignore it); `GLASS_CONFIG_DIR` and `GLASS_DATA_DIR` move the two folders. Read a minidump with `minidump-stackwalk` (`cargo install minidump-stackwalk`) and the matching build's debug symbols.
+`GLASS_DEBUG_CRASH` also takes `abort` and `panic`, and works in debug builds only (release builds ignore it); `GLASS_CONFIG_DIR`, `GLASS_DATA_DIR` and `GLASS_CACHE_DIR` move the config, data and cache folders, and win over portable mode (see [Portable mode](#portable-mode)). Read a minidump with `minidump-stackwalk` (`cargo install minidump-stackwalk`) and the matching build's debug symbols.
 
 ### Feature flags
 
@@ -196,6 +197,17 @@ Every panel, dialog and parameter widget has golden images: `crates/ui/tests/ui_
 - **Fonts and platforms.** The runtime font fallback depends on the machine, so snapshots pin their fonts (`ui::snapshot::fonts`): Arial and Courier New from `/System/Library/Fonts/Supplemental/`, which every macOS ships, until the Geist fonts are bundled. `crates/ui/tests/snapshots/FONTS.txt` records the files the goldens were made with, and a failure says so when the fonts differ. Until Geist is bundled the goldens are macOS-only: elsewhere the test prints `SKIPPED ui snapshots: ...`. When the Geist fonts land in `assets/fonts/` the snapshots switch to them automatically; regenerate every golden with `GLASS_UPDATE_SNAPSHOTS=1` in the same change (the other platforms can then compare too).
 - **No GPU.** Like the frame-budget tests, the snapshot test prints `SKIPPED ...` without a GPU and fails instead under `GLASS_REQUIRE_GPU=1`. CI runs it as its own step on the macOS arm64 job.
 - **Size.** Keep cases cropped to the piece; goldens are RGB PNGs at maximum compression. The whole folder should stay under a few MB.
+
+## Visual regression tests
+
+The compositor has golden frames too: `crates/render/tests/visual_regression.rs` renders each reference sequence registered in `crates/render/tests/visual/cases.rs` through the render graph (sources, `composite_stack` with blend modes, transforms, crop and opacity, text, shapes, then `OutputNode::preview` dithered with the frame index as its seed) at 320 x 180, at each of the case's frame indices, and compares it with `crates/render/tests/visual/goldens/<case>/frame_<index>.png`.
+
+- **Adding a case.** Add a `Case` to the list in `crates/render/tests/visual/cases.rs`: a name (the golden folder), a few frame indices, and a function from the frame index to a `Scene`, its layers bottom first, each a `Source` (decoded bars through `YuvSourceNode`, an uploaded still, a solid fill, a text, vector shapes) with its `Layer` settings. The bottom layer must be opaque and cover the canvas (goldens have no alpha). A new kind of source, such as masks, is a `Source` variant plus its arm in `Studio::render`. Write the goldens with `GLASS_UPDATE_SNAPSHOTS=1 cargo test -p render --test visual_regression` and look at every new PNG before committing it. `every_golden_folder_has_a_case` fails on a golden folder or frame with no case.
+- **Updating goldens.** After an intended change to what the compositor draws, rerun with `GLASS_UPDATE_SNAPSHOTS=1`, review the changed PNGs in the diff, and commit them with the change.
+- **Tolerance.** The comparison is the UI snapshots' (shared by path), with the compositor's own thresholds in `crates/render/tests/visual/mod.rs`. On a GPU (`visual::GPU`) a pixel differs when a channel is more than 6 levels off, and a frame fails when more than 0.05% of its pixels differ (28 pixels), so a layer moved by one pixel, a wrong blend mode, colour or opacity fails while one code of dither does not. On a software rasteriser (`visual::SOFTWARE`) it is 24 levels on up to 0.5% of the pixels, which catches a missing, moved or wrongly blended layer but not a one-pixel shift.
+- **Failures.** A failing frame writes `frame_<index>.actual.png` and `frame_<index>.diff.png` (differing pixels in magenta over a faded golden) next to the golden; both are git-ignored, and CI uploads them as the `visual-regression-differences` artifact.
+- **Platforms and GPUs.** Texts are set in Arial from `/System/Library/Fonts/Supplemental/`, so the goldens are macOS-only: elsewhere the test prints `SKIPPED visual regression: ...`. Without a GPU it prints `SKIPPED ...`, and fails instead under `GLASS_REQUIRE_GPU=1`. CI runs it as its own step on the macOS arm64 job.
+- **Size.** Keep scenes at the 320 x 180 canvas and to two or three frames; goldens are RGB PNGs at maximum compression, and the dither noise makes each one 35 to 60 KB. The folder should stay under 1 MB.
 
 ## User-facing strings
 
@@ -266,6 +278,10 @@ scripts/package/make-dmg.sh --binary target/dist/glass
 ```
 
 It writes `target/package/<target>/Glass.app` and `glass-<version>-<target>.dmg`, signed ad hoc unless `GLASS_CODESIGN_IDENTITY` names a Developer ID identity, and fails if any bundled binary still references a library outside the bundle or the system. Icons are taken from `assets/icons/` when present.
+
+### Portable mode
+
+Glass runs portable, with nothing written to the user's own folders, when a folder named `Glass Data` sits next to the executable: next to `glass.exe` on Windows, next to the binary or AppImage on Linux, and next to `Glass.app` on macOS (not inside the bundle). Settings then live in `Glass Data/Settings/`, crash reports and later downloads in `Glass Data/Data/`, and the per-user cache (autosaves) in `Glass Data/Cache/`. Projects keep their own `.glass-cache/` beside the project file in both modes. To make a portable copy, put Glass on the drive and create the empty `Glass Data` folder beside it; delete the folder to go back to the normal per-user folders. If a portable folder cannot be written (a locked drive, read-only media, or macOS running a downloaded app from a randomised read-only location until it is moved), Glass logs a warning and uses the normal per-user folder for it instead. The code is `app::locations`.
 
 ### Size budget
 

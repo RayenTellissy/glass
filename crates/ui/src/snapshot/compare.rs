@@ -5,6 +5,9 @@
 //! at most [`Tolerance::max_differing_ratio`] of its pixels differ. The channel
 //! threshold absorbs anti-aliasing and blending rounding between GPUs; the ratio lets a
 //! few edge pixels move while a changed word, colour, border or layout still fails.
+//!
+//! `render`'s visual regression tests include this file by path (`ui` depends on
+//! `render`, not the other way), so it stays free of crate dependencies.
 
 /// How far a rendering may drift from its golden.
 #[derive(Clone, Copy, Debug, PartialEq)]

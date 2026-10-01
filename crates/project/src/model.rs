@@ -15,7 +15,8 @@ use std::sync::Arc;
 use imbl::{OrdMap, Vector};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::id::{ItemId, MediaId, SequenceId, TrackId};
+use crate::id::{ItemId, MarkerId, MediaId, SequenceId, TrackId};
+use crate::marker::Marker;
 use crate::time::{Rational, Time, TimeError, TimeRange};
 
 /// The document root. Cheap to clone; see the module docs.
@@ -193,6 +194,9 @@ pub struct Sequence {
     pub frame_rate: Rational,
     /// Audio samples per second; audio items sit on its sample grid.
     pub sample_rate: u32,
+    /// Markers on the sequence's ruler, in sequence time, ordered by start then id
+    /// (schema v3).
+    pub markers: Vector<Arc<Marker>>,
     /// Top to bottom as shown in the timeline.
     pub tracks: Vector<Arc<Track>>,
 }
@@ -209,12 +213,14 @@ impl Sequence {
             name,
             frame_rate,
             sample_rate,
+            markers,
             tracks,
         } = self;
         *id == other.id
             && *name == other.name
             && *frame_rate == other.frame_rate
             && *sample_rate == other.sample_rate
+            && all_eq(markers, &other.markers, |a, b| a == b)
             && all_eq(tracks, &other.tracks, |a, b| a.content_eq(b))
     }
 
@@ -226,19 +232,53 @@ impl Sequence {
     pub fn grid(&self, kind: TrackKind) -> Result<Time, TimeError> {
         match kind {
             TrackKind::Audio => Time::from_samples(1, self.sample_rate),
-            TrackKind::Video => self.frame_rate.frame_duration(),
+            TrackKind::Video | TrackKind::Subtitle | TrackKind::Adjustment => {
+                self.frame_rate.frame_duration()
+            }
         }
+    }
+
+    pub fn marker(&self, id: MarkerId) -> Option<&Arc<Marker>> {
+        self.markers.iter().find(|m| m.id == id)
     }
 }
 
+/// What a track holds. Each kind accepts one kind of item ([`TrackKind::accepts`]):
+/// video and audio tracks hold clips, subtitle tracks subtitles, adjustment tracks
+/// adjustment items. Audio items sit on the sample grid, all others on the frame grid.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrackKind {
     Video,
     Audio,
+    Subtitle,
+    Adjustment,
+}
+
+impl TrackKind {
+    pub const ALL: [TrackKind; 4] = [
+        TrackKind::Video,
+        TrackKind::Audio,
+        TrackKind::Subtitle,
+        TrackKind::Adjustment,
+    ];
+
+    /// Whether an item of `kind` may sit on a track of this kind.
+    pub fn accepts(self, kind: &ItemKind) -> bool {
+        matches!(
+            (self, kind),
+            (TrackKind::Video | TrackKind::Audio, ItemKind::Clip(_))
+                | (TrackKind::Subtitle, ItemKind::Subtitle(_))
+                | (TrackKind::Adjustment, ItemKind::Adjustment(_))
+        )
+    }
 }
 
 /// A track: items ordered by start time, never overlapping.
+///
+/// Gaps are implicit: the empty space between items is not stored (no gap items), so no
+/// edit has to keep gap nodes in step with the items around them. [`Track::gaps`] lists
+/// them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Track {
     pub id: TrackId,
@@ -274,6 +314,30 @@ impl Track {
     pub fn end(&self) -> Result<Time, TimeError> {
         self.items.last().map_or(Ok(Time::ZERO), |i| i.range.end())
     }
+
+    /// The item covering `time`, if any.
+    pub fn item_at(&self, time: Time) -> Result<Option<&Arc<Item>>, TimeError> {
+        let index = match self.items.binary_search_by(|i| i.range.start.cmp(&time)) {
+            Ok(i) => return Ok(self.items.get(i)),
+            Err(0) => return Ok(None),
+            Err(i) => i - 1,
+        };
+        let item = &self.items[index];
+        Ok(item.range.contains(time)?.then_some(item))
+    }
+
+    /// The empty spans between zero and [`Track::end`], in time order.
+    pub fn gaps(&self) -> Result<Vec<TimeRange>, TimeError> {
+        let mut gaps = Vec::new();
+        let mut at = Time::ZERO;
+        for item in &self.items {
+            if item.range.start > at {
+                gaps.push(TimeRange::between(at, item.range.start)?);
+            }
+            at = at.max(item.range.end()?);
+        }
+        Ok(gaps)
+    }
 }
 
 /// Something that occupies a range of a track.
@@ -290,23 +354,63 @@ pub struct Item {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ItemKind {
     Clip(Clip),
+    Subtitle(Subtitle),
+    Adjustment(Adjustment),
+}
+
+impl ItemKind {
+    /// The kind's name in files and messages (`clip`, `subtitle`, `adjustment`).
+    pub fn name(&self) -> &'static str {
+        match self {
+            ItemKind::Clip(_) => "clip",
+            ItemKind::Subtitle(_) => "subtitle",
+            ItemKind::Adjustment(_) => "adjustment",
+        }
+    }
 }
 
 impl Item {
     pub fn clip(&self) -> Option<&Clip> {
         match &self.kind {
             ItemKind::Clip(c) => Some(c),
+            _ => None,
         }
     }
 }
 
-/// A piece of a source file placed on a track.
+/// A piece of a source file placed on a track. The clip properties (speed map, effect
+/// stack, transform, gain, enabled flag) join it in a later schema version.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Clip {
     pub media: MediaId,
     /// Source time (seconds from the start of the file) shown at the item's start.
     pub source_start: Time,
+    /// Markers on the clip in source time, so they stay on their frame when the clip is
+    /// trimmed or moved; ordered by start then id (schema v3).
+    pub markers: Vector<Arc<Marker>>,
 }
+
+impl Clip {
+    /// The source span an item with timeline `range` shows (speed 1).
+    pub fn source_range(&self, range: TimeRange) -> TimeRange {
+        TimeRange::new(self.source_start, range.duration)
+    }
+
+    pub fn marker(&self, id: MarkerId) -> Option<&Arc<Marker>> {
+        self.markers.iter().find(|m| m.id == id)
+    }
+}
+
+/// A subtitle cue on a subtitle track. Caption styles join it in Phase 10.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Subtitle {
+    pub text: String,
+}
+
+/// An adjustment item: its effects apply to every track below it over its range. The
+/// effect stack joins it with the adjustment layers task.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Adjustment {}
 
 /// Element-wise equality of two node lists, by pointer first.
 fn all_eq<T>(a: &Vector<Arc<T>>, b: &Vector<Arc<T>>, eq: impl Fn(&T, &T) -> bool) -> bool {

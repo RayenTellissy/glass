@@ -4,13 +4,13 @@
 
 use ui::dialogs::about::AboutInfo;
 
-use crate::settings::Paths;
+use crate::locations::Locations;
 
-pub fn info(paths: &Paths) -> AboutInfo {
+pub fn info(locations: &Locations) -> AboutInfo {
     AboutInfo {
         commit: option_env!("GLASS_GIT_COMMIT").map(str::to_owned),
         build_date: option_env!("GLASS_BUILD_DATE").map(str::to_owned),
-        settings_folder: Some(paths.config.display().to_string()),
+        settings_folder: Some(locations.config.display().to_string()),
         ..AboutInfo::new(env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_REPOSITORY"))
     }
 }
