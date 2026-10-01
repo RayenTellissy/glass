@@ -1,0 +1,80 @@
+{
+  "format": "glass.project",
+  "schema_version": 2,
+  "project": {
+    "uid": "fixture-basic",
+    "name": "Harbour film",
+    "next_id": 9,
+    "media": {
+      "refs": [
+        {
+          "id": 1,
+          "content_hash": "a1b2c3",
+          "path": "/footage/harbour.mov"
+        },
+        {
+          "id": 2,
+          "content_hash": "d4e5f6",
+          "path": "/footage/gulls.wav"
+        }
+      ]
+    },
+    "sequences": [
+      {
+        "id": 3,
+        "name": "Main",
+        "frame_rate": {
+          "num": 25,
+          "den": 1
+        },
+        "sample_rate": 48000,
+        "tracks": [
+          {
+            "id": 4,
+            "kind": "video",
+            "name": "V1",
+            "items": [
+              {
+                "id": 6,
+                "range": {
+                  "start": "0",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "1/2"
+              },
+              {
+                "id": 7,
+                "range": {
+                  "start": "2",
+                  "duration": "3/5"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "3"
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "kind": "audio",
+            "name": "A1",
+            "items": [
+              {
+                "id": 8,
+                "range": {
+                  "start": "0",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 2,
+                "source_start": "0"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
