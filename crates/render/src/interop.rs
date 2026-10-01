@@ -235,6 +235,49 @@ impl SurfaceImporter {
     }
 }
 
+/// Memory sizes the platform reports, for defaults that scale with the machine (the
+/// rendered-frame cache ceilings). `None` where the platform gives no answer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MemoryReport {
+    /// Bytes the GPU can keep resident without a performance penalty (Metal's
+    /// `recommendedMaxWorkingSetSize`).
+    pub gpu_working_set: Option<u64>,
+    /// Physical memory of the machine.
+    pub system: Option<u64>,
+    /// The GPU shares system memory (Apple silicon, integrated GPUs).
+    pub unified: bool,
+}
+
+/// Asks the platform how much GPU and system memory there is. Cheap; call it once at
+/// startup.
+pub fn memory_report(device: &wgpu::Device) -> MemoryReport {
+    #[cfg(target_os = "macos")]
+    {
+        let system = Some(objc2_foundation::NSProcessInfo::processInfo().physicalMemory());
+        // SAFETY: as_hal only borrows the device's Metal object for this call.
+        match unsafe { device.as_hal::<wgpu::hal::api::Metal>() } {
+            Some(hal) => {
+                use objc2_metal::MTLDevice;
+                let raw = hal.raw_device();
+                MemoryReport {
+                    gpu_working_set: Some(raw.recommendedMaxWorkingSetSize()),
+                    system,
+                    unified: raw.hasUnifiedMemory(),
+                }
+            }
+            None => MemoryReport {
+                system,
+                ..MemoryReport::default()
+            },
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = device;
+        MemoryReport::default()
+    }
+}
+
 /// wgpu formats of a surface's luma and chroma planes.
 pub fn plane_formats(format: HwSurfaceFormat) -> (wgpu::TextureFormat, wgpu::TextureFormat) {
     if format.bytes_per_sample() == 2 {

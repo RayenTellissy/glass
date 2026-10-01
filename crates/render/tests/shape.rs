@@ -360,7 +360,7 @@ fn fill_rules_on_a_pentagram_and_holes() {
     // A square with a square hole: the hole is empty for even-odd either way, and for
     // non-zero only when it winds the other way.
     let square = |x0: f32, y0: f32, x1: f32, y1: f32, reverse: bool| {
-        let mut pts = vec![(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
+        let mut pts = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
         if reverse {
             pts.reverse();
         }
@@ -748,7 +748,7 @@ fn coverage_node_matches_the_shape_layer() {
                 a[3]
             );
         }
-        assert!(coverage.iter().any(|c| *c > 0.99) && coverage.iter().any(|c| *c == 0.0));
+        assert!(coverage.iter().any(|c| *c > 0.99) && coverage.contains(&0.0));
     }
     assert!(layer.iter().any(|p| p[3] > 0.99));
 }

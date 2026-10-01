@@ -8,6 +8,7 @@ pub mod frame_time;
 pub mod headless;
 pub mod panels;
 pub mod params;
+pub mod shortcuts;
 pub mod snapshot;
 pub mod theme;
 

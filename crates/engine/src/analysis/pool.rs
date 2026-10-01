@@ -565,9 +565,10 @@ impl AnalysisPool {
         let mut workers = Vec::new();
         for n in 0..config.workers.max(1) {
             let worker_shared = shared.clone();
-            let spawned = std::thread::Builder::new()
-                .name(format!("glass-analysis-{n}"))
-                .spawn(move || worker(&worker_shared));
+            let spawned =
+                crate::threads::spawn(crate::threads::Role::Analysis, Some(n), move || {
+                    worker(&worker_shared)
+                });
             match spawned {
                 Ok(handle) => workers.push(handle),
                 Err(error) => {
@@ -743,10 +744,12 @@ fn worker(shared: &Arc<Shared>) {
                     shared.send(&key, id, JobEventKind::Started);
                     break (key, id, job, cancel);
                 }
-                state = shared
-                    .changed
-                    .wait(state)
-                    .unwrap_or_else(PoisonError::into_inner);
+                state = crate::threads::idle(|| {
+                    shared
+                        .changed
+                        .wait(state)
+                        .unwrap_or_else(PoisonError::into_inner)
+                });
             }
         };
         let ctx = JobContext {

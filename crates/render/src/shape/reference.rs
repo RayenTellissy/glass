@@ -177,8 +177,8 @@ mod tests {
     fn winding_counts_direction() {
         let cw = vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
         let ccw: Vec<P> = cw.iter().rev().copied().collect();
-        assert_eq!(winding(&[cw.clone()], [5.0, 5.0]), 1);
-        assert_eq!(winding(&[ccw.clone()], [5.0, 5.0]), -1);
+        assert_eq!(winding(std::slice::from_ref(&cw), [5.0, 5.0]), 1);
+        assert_eq!(winding(std::slice::from_ref(&ccw), [5.0, 5.0]), -1);
         assert_eq!(winding(&[cw.clone(), cw], [5.0, 5.0]), 2);
         assert_eq!(winding(&[ccw], [15.0, 5.0]), 0);
     }

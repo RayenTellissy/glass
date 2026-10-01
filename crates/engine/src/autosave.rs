@@ -29,7 +29,7 @@ pub use project::{EditLabel, History, Project};
 pub const INTERVAL: Duration = Duration::from_millis(files::INTERVAL_MS);
 
 /// The thread's name, as the threading model in `docs/ARCHITECTURE.md` lists it.
-pub const THREAD_NAME: &str = "glass-io";
+pub const THREAD_NAME: &str = crate::threads::Role::Io.base_name();
 
 /// The autosave folder of `project` inside the cache folder `cache`.
 pub fn project_dir(cache: &Path, project: &Project) -> PathBuf {
@@ -107,9 +107,9 @@ impl Autosave {
     ) -> std::io::Result<(Self, Receiver<AutosaveEvent>)> {
         let (sender, messages) = mpsc::channel();
         let (events_tx, events) = mpsc::channel();
-        let thread = std::thread::Builder::new()
-            .name(THREAD_NAME.into())
-            .spawn(move || run(config, root, changes, messages, events_tx))?;
+        let thread = crate::threads::spawn(crate::threads::Role::Io, None, move || {
+            run(config, root, changes, messages, events_tx)
+        })?;
         Ok((
             Self {
                 sender,
@@ -199,7 +199,7 @@ fn run(
     let mut deadline = Instant::now() + config.interval;
     loop {
         let wait = deadline.saturating_duration_since(Instant::now());
-        let tick_now = match messages.recv_timeout(wait) {
+        let tick_now = match crate::threads::idle(|| messages.recv_timeout(wait)) {
             Ok(Message::Submit { root, changes }) => {
                 latest = Some((root, changes));
                 false
