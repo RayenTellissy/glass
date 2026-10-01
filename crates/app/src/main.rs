@@ -19,6 +19,8 @@ fn main() -> ExitCode {
     if let Err(error) = engine::logging::init() {
         eprintln!("glass: logging disabled: {error}");
     }
+    // The UI thread is the process main thread; it registers for the debug panel.
+    let _ui_thread = engine::threads::global().register_current(engine::threads::Role::Ui, None);
     let paths = settings::Paths::from_env();
     let settings = settings::Settings::load(&paths);
     let _crash_reporting = settings

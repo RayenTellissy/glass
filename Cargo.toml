@@ -85,6 +85,9 @@ rfd = "0.17"
 rtrb = "0.4"
 crossbeam-queue = "0.3"
 crossbeam-utils = "0.8"
+# OS thread ids for the thread registry (`engine::threads`): `pthread_threadid_np` on macOS,
+# `GetCurrentThreadId` on Windows; allocation-free, so the audio callback can call it.
+thread-id = "5"
 tracing = "0.1"
 # `tracing-log` routes `log` records (wgpu, winit, eframe) into tracing.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "ansi", "env-filter", "tracing-log", "smallvec"] }
