@@ -229,6 +229,8 @@ flowchart LR
     M --> N["ui draws the preview texture"]
 ```
 
+**Offline media** (`engine::media_mgmt::offline`, Phase 2): a check off the UI thread (`check_project`) marks each `MediaRef` online or offline with a reason (`Missing`, `Unreadable` with the system's message, or `Changed` when the content hash no longer matches the one recorded at import; `Verify::Quick` stops at a stat and an open). The result is a separate `MediaAvailability` map, never written into the project, so offline clips keep their place, trims and effects and the project loads, edits, undoes and saves byte for byte as before. `offline_clips` lists the affected clips and their timeline ranges for the timeline and the evaluator; in place of their pictures the compositor imports a `render::slate` frame (the design's offline slate: glows through a dot screen, a glass card with the icon, "Media offline", the file name and a detail line, colours from the dark theme's roles in linear light) at the clip's size for every frame of its range. `render::slate::SlateCache` lays out and renders each slate once per size and label (`slate_label`, i18n `media.offline.*`) and every frame imports the cached texture, so nothing is laid out or drawn per frame. Relinking points the reference at a new path and a new check brings it back.
+
 Scrub mode shows the nearest cached frame immediately, then the exact frame once the pointer has paused for 40 ms. Diffing two roots is cheap because unchanged subtrees are shared: pointer-equal nodes are skipped, so an edit costs work proportional to what changed.
 
 ### Export

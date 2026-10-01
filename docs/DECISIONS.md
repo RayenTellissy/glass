@@ -199,7 +199,6 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Details:** `render::crop` (CPU reference), `nodes::Layer::{opacity, crop}`, `crates/render/shaders/composite.wgsl`; `crates/render/tests/crop_opacity.rs`.
 - **Consequences:** A proxy at a lower resolution than the source needs its crop, feather and transform scaled into proxy pixels by the caller (the same mapping as the transform's anchor).
 
-
 ## 25. Text: coverage atlas, vector outline strokes, graph shadow
 
 - **Date:** 2026-09-30
@@ -227,3 +226,11 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** `scripts/cargo-serial` records the top-level path of the checkout that last ran a cargo command in `<git common dir>/glass-cargo-last-checkout`. When a command comes from a different checkout (or the record is missing), after taking the lock and before running cargo it deletes the fingerprint directories of every workspace package (`cargo metadata --no-deps`) under every profile in the target directory (`CARGO_TARGET_DIR`, else `<main checkout>/target`), prints one line, and records the new path. Dependencies' fingerprints stay.
 - **Reason:** Every worktree shares the main checkout's target directory (Decision 16), and cargo hashes a workspace member's path relative to the workspace root, so the same crate in two worktrees gets the same `.fingerprint/<pkg>-<hash>` directory and the same `deps/lib<pkg>-<hash>.rlib`. After worktree B builds a crate, worktree A's next build compares A's older source mtimes with B's newer outputs and treats them as fresh, so A compiles and tests against B's code: false "unresolved import" errors, or tests silently running another branch's build. Decision 16 wrongly said workspace crates get separate artifacts per worktree.
 - **Consequences:** The first command after switching checkouts recompiles the workspace crates it needs (dependencies and `ffmpeg-sys` are not rebuilt). Only commands run through `cargo-serial` are protected: a plain `cargo` build in a worktree, or a worktree whose branch still has the old script, neither records its checkout nor clears the fingerprints, so every worktree should merge the phase branch to pick up the new script.
+
+## 29. Offline media is runtime state, shown as a cached slate
+
+- **Date:** 2026-09-30
+- **Decision:** Whether a source file is available is checked by the engine (`engine::media_mgmt::offline`: missing, unreadable, or content hash changed) and kept in a map beside the project, never in the document. An offline clip renders `render::slate`: the viewer's offline state from the error and warning states sheet, drawn at the clip's size with sizes scaled from the 640 x 360 design frame, colours from the dark theme's roles (whatever the UI theme, since the slate is picture content that exports carry), without the design's Relink button (the preview draws controls over the picture). Each slate is rendered once per size and label and cached; frames import the cached texture.
+- **Reason:** Keeping availability out of the tree means loading, editing, undo and saving never depend on the disk, and a relink or a remounted drive changes nothing in the document. One cached texture per size and label costs one layout and a few passes per offline file, then only an import per frame.
+- **Details:** `engine::media_mgmt::offline`, `render::slate` (CPU reference `slate::reference`), `crates/render/shaders/slate.wgsl`; `crates/engine/tests/offline_media.rs`, `crates/render/tests/slate.rs`.
+- **Consequences:** The design's glow blur (18 px) and backdrop blur are approximated analytically (the glows are already soft; the card's backdrop is the dot screen at its average cover). The file size is not stored on `MediaRef`, so the only content check is the hash (at most 2.5 MiB read per file). The slate uses Geist and Geist Mono when installed and falls back to system faces until they are bundled.
