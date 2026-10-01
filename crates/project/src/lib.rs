@@ -12,6 +12,7 @@ pub mod id;
 pub mod media_pool;
 pub mod model;
 pub mod params;
+pub mod schema;
 pub mod time;
 pub mod validate;
 
@@ -20,5 +21,6 @@ pub use error::EditError;
 pub use history::{EditLabel, History, MemoryStats};
 pub use id::{BinId, ItemId, MediaId, NodeId, SequenceId, TrackId};
 pub use model::{Clip, Item, ItemKind, MediaRef, MediaRefs, Project, Sequence, Track, TrackKind};
+pub use schema::LoadError;
 pub use time::{Rational, Time, TimeError, TimeRange};
 pub use validate::ValidationError;

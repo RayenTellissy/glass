@@ -128,7 +128,9 @@ pub struct MediaRef {
     pub path: String,
 }
 
-/// The project's source references by id. Serialised as a list ordered by id.
+/// The project's source references by id. Serialised as `{"refs": [...]}` with the list
+/// ordered by id (schema v2); the object leaves room for the media pool's bins and
+/// metadata next to the references.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MediaRefs(pub(crate) OrdMap<MediaId, Arc<MediaRef>>);
 
@@ -155,15 +157,29 @@ impl MediaRefs {
     }
 }
 
+/// The serde form of [`MediaRefs`].
+#[derive(Serialize)]
+struct MediaRefsOut<'a> {
+    refs: Vec<&'a Arc<MediaRef>>,
+}
+
+#[derive(Deserialize)]
+struct MediaRefsIn {
+    refs: Vec<Arc<MediaRef>>,
+}
+
 impl Serialize for MediaRefs {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(self.0.values())
+        MediaRefsOut {
+            refs: self.0.values().collect(),
+        }
+        .serialize(serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for MediaRefs {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let list = Vec::<Arc<MediaRef>>::deserialize(deserializer)?;
+        let list = MediaRefsIn::deserialize(deserializer)?.refs;
         Ok(MediaRefs(list.into_iter().map(|m| (m.id, m)).collect()))
     }
 }
