@@ -78,6 +78,8 @@ objc2-io-surface = { version = "0.3", default-features = false, features = ["std
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGGeometry", "CGImage"] }
 objc2-image-io = { version = "0.3", default-features = false, features = ["std", "CGImageSource", "CGImageProperties", "objc2-core-graphics"] }
 objc2-metal = { version = "0.3", default-features = false, features = ["std", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "MTLTypes", "objc2-io-surface"] }
+# Physical memory size for the rendered-frame cache's default RAM ceiling (`render::interop`).
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSProcessInfo"] }
 
 # UI: egui on wgpu, the versions proto-ui measured. `default_fonts` stays off because
 # it bundles the Ubuntu font, which deny.toml rejects; Glass ships Geist and Geist Mono

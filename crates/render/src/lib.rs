@@ -20,12 +20,16 @@
 //! rasterised as exact coverage by [`shape::ShapeNode`] into a layer, or by
 //! [`shape::CoverageNode`] for masks.
 //!
+//! Rendered preview frames are kept by [`frame_cache::FrameCache`]: an LRU of textures in
+//! VRAM that spills to RAM through the async readback ring.
+//!
 //! A clip whose source is offline shows a [`slate`]: rendered once per size and label,
 //! cached, and imported into each frame's graph like a decoded frame.
 
 pub mod blend;
 pub mod colour;
 pub mod crop;
+pub mod frame_cache;
 pub mod graph;
 #[allow(unsafe_code)]
 pub mod interop;
