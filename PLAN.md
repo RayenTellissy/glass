@@ -176,6 +176,10 @@ Done when: the stress project (Phase 16) plays at full rate on both platforms, s
 - [ ] Thread layout implemented: UI, scheduler, decode pool, render, audio callback, analysis pool, all named, all visible in the debug panel
 - [ ] Lock-free frame queues between decode, render, and present (`crossbeam` or `rtrb`)
 - [~] Master clock from the audio device callback, video slaved to it, drift correction
+  - [x] Audio output through `cpal` with an `rtrb` feed ring and an offline backend for tests and export; the callback allocates and locks nothing (counting-allocator test)
+  - [x] Master clock: callback frame counter plus output latency, drift-corrected by a delay-locked loop, with a monotonic stand-in when no device is open
+  - [x] Video slaved to the clock: one frame per display refresh with hysteresis, drift corrected by a single repeated or skipped frame
+  - [ ] Listening check on real hardware: run `GLASS_AUDIO_DEVICE_TEST=1 cargo test -p audio --test device` on built-in speakers, USB and Bluetooth outputs, and confirm lip sync by eye and ear once the engine plays through the clock (needs-human: judging audible sync and other output devices needs a person at the machine)
 - [ ] Look-ahead decode across cuts and transitions, configurable depth
 - [ ] Rendered-frame cache keyed by (segment hash, frame index), LRU in VRAM with RAM spill and a configurable ceiling
 - [ ] Dirty-range invalidation: any edit invalidates only affected segments, verified by a test that counts re-renders
@@ -500,6 +504,7 @@ Append one line per decision: date, decision, reason. Add the same entry to `doc
 - 2026-09-30 — Layer transforms, opacity and crop are sampled inside the composite pass (inverse matrix per canvas pixel, bicubic by default, nearest when the transform maps pixel centres onto texel centres, one shader entry point per filter, and a per-pass cap so playback can sample transformed layers bilinear while paused frames and export use bicubic); no standalone transform node; the per-layer transform holds shutter samples for motion blur, of which the middle one is rendered until Phase 13. Reason: five 4K layers already use about 5.5 ms of the 8 ms budget, bandwidth-bound, and a separate transform pass would add a full-frame intermediate per layer; exact bicubic costs about twice bilinear there.
 - 2026-09-30 — A layer's crop is four per-edge amounts in layer pixels applied before the transform, with a feather that ramps each crop edge inward by a smoothstep (the layer's own edges when uncropped); opacity scales the premultiplied layer before the blend. Reason: the cut stays attached to the picture as it moves, an inward feather never reveals cropped pixels, and premultiplied scaling fades every blend mode towards the backdrop.
 - 2026-09-30 — The output node encodes SDR video with the inverse BT.1886 EOTF (sRGB for the preview and stills, PQ absolute, HLG through the inverse 1000-nit OOTF), writes straight alpha by default, and dithers 8, 10 and 16-bit targets with one code of triangular noise seeded per frame. Reason: players decode BT.709 video with BT.1886, so display light round-trips with the display-referred working space; TPDF dither removes banding without bias.
+- 2026-09-30 — The master clock is the audio callback's frame counter mapped to monotonic time by a delay-locked loop (1.5 Hz narrowing to 0.1 Hz) whose published line steers by slope, at most 0.5%, so it never jumps; audio I/O uses `cpal` 0.18 and an `rtrb` 0.4 feed ring. Reason: device crystals drift by hundreds of ppm and callback timing jitters by up to 1 ms; a DLL filters both for a few multiplications per callback, and `cargo deny check` passes with both crates.
 
 ## Progress Log
 
