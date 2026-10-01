@@ -167,7 +167,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [x] Media pool with bins, colour labels, tags, and a search index
   - [x] Pool model and search index: `project::media_pool::MediaPool` (imbl, nested bins, colour labels, tags, items keyed by `MediaId`) and `SearchIndex` (name, tags, labels, metadata; prefix and typo matches), tests and a 10,000-item search bench
   - [x] Media pool panel `ui::panels::media_pool`: list and grid views, bins tree, labels, tags, search, metadata columns, proxy, offline and analysis badges; snapshot cases and a frame-budget test
-- [ ] Relinking: fuzzy match by name, duration, and content hash, batch relink dialog
+- [~] Relinking: fuzzy match by name, duration, and content hash, batch relink dialog
 - [x] Offline media placeholder that keeps edits intact and renders a labelled slate
 - [x] Metadata panel: camera, lens, timecode, GPS, created date
 
