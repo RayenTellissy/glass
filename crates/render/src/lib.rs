@@ -17,6 +17,9 @@
 //! are stacked by [`nodes::CompositeNode`] with the [`blend::BlendMode`]s, whose CPU
 //! reference lives in [`blend`]; each layer is sampled through its [`transform`], cut by its
 //! [`crop`] and scaled by its opacity inside the same pass.
+//!
+//! Looks come from [`lut`] files (`.cube`), uploaded once as a [`nodes::GpuLut`] and
+//! applied by [`nodes::LutNode`] in the LUT's declared input space with an intensity mix.
 
 pub mod blend;
 pub mod colour;
@@ -24,6 +27,7 @@ pub mod crop;
 pub mod graph;
 #[allow(unsafe_code)]
 pub mod interop;
+pub mod lut;
 pub mod nodes;
 pub mod profiler;
 pub mod readback;

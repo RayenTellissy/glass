@@ -1,6 +1,6 @@
 //! The compositor's shared GPU state: device and queue handles, the effect pipelines
-//! (built lazily per shader, entry point, target format and input count, and rebuilt when
-//! a debug build reloads their shader), samplers and the Y'CbCr converter. One per device, owned by the render thread; nodes reach it
+//! (built lazily per shader, entry point, target format and input count and dimensions,
+//! and rebuilt when a debug build reloads their shader), samplers and the Y'CbCr converter. One per device, owned by the render thread; nodes reach it
 //! through [`crate::graph::NodeContext`].
 
 use std::collections::HashMap;
@@ -18,6 +18,8 @@ pub struct EffectKey {
     pub entry: &'static str,
     pub format: wgpu::TextureFormat,
     pub inputs: u8,
+    /// Bit `i` set when input `i` is a 3D texture (a LUT); the others are 2D.
+    pub volumes: u8,
 }
 
 /// Which sampler binding 1 holds.
@@ -29,7 +31,8 @@ pub enum Filter {
 }
 
 /// One full-screen effect draw: `common.wgsl` + `shader`, entry point `entry`, a uniform
-/// at binding 0, a sampler at binding 1 and `inputs` at bindings 2 and up.
+/// at binding 0, a sampler at binding 1 and `inputs` at bindings 2 and up (each bound as
+/// `texture_2d` or, for 3D textures, `texture_3d`).
 pub struct Effect<'a> {
     pub label: &'a str,
     pub shader: &'static str,
@@ -42,7 +45,7 @@ pub struct Effect<'a> {
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    layouts: Mutex<HashMap<u8, wgpu::BindGroupLayout>>,
+    layouts: Mutex<HashMap<(u8, u8), wgpu::BindGroupLayout>>,
     pipelines: Mutex<HashMap<EffectKey, wgpu::RenderPipeline>>,
     shaders: ShaderLibrary,
     linear: wgpu::Sampler,
@@ -144,10 +147,10 @@ impl Renderer {
         changed
     }
 
-    fn layout(&self, inputs: u8) -> wgpu::BindGroupLayout {
+    fn layout(&self, inputs: u8, volumes: u8) -> wgpu::BindGroupLayout {
         let mut layouts = self.layouts.lock().unwrap_or_else(|e| e.into_inner());
         layouts
-            .entry(inputs)
+            .entry((inputs, volumes))
             .or_insert_with(|| {
                 let mut entries = vec![
                     wgpu::BindGroupLayoutEntry {
@@ -172,7 +175,11 @@ impl Renderer {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: if u32::from(volumes) & (1 << i) != 0 {
+                            wgpu::TextureViewDimension::D3
+                        } else {
+                            wgpu::TextureViewDimension::D2
+                        },
                         multisampled: false,
                     },
                     count: None,
@@ -196,7 +203,7 @@ impl Renderer {
         {
             return p.clone();
         }
-        let layout = self.layout(key.inputs);
+        let layout = self.layout(key.inputs, key.volumes);
         let pipeline = self.build(key, &layout);
         self.pipelines
             .lock()
@@ -254,11 +261,19 @@ impl Renderer {
     ) {
         let format = target.texture().format();
         let inputs = u8::try_from(effect.inputs.len()).unwrap_or(u8::MAX);
+        let volumes = effect
+            .inputs
+            .iter()
+            .take(8)
+            .enumerate()
+            .filter(|(_, v)| v.texture().dimension() == wgpu::TextureDimension::D3)
+            .fold(0u8, |mask, (i, _)| mask | 1 << i);
         let pipeline = self.pipeline(EffectKey {
             shader: effect.shader,
             entry: effect.entry,
             format,
             inputs,
+            volumes,
         });
         let mut contents = effect.uniform.to_vec();
         contents.resize(contents.len().next_multiple_of(16).max(16), 0);
@@ -291,7 +306,7 @@ impl Renderer {
         }));
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(effect.label),
-            layout: &self.layout(inputs),
+            layout: &self.layout(inputs, volumes),
             entries: &entries,
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
