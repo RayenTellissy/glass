@@ -34,6 +34,7 @@ pub enum EditLabel {
     AddMarker,
     Transition,
     Recover,
+    Relink,
 }
 
 impl EditLabel {
@@ -52,6 +53,7 @@ impl EditLabel {
             EditLabel::AddMarker => "edit.label.add_marker",
             EditLabel::Transition => "edit.label.transition",
             EditLabel::Recover => "edit.label.recover",
+            EditLabel::Relink => "edit.label.relink",
         }
     }
 }
