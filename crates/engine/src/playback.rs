@@ -41,6 +41,12 @@
 //! as blocked. The one timed wait is render's: the presenter never wakes render (render
 //! must not wait on the UI), so while the present queue is full render offers its frame
 //! again every [`PRESENT_RETRY`].
+//!
+//! **Seams.** The master clock (in `audio`) replaces "as fast as back-pressure allows" in
+//! the scheduler, and its device callback is wrapped in the registry's
+//! [`AudioCallbackHook`](crate::threads::AudioCallbackHook), handed to `audio` as a
+//! closure. The rendered-frame cache (in `render`) sits behind a [`Render`]
+//! implementation, with its index on the scheduler.
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvError, Sender, TryRecvError};
