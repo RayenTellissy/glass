@@ -2,3 +2,4 @@
 //! chose, so they can be shown by the app shell and tested headless.
 
 pub mod recovery;
+pub mod shortcuts;
