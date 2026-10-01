@@ -5,7 +5,7 @@
 //! - `snapshot-<g>.json`: the whole project at the start of generation `g`, written to a
 //!   `.partial` name, flushed to disk and renamed, so a snapshot is either complete or
 //!   absent.
-//! - `log-<g>.jsonl`: a header line (`{"autosave_format":2,"generation":g}`), then one
+//! - `log-<g>.jsonl`: a header line (`{"autosave_format":3,"generation":g}`), then one
 //!   [`Record`] per line, each a [`Diff`] from the previous state, appended and flushed to
 //!   disk (`sync_data`) before the next. A crash can only tear the last line; recovery
 //!   ignores a torn or unreadable tail and reports it.
@@ -17,7 +17,11 @@
 //! Every file carries [`FORMAT_VERSION`], the version of this folder layout and record
 //! format. It is separate from the project schema version: the snapshot embeds the
 //! project in whatever schema the build writes, and an autosave of another format version
-//! is not read (autosaves are never migrated; the saved project file is).
+//! is not read (autosaves are never migrated; the saved project file is). Recovery reads a
+//! snapshot's format version before the rest, so an older autosave is refused as
+//! [`AutosaveError::Format`] rather than as damaged JSON. Version 2 began with project
+//! schema v2 (`media` as `{"refs": [...]}`), whose snapshots version 1 builds cannot read
+//! and the other way round; version 3 began with schema v3.
 //!
 //! A new generation starts every [`SNAPSHOT_EVERY`] records and whenever the project is
 //! saved; the previous generation is kept as a fallback, older ones are deleted.
@@ -42,8 +46,10 @@ pub const INTERVAL_MS: u64 = 10_000;
 /// Records per generation before a new snapshot (five minutes of ticks with changes).
 pub const SNAPSHOT_EVERY: u64 = 30;
 /// Version of the autosave folder layout and record format (not the project schema).
-/// 2: sequence markers are records of their own (`diff::Node::Marker`).
-pub const FORMAT_VERSION: u32 = 2;
+/// Bumped whenever the snapshot's embedded project serialises differently. 3: project
+/// schema v3 (markers, subtitle and adjustment tracks), with sequence markers as records
+/// of their own (`diff::Node::Marker`).
+pub const FORMAT_VERSION: u32 = 3;
 
 /// How long the autosave of a session that did not quit normally is kept (the recovery
 /// dialog promises seven days).
@@ -86,6 +92,13 @@ struct Snapshot {
     /// Edits since the last save at the time of the snapshot.
     edits: u64,
     project: Project,
+}
+
+/// The version field every autosave file starts with, read on its own so a file of
+/// another version is refused before its body is parsed.
+#[derive(Debug, Deserialize)]
+struct FormatVersion {
+    autosave_format: u32,
 }
 
 /// The first line of a log.
@@ -492,11 +505,12 @@ fn recover_generation(
     dir: &Path,
     generation: u64,
 ) -> Result<(Project, RecoveryInfo, usize), AutosaveError> {
-    let snapshot: Snapshot =
-        serde_json::from_slice(&fs::read(dir.join(snapshot_name(generation)))?)?;
-    if snapshot.autosave_format != FORMAT_VERSION {
-        return Err(AutosaveError::Format(snapshot.autosave_format));
+    let bytes = fs::read(dir.join(snapshot_name(generation)))?;
+    let version = serde_json::from_slice::<FormatVersion>(&bytes)?.autosave_format;
+    if version != FORMAT_VERSION {
+        return Err(AutosaveError::Format(version));
     }
+    let snapshot: Snapshot = serde_json::from_slice(&bytes)?;
     snapshot.project.validate()?;
     let mut flat = flatten(&snapshot.project);
     let mut project = snapshot.project;

@@ -1,0 +1,3 @@
+# Written by visual_regression when a frame differs from its golden.
+*.actual.png
+*.diff.png

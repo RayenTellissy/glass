@@ -50,7 +50,7 @@ pub enum Node {
         track: TrackId,
         item: Arc<Item>,
     },
-    /// A marker on a sequence's ruler (schema v3; autosave format 2).
+    /// A marker on a sequence's ruler (schema v3; autosave format 3).
     Marker {
         sequence: SequenceId,
         marker: Arc<Marker>,

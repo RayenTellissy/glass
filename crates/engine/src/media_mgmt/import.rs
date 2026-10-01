@@ -212,9 +212,8 @@ impl Importer {
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, events) = mpsc::channel();
         let flag = cancel.clone();
-        let thread = std::thread::Builder::new()
-            .name("glass-import".into())
-            .spawn(move || work(&tx, &flag))?;
+        let thread =
+            crate::threads::spawn(crate::threads::Role::Import, None, move || work(&tx, &flag))?;
         Ok(Self {
             cancel,
             events,

@@ -798,13 +798,55 @@ pub mod builtin {
     }
 }
 
+/// The schemas of effects a clip's effect stack can hold.
+pub mod effects {
+    use super::*;
+
+    /// LUT input space option ids in menu order; `render::lut::LutSpace` reads these ids.
+    pub const LUT_INPUT_SPACES: [&str; 3] = ["rec709", "srgb", "linear"];
+
+    /// A `.cube` LUT: its file, the colour space it expects (display-referred Rec.709
+    /// for most creative LUTs) and how strongly it applies. The file is a path in a text
+    /// row until the inspector has a file-pick row.
+    pub fn lut() -> ParamSchema {
+        let options: Vec<(&str, String)> = LUT_INPUT_SPACES
+            .iter()
+            .map(|id| (*id, format!("inspector.lut.input.{id}")))
+            .collect();
+        let options: Vec<(&str, &str)> = options.iter().map(|(id, l)| (*id, l.as_str())).collect();
+        ParamSchema::new(
+            "lut",
+            "inspector.lut",
+            vec![
+                ParamDef::boolean("enabled", "inspector.lut.enabled", true),
+                ParamDef::text("file", "inspector.lut.file", "", false),
+                ParamDef::choice("input", "inspector.lut.input", &options),
+                ParamDef::float(
+                    "intensity",
+                    "inspector.lut.intensity",
+                    1.0,
+                    Range::new(0.0, 1.0),
+                )
+                .unit(Unit::Percent)
+                .decimals(0)
+                .slider(),
+            ],
+        )
+        .header_switch("enabled")
+    }
+
+    pub fn all() -> Vec<ParamSchema> {
+        vec![lut()]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn builtin_schemas_are_valid() {
-        for schema in builtin::all() {
+        for schema in builtin::all().into_iter().chain(effects::all()) {
             schema
                 .validate()
                 .unwrap_or_else(|e| panic!("{}: {e}", schema.id));
@@ -998,6 +1040,26 @@ mod tests {
         let text = ParamDef::text("t", "t", "", false);
         assert!(!text.keyframeable);
         assert!(text.keyframeable(true).keyframeable);
+    }
+
+    #[test]
+    fn lut_effect_defaults_and_limits() {
+        let lut = effects::lut();
+        let mut values = lut.defaults();
+        assert_eq!(values.text(&lut, "file").as_deref(), Some(""));
+        assert_eq!(values.choice(&lut, "input").as_deref(), Some("rec709"));
+        assert_eq!(values.float(&lut, "intensity"), Some(1.0));
+        assert_eq!(
+            values.set(&lut, "intensity", ParamValue::Float(1.4)),
+            Some(ParamValue::Float(1.0))
+        );
+        assert_eq!(
+            values.set(&lut, "input", ParamValue::Choice("acescct".into())),
+            Some(ParamValue::Choice("rec709".into()))
+        );
+        assert!(lut.get("intensity").expect("intensity").keyframeable);
+        assert!(!lut.get("file").expect("file").keyframeable);
+        assert_eq!(lut.header_switch.as_deref(), Some("enabled"));
     }
 
     #[test]
