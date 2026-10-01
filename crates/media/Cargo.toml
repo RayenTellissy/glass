@@ -20,10 +20,12 @@ bench = false
 assets.workspace = true
 audioadapter-buffers.workspace = true
 blake3.workspace = true
+ebur128.workspace = true
 ffmpeg-next.workspace = true
 gif.workspace = true
 image.workspace = true
 image-webp.workspace = true
+realfft.workspace = true
 rubato.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -76,6 +78,14 @@ harness = false
 
 [[bench]]
 name = "silence"
+harness = false
+
+[[bench]]
+name = "loudness"
+harness = false
+
+[[bench]]
+name = "beats"
 harness = false
 
 [lints]

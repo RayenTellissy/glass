@@ -133,7 +133,7 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Date:** 2026-09-29
 - **Decision:** Independent tasks now run in parallel in separate git worktrees, including tasks from the next phases whose inputs are already built. Cargo commands are serialised by `scripts/cargo-serial` and every worktree shares the main checkout's target directory. The hard limits stay: at most 10 agents, one cargo command at a time, 4 compiler jobs, serial benchmarks.
 - **Reason:** The user asked for faster progress, and most agent time is spent outside the compiler (reading, writing, reviewing), so only the compiler needs to wait its turn.
-- **Details:** `scripts/cargo-serial` holds an exclusive `flock` on `<git common dir>/glass-cargo.lock` for the whole cargo command, test runs included. `scripts/dev-env.sh` points `CARGO_TARGET_DIR` at `<main checkout>/target` and `FFMPEG_DIR` at `<main checkout>/.glass-cache/ffmpeg/<host>`, so crates.io dependencies and `ffmpeg-sys` build once for all worktrees; workspace crates get separate artifacts per worktree because their paths differ. `scripts/worktree-setup.sh` prepares a new worktree. `PLAN.md` and `docs/DECISIONS.md` use git's union merge driver (`.gitattributes`) so branches that each append log lines merge without conflicts.
+- **Details:** `scripts/cargo-serial` holds an exclusive `flock` on `<git common dir>/glass-cargo.lock` for the whole cargo command, test runs included. `scripts/dev-env.sh` points `CARGO_TARGET_DIR` at `<main checkout>/target` and `FFMPEG_DIR` at `<main checkout>/.glass-cache/ffmpeg/<host>`, so crates.io dependencies and `ffmpeg-sys` build once for all worktrees. (Corrected by Decision 28: workspace crates do not get separate artifacts per worktree, because cargo hashes their path relative to the workspace root.) `scripts/worktree-setup.sh` prepares a new worktree. `PLAN.md` and `docs/DECISIONS.md` use git's union merge driver (`.gitattributes`) so branches that each append log lines merge without conflicts.
 - **Consequences:** Replaces the earlier rule that only `(parallel)` tasks run beside the current phase task. With union merges, a line changed differently on two branches (the same checkbox marked `[~]` on one and `[x]` on the other) ends up in the file twice, so check `PLAN.md` after each merge. Killing `cargo-serial` with `SIGKILL` releases the lock while its cargo child may still run; stop it with Ctrl-C or `SIGTERM` instead.
 
 
@@ -199,13 +199,13 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Details:** `render::crop` (CPU reference), `nodes::Layer::{opacity, crop}`, `crates/render/shaders/composite.wgsl`; `crates/render/tests/crop_opacity.rs`.
 - **Consequences:** A proxy at a lower resolution than the source needs its crop, feather and transform scaled into proxy pixels by the caller (the same mapping as the transform's anchor).
 
-
 ## 25. Text: coverage atlas, vector outline strokes, graph shadow
 
 - **Date:** 2026-09-30
 - **Decision:** `render::text` rasterises glyphs to 8-bit coverage in one `R8Unorm` atlas (shelf packed, doubling up to 4096, then evicting glyphs unused this frame and repacking on the GPU). Outlines are round-join strokes rasterised by swash at twice the outline width, cached per glyph and width in the same atlas, instead of a signed distance field. The drop shadow is a separable Gaussian of the fill-and-outline union, as render-graph passes. cosmic-text 0.19 is built without its `fontconfig` feature.
 - **Reason:** Coverage matches the CPU rasteriser exactly (GPU vs CPU max difference 0.0005), strokes stay crisp at any width without an SDF's range limit, and fontdb scans the standard font folders without fontconfig.
 - **Consequences:** Each outline width is a separate atlas entry, so animating the outline width re-rasterises per step (quantised to 1/16 px). Per-glyph scale above 1 samples the atlas bilinearly; the text animator should lay out at the final size for large zooms. Colour glyphs (emoji) keep only their alpha and take the fill colour.
+
 ## 26. Media pool items are keyed by `MediaId`; colour labels use the clip palette
 
 - **Date:** 2026-09-30
@@ -213,7 +213,36 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Reason:** `project` already exports an `ItemId` for timeline items, and a clip's media reference and its pool entry are the same thing, so one id avoids a mapping table. The colour label menu on the `Sheet / Media pool` board uses exactly these clip colours, and the theme has no separate label roles.
 - **Consequences:** Embedding the pool into `Project.media` later only swaps the id source. The search index is a derived cache and is never saved.
 
-## 28. Rendered-frame cache: one LRU across VRAM and RAM, ceilings from the machine
+## 27. Frame queues: rtrb for one producer, crossbeam's ArrayQueue for the decode pool
+
+- **Date:** 2026-09-30
+- **Decision:** `engine::frame_queue` uses `rtrb` 0.4 for single-producer queues (render → present, one decoder → render) and `crossbeam-queue`'s bounded `ArrayQueue` for the multi-producer decode → render queue, with `crossbeam-utils`' `Parker` for waiting. Stale frames are flushed through a shared generation counter carried in every frame's stamp rather than by draining the queue under a lock.
+- **Reason:** Both are lock-free, bounded and allocation-free per operation, and both pass `cargo deny check` (MIT or Apache-2.0, no new transitive crates; `crossbeam-utils` was already in the tree). `rtrb` is the fastest SPSC ring and can peek, which the present policy needs; it cannot take several producers, so the decode pool uses `ArrayQueue`. `std::sync::mpsc::sync_channel` (crossbeam's channel in std) was not used because a sender blocked on a full channel cannot be woken by a seek, and blocking decoders must return at once when the generation moves on.
+- **Consequences:** Order is kept per producer only on the decode queue; render matches frames to requests by stamp. Push and pop fence once (`SeqCst`) to pair with the waiting flags.
+
+## 28. `cargo-serial` forgets workspace fingerprints when the checkout changes
+
+- **Date:** 2026-09-30
+- **Decision:** `scripts/cargo-serial` records the top-level path of the checkout that last ran a cargo command in `<git common dir>/glass-cargo-last-checkout`. When a command comes from a different checkout (or the record is missing), after taking the lock and before running cargo it deletes the fingerprint directories of every workspace package (`cargo metadata --no-deps`) under every profile in the target directory (`CARGO_TARGET_DIR`, else `<main checkout>/target`), prints one line, and records the new path. Dependencies' fingerprints stay.
+- **Reason:** Every worktree shares the main checkout's target directory (Decision 16), and cargo hashes a workspace member's path relative to the workspace root, so the same crate in two worktrees gets the same `.fingerprint/<pkg>-<hash>` directory and the same `deps/lib<pkg>-<hash>.rlib`. After worktree B builds a crate, worktree A's next build compares A's older source mtimes with B's newer outputs and treats them as fresh, so A compiles and tests against B's code: false "unresolved import" errors, or tests silently running another branch's build. Decision 16 wrongly said workspace crates get separate artifacts per worktree.
+- **Consequences:** The first command after switching checkouts recompiles the workspace crates it needs (dependencies and `ffmpeg-sys` are not rebuilt). Only commands run through `cargo-serial` are protected: a plain `cargo` build in a worktree, or a worktree whose branch still has the old script, neither records its checkout nor clears the fingerprints, so every worktree should merge the phase branch to pick up the new script.
+
+## 29. Offline media is runtime state, shown as a cached slate
+
+- **Date:** 2026-09-30
+- **Decision:** Whether a source file is available is checked by the engine (`engine::media_mgmt::offline`: missing, unreadable, or content hash changed) and kept in a map beside the project, never in the document. An offline clip renders `render::slate`: the viewer's offline state from the error and warning states sheet, drawn at the clip's size with sizes scaled from the 640 x 360 design frame, colours from the dark theme's roles (whatever the UI theme, since the slate is picture content that exports carry), without the design's Relink button (the preview draws controls over the picture). Each slate is rendered once per size and label and cached; frames import the cached texture.
+- **Reason:** Keeping availability out of the tree means loading, editing, undo and saving never depend on the disk, and a relink or a remounted drive changes nothing in the document. One cached texture per size and label costs one layout and a few passes per offline file, then only an import per frame.
+- **Details:** `engine::media_mgmt::offline`, `render::slate` (CPU reference `slate::reference`), `crates/render/shaders/slate.wgsl`; `crates/engine/tests/offline_media.rs`, `crates/render/tests/slate.rs`.
+- **Consequences:** The design's glow blur (18 px) and backdrop blur are approximated analytically (the glows are already soft; the card's backdrop is the dot screen at its average cover). The file size is not stored on `MediaRef`, so the only content check is the hash (at most 2.5 MiB read per file). The slate uses Geist and Geist Mono when installed and falls back to system faces until they are bundled.
+
+## 30. Loudness through the `ebur128` crate
+
+- **Date:** 2026-09-30
+- **Decision:** `media::analysis::loudness` measures with the `ebur128` crate (a Rust port of libebur128, MIT) instead of an in-house BS.1770-4 meter. Fixture references come from FFmpeg's `ebur128` filter and are matched within 0.1 LU integrated, 0.3 dB true peak and 0.5 LU loudness range.
+- **Reason:** A maintained, reference-tested implementation of the standard; `cargo deny check` passes (it adds `bitflags` 1 beside 2, a duplicate warning only).
+- **Consequences:** Loudness range differs from FFmpeg's by 0.3 to 0.4 LU on the stepped program fixtures (FFmpeg bins short-term values into a histogram); libebur128's values pass EBU Tech 3342, so the fixture tolerance is 0.5 LU rather than 0.1.
+
+## 30. Rendered-frame cache: one LRU across VRAM and RAM, ceilings from the machine
 
 - **Date:** 2026-10-01
 - **Decision:** `render::frame_cache::FrameCache` keys frames by segment hash, frame index and a `RenderVariant` (size, quality step, settings hash), keeps one recency order across both tiers, spills VRAM evictions to RAM through a lossless `ReadbackRing` without waiting, stores them bit-exact by default (`SpillFormat::Srgb8` halves `Rgba16Float` frames as an option), and drops a frame whose spill cannot start. Default ceilings: a sixth of Metal's recommended GPU working set for VRAM, an eighth of physical memory for RAM (a sixteenth on unified memory), 1 GiB when the platform reports nothing. Physical memory comes from `objc2-foundation` (`NSProcessInfo`), already in the dependency tree.

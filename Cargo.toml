@@ -46,6 +46,11 @@ image-webp = "0.2"
 # the FFT resampler's dependencies stay out; audioadapter-buffers wraps planar buffers.
 rubato = { version = "5", default-features = false }
 audioadapter-buffers = { version = "5.1", default-features = false, features = ["std"] }
+# Loudness after BS.1770-4 and EBU R128 (`media::analysis::loudness`): a Rust port of
+# libebur128.
+ebur128 = { version = "0.1", default-features = false }
+# Real FFTs for onset strength in beat detection (`media::analysis::beats`).
+realfft = "3.5"
 
 # GPU: the wgpu version egui-wgpu 0.36 uses, so `render` shares eframe's device.
 wgpu = "30"
@@ -81,6 +86,12 @@ eframe = { version = "0.36", default-features = false, features = ["accesskit", 
 pollster = "0.4"
 # The system file picker for importing (`ui::panels::file_dialog`), used asynchronously.
 rfd = "0.17"
+# Frame queues between decode, render and present (`engine::frame_queue`): `rtrb` for
+# single-producer rings, crossbeam's bounded array queue for the decode pool, and
+# crossbeam's parker so a waiting side sleeps instead of spinning.
+rtrb = "0.4"
+crossbeam-queue = "0.3"
+crossbeam-utils = "0.8"
 tracing = "0.1"
 # `tracing-log` routes `log` records (wgpu, winit, eframe) into tracing.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "ansi", "env-filter", "tracing-log", "smallvec"] }

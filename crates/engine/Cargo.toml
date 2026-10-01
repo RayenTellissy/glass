@@ -30,6 +30,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+rtrb.workspace = true
+crossbeam-queue.workspace = true
+crossbeam-utils.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
