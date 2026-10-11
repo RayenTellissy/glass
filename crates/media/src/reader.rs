@@ -200,13 +200,14 @@ impl FrameReader {
     /// It starts decoding at the last keyframe presented at or before `target` (from the
     /// GOP index) and discards frames until it reaches the target, so open GOPs and
     /// reordered (B-frame) streams land on the right frame; when the target is ahead in
-    /// the current GOP it decodes forward without seeking. Works on hardware and software
-    /// decoders, after the end of the stream and backwards.
+    /// the current GOP it decodes forward without seeking (a target still inside the frame
+    /// handed out last decodes from the keyframe again: that frame is gone). Works on
+    /// hardware and software decoders, after the end of the stream and backwards.
     pub fn seek_exact(&mut self, target: Timestamp) -> Result<Option<Frame>> {
         let gop = self.gop_index()?;
         let target = target.rescale_floor(self.stream.time_base);
         let mut keyframe = gop.keyframe_at_or_before(target).unwrap_or(0);
-        let continue_forward = !self.finished
+        let mut continue_forward = !self.finished
             && self.last_pts.is_some_and(|last| {
                 last.cmp_time(target) == Ordering::Less
                     && gop.keyframe_at_or_before(last) == Some(keyframe)
@@ -235,6 +236,11 @@ impl FrameReader {
                             self.pending = Some(frame);
                             return Ok(candidate);
                         }
+                        // Decoding on from the frame handed out last: the target is still
+                        // inside that frame, which is gone, so decode the GOP again.
+                        if continue_forward {
+                            break;
+                        }
                         // The first frame is already past the target: either the target is
                         // before the first frame, or decoding started too late.
                         if keyframe == 0 {
@@ -244,7 +250,9 @@ impl FrameReader {
                     }
                 }
             }
-            keyframe -= 1;
+            if !std::mem::take(&mut continue_forward) {
+                keyframe -= 1;
+            }
             self.seek_to_keyframe(&gop, keyframe)?;
         }
     }
