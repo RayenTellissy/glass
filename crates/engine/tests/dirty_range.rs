@@ -11,6 +11,9 @@
 //! frame boundary and keeps the look-ahead lane of an unchanged segment, a second pass
 //! decodes nothing, and a skipped frame the cache let go of is decoded again.
 
+// Dirty frames are lists of ranges, often of one.
+#![allow(clippy::single_range_in_vec_init)]
+
 mod common;
 mod stand_in;
 

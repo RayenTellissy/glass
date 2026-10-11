@@ -415,6 +415,8 @@ fn same_picture_item(a: &project::Item, b: &project::Item) -> bool {
 }
 
 #[cfg(test)]
+// Dirty frames are lists of ranges, often of one.
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
     use project::params::effects;

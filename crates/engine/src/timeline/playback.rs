@@ -859,7 +859,7 @@ impl<R: FrameRender> RenderLoop<R> {
         self.plan = plan;
         self.stats.replans.fetch_add(1, Ordering::Relaxed);
         let stale = match dirty {
-            DirtyFrames::All => vec![i64::MIN..i64::MAX],
+            DirtyFrames::All => std::iter::once(i64::MIN..i64::MAX).collect(),
             DirtyFrames::Ranges(ranges) => ranges.clone(),
         };
         let mut from = self.frames.position();
