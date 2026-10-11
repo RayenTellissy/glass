@@ -103,7 +103,7 @@ fn prores_proxies_of_1080p_and_4k() {
         let settings = ProxySettings::default();
         assert_eq!(settings.format, ProxyFormat::ProResProxy);
         let Some((proxy, out, cache)) = make(file, &settings, file) else {
-            return;
+            continue;
         };
         let source = common::fixture(file).expect("fixture");
         assert_eq!((proxy.width, proxy.height), size, "{file}");
