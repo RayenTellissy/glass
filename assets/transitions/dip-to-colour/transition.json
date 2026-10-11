@@ -1,0 +1,11 @@
+{
+  "id": "dip-to-colour",
+  "name": "transition.name.dip_to_colour",
+  "category": "dissolve",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "colour", "label": "transition.param.colour", "kind": {"colour": {"default": [0.8, 0.05, 0.03, 1.0], "alpha": true}}, "unit": "none", "keyframeable": false},
+    {"id": "midpoint", "label": "transition.param.midpoint", "kind": {"float": {"default": 0.5, "range": {"min": 0.05, "max": 0.95}, "soft": null, "decimals": 2}}, "unit": "percent", "keyframeable": false}
+  ]
+}

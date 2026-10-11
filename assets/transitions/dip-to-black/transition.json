@@ -1,0 +1,10 @@
+{
+  "id": "dip-to-black",
+  "name": "transition.name.dip_to_black",
+  "category": "dissolve",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "midpoint", "label": "transition.param.midpoint", "kind": {"float": {"default": 0.5, "range": {"min": 0.05, "max": 0.95}, "soft": null, "decimals": 2}}, "unit": "percent", "keyframeable": false}
+  ]
+}
