@@ -204,6 +204,42 @@
                   }
                 ],
                 "keyframes": {
+                  "crop.feather": {
+                    "keys": [
+                      {
+                        "time": "13/3",
+                        "value": {
+                          "float": 0.0
+                        },
+                        "interpolation": "linear"
+                      }
+                    ]
+                  },
+                  "opacity": {
+                    "keys": [
+                      {
+                        "time": "4",
+                        "value": {
+                          "float": 0.0
+                        },
+                        "interpolation": "linear"
+                      },
+                      {
+                        "time": "9/2",
+                        "value": {
+                          "float": 1.0
+                        },
+                        "interpolation": "hold"
+                      },
+                      {
+                        "time": "11/2",
+                        "value": {
+                          "float": 0.25
+                        },
+                        "interpolation": "linear"
+                      }
+                    ]
+                  },
                   "position": {
                     "keys": [
                       {
@@ -258,42 +294,6 @@
                         "time": "8",
                         "value": {
                           "angle": 720.0
-                        },
-                        "interpolation": "linear"
-                      }
-                    ]
-                  },
-                  "crop.feather": {
-                    "keys": [
-                      {
-                        "time": "13/3",
-                        "value": {
-                          "float": 0.0
-                        },
-                        "interpolation": "linear"
-                      }
-                    ]
-                  },
-                  "opacity": {
-                    "keys": [
-                      {
-                        "time": "4",
-                        "value": {
-                          "float": 0.0
-                        },
-                        "interpolation": "linear"
-                      },
-                      {
-                        "time": "9/2",
-                        "value": {
-                          "float": 1.0
-                        },
-                        "interpolation": "hold"
-                      },
-                      {
-                        "time": "11/2",
-                        "value": {
-                          "float": 0.25
                         },
                         "interpolation": "linear"
                       }
