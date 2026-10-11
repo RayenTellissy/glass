@@ -220,3 +220,56 @@ fn a_folder_that_cannot_be_written_reports_failure() {
     ));
     std::fs::remove_dir_all(&cache).expect("cleanup");
 }
+
+#[test]
+fn the_first_save_moves_the_autosave_into_the_project_cache_folder() {
+    let root = temp_cache("move");
+    let user_cache = root.join("user-cache");
+    let (p, media, v1) = project(2);
+    // Unsaved: the per-user cache folder.
+    let unsaved = autosave::autosave_location(&p, None, &user_cache);
+    assert_eq!(unsaved, autosave::project_dir(&user_cache, &p));
+    let config = AutosaveConfig {
+        interval: Duration::from_millis(20),
+        ..AutosaveConfig::new(unsaved.clone())
+    };
+    let (handle, events) = Autosave::start(config, p.clone(), 0).expect("start");
+    let (a, _) = p.insert_clip(v1, clip(media, 500, 5)).expect("clip");
+    handle.submit(&a, 1);
+    assert!(matches!(next_event(&events), AutosaveEvent::Written { .. }));
+    assert!(unsaved.join("session.json").exists());
+
+    // Saved as `films/Harbour.glass`: from now on `films/.glass-cache/autosave/<uid>`.
+    let file = root.join("films/Harbour.glass");
+    let saved = autosave::autosave_location(&a, Some(&file), &user_cache);
+    assert_eq!(
+        saved,
+        root.join("films/.glass-cache/autosave").join(a.uid())
+    );
+    handle.saved_as(&a, 1, saved.clone());
+    assert_eq!(next_event(&events), AutosaveEvent::Saved);
+    assert!(!unsaved.exists(), "the per-user autosave is gone");
+    assert!(saved.join("session.json").exists());
+    // Nothing unsaved yet: nothing to recover.
+    assert_eq!(files::find_recovery(&saved).expect("find"), None);
+
+    // Edits after the save are autosaved in the new folder and survive a crash.
+    let (b, _) = a.insert_clip(v1, clip(media, 600, 5)).expect("clip");
+    handle.submit(&b, 2);
+    assert!(matches!(next_event(&events), AutosaveEvent::Written { .. }));
+    // Saving again to the same file keeps the folder.
+    handle.saved_as(&b, 2, saved.clone());
+    assert_eq!(next_event(&events), AutosaveEvent::Saved);
+    let (c, _) = b.insert_clip(v1, clip(media, 700, 5)).expect("clip");
+    handle.submit(&c, 3);
+    assert!(matches!(next_event(&events), AutosaveEvent::Written { .. }));
+    handle.abandon();
+    assert!(files::pending(&user_cache).expect("pending").is_empty());
+    let info = files::find_recovery(&saved)
+        .expect("find")
+        .expect("recoverable");
+    assert_eq!(info.edits_since_save, 1);
+    assert!(info.saved_at_ms.is_some());
+    assert_eq!(files::recover(&saved).expect("recover").project, c);
+    std::fs::remove_dir_all(&root).expect("cleanup");
+}

@@ -13,8 +13,9 @@ use std::path::{Path, PathBuf};
 use project::params::{ParamDef, ParamSchema, ParamValue, Range, effects};
 use project::schema::{self, LoadError, OLDEST_VERSION, SCHEMA_VERSION};
 use project::{
-    Alignment, BlendMode, Clip, ClipSpec, ColourLabel, Crop, MarkerOwner, MarkerSpec, MediaId,
-    Project, Rational, SpeedKeep, Time, TimeRange, TodoState, TrackKind, Transform, TransitionSpec,
+    Alignment, BlendMode, CacheFolder, ChannelLayout, Clip, ClipSpec, ColourLabel, ColourSpace,
+    Crop, MarkerOwner, MarkerSpec, MediaId, Project, ProjectSettings, Rational, Resolution,
+    SequenceFormat, SpeedKeep, Time, TimeRange, TodoState, TrackKind, Transform, TransitionSpec,
 };
 use serde_json::Value;
 
@@ -284,6 +285,53 @@ fn transitions() -> Project {
     p
 }
 
+/// The settings in the `*-settings.json` fixtures: every field away from its default.
+fn custom_settings() -> ProjectSettings {
+    ProjectSettings {
+        sequence: SequenceFormat {
+            resolution: Resolution::UHD,
+            frame_rate: Rational::new(30000, 1001),
+            drop_frame: true,
+            sample_rate: 96_000,
+            channel_layout: ChannelLayout::Surround51,
+        },
+        colour_space: ColourSpace::Rec2020Hlg,
+        cache_folder: CacheFolder::Relative("../caches/settings film".into()),
+    }
+}
+
+/// The project in every `*-settings.json` fixture (from v6): custom project settings, a
+/// sequence in the project's format with a clip, and a square mono sequence at 24 fps.
+fn settings() -> Project {
+    let p = Project::new("fixture-settings", "Settings film");
+    let p = p.set_project_settings(custom_settings()).expect("settings");
+    let (p, media) = p.add_media("0a1b2c", "/footage/street.mov").expect("media");
+    let format = p.settings().sequence;
+    let (p, main) = p.add_sequence_with("Main", format).expect("main");
+    let (p, v1) = p.add_track(main, TrackKind::Video, "V1", None).expect("v1");
+    let ntsc = Rational::new(30000, 1001);
+    let (p, _) = p
+        .insert_clip(
+            v1,
+            ClipSpec {
+                media,
+                range: TimeRange::new(Time::ZERO, Time::from_frames(60, ntsc).expect("frames")),
+                source_start: Time::ZERO,
+            },
+        )
+        .expect("clip");
+    let (p, square) = p
+        .add_sequence("Square", Rational::new(24, 1), 44_100)
+        .expect("square");
+    let square_format = SequenceFormat {
+        resolution: Resolution::SQUARE,
+        channel_layout: ChannelLayout::Mono,
+        ..p.sequence(square).expect("square").format()
+    };
+    p.set_sequence_format(square, square_format)
+        .expect("square format")
+}
+
 /// The project each fixture name was saved from.
 fn builder(name: &str) -> Project {
     match name {
@@ -291,6 +339,7 @@ fn builder(name: &str) -> Project {
         "tracks" => tracks(),
         "props" => props(),
         "transitions" => transitions(),
+        "settings" => settings(),
         other => panic!("no builder for {other} fixtures"),
     }
 }
@@ -347,7 +396,7 @@ fn every_version_has_fixtures_and_their_versions_match_the_names() {
 
 #[test]
 fn the_current_version_fixtures_are_what_save_writes() {
-    for name in ["basic", "tracks", "props", "transitions"] {
+    for name in ["basic", "tracks", "props", "transitions", "settings"] {
         let bytes = schema::save(&builder(name));
         let path = fixtures_dir().join(format!("v{SCHEMA_VERSION}-{name}.json"));
         if std::env::var_os("GLASS_UPDATE_FIXTURES").is_some() {
@@ -475,6 +524,75 @@ fn v4_tracks_gain_empty_transition_lists() {
         );
         assert!(loaded.content_eq(&builder(name)), "{name}");
     }
+}
+
+#[test]
+fn v5_projects_gain_default_settings_and_sequence_formats() {
+    for name in ["basic", "tracks", "props", "transitions"] {
+        let path = fixtures_dir().join(format!("v5-{name}.json"));
+        let v5: Value = serde_json::from_slice(&read(&path)).expect("JSON");
+        assert!(v5["project"].get("settings").is_none());
+        let migrated = schema::migrate(5, v5["project"].clone()).expect("migrates");
+        assert_eq!(
+            migrated["settings"]["cache_folder"],
+            serde_json::json!({ "relative": ".glass-cache" })
+        );
+        let loaded = schema::load(&read(&path)).expect("loads");
+        assert_eq!(*loaded.settings(), ProjectSettings::default(), "{name}");
+        assert_eq!(
+            loaded.next_id(),
+            v5["project"]["next_id"].as_u64().expect("next id")
+        );
+        for (seq, old) in loaded
+            .sequences()
+            .iter()
+            .zip(v5["project"]["sequences"].as_array().expect("sequences"))
+        {
+            assert_eq!(seq.resolution, Resolution::HD, "{name}");
+            assert!(!seq.drop_frame);
+            assert_eq!(seq.channel_layout, ChannelLayout::Stereo);
+            // The rates stay as the v5 file had them.
+            assert_eq!(Value::from(seq.sample_rate), old["sample_rate"], "{name}");
+            assert_eq!(
+                serde_json::to_value(seq.frame_rate).expect("JSON"),
+                old["frame_rate"]
+            );
+        }
+        assert!(loaded.content_eq(&builder(name)), "{name}");
+    }
+}
+
+#[test]
+fn the_settings_fixture_round_trips_every_setting() {
+    let p = settings();
+    let bytes = schema::save(&p);
+    let loaded = schema::load(&bytes).expect("loads");
+    assert!(loaded.content_eq(&p));
+    assert_eq!(schema::save(&loaded), bytes);
+    assert_eq!(*loaded.settings(), custom_settings());
+    let main = &loaded.sequences()[0];
+    assert_eq!(main.format(), custom_settings().sequence);
+    let square = &loaded.sequences()[1];
+    assert_eq!(square.resolution, Resolution::SQUARE);
+    assert_eq!(square.frame_rate, Rational::new(24, 1));
+    assert_eq!(square.sample_rate, 44_100);
+    assert_eq!(square.channel_layout, ChannelLayout::Mono);
+    let json: Value = serde_json::from_slice(&bytes).expect("JSON");
+    let s = &json["project"]["settings"];
+    assert_eq!(s["colour_space"], "rec2020_hlg");
+    assert_eq!(
+        s["cache_folder"],
+        serde_json::json!({ "relative": "../caches/settings film" })
+    );
+    assert_eq!(s["sequence"]["channel_layout"], "surround51");
+    assert_eq!(s["sequence"]["drop_frame"], true);
+    assert_eq!(
+        s["sequence"]["resolution"],
+        serde_json::json!({ "width": 3840, "height": 2160 })
+    );
+    let seq = &json["project"]["sequences"][1];
+    assert_eq!(seq["channel_layout"], "mono");
+    assert_eq!(seq["drop_frame"], false);
 }
 
 #[test]

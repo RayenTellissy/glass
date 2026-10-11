@@ -1,11 +1,13 @@
 //! Autosave: an append-only log of diffs with periodic full snapshots, and recovery.
 //!
-//! One folder per project, `<cache>/autosave/<project uid>/` ([`autosave_dir`]):
+//! One folder per project, `<cache>/autosave/<project uid>/` ([`autosave_dir`]), where
+//! `<cache>` is the project's cache folder once the project has a file, and the per-user
+//! cache folder before that ([`autosave_location`]):
 //!
 //! - `snapshot-<g>.json`: the whole project at the start of generation `g`, written to a
 //!   `.partial` name, flushed to disk and renamed, so a snapshot is either complete or
 //!   absent.
-//! - `log-<g>.jsonl`: a header line (`{"autosave_format":5,"generation":g}`), then one
+//! - `log-<g>.jsonl`: a header line (`{"autosave_format":6,"generation":g}`), then one
 //!   [`Record`] per line, each a [`Diff`] from the previous state, appended and flushed to
 //!   disk (`sync_data`) before the next. A crash can only tear the last line; recovery
 //!   ignores a torn or unreadable tail and reports it.
@@ -22,7 +24,7 @@
 //! [`AutosaveError::Format`] rather than as damaged JSON. Version 2 began with project
 //! schema v2 (`media` as `{"refs": [...]}`), whose snapshots version 1 builds cannot read
 //! and the other way round; version 3 began with schema v3, version 4 with schema v4,
-//! version 5 with schema v5.
+//! version 5 with schema v5, version 6 with schema v6.
 //!
 //! A new generation starts every [`SNAPSHOT_EVERY`] records and whenever the project is
 //! saved; the previous generation is kept as a fallback, older ones are deleted.
@@ -51,8 +53,9 @@ pub const SNAPSHOT_EVERY: u64 = 30;
 /// schema v3 (markers, subtitle and adjustment tracks), with sequence markers as records
 /// of their own (`diff::Node::Marker`). 4: project schema v4 (clip properties, which
 /// travel inside their item's record). 5: project schema v5 (track transitions, as
-/// records of their own, `diff::Node::Transition`).
-pub const FORMAT_VERSION: u32 = 5;
+/// records of their own, `diff::Node::Transition`). 6: project schema v6 (project
+/// settings in the root record, sequence formats in the sequence records).
+pub const FORMAT_VERSION: u32 = 6;
 
 /// How long the autosave of a session that did not quit normally is kept (the recovery
 /// dialog promises seven days).
@@ -69,6 +72,22 @@ pub fn autosave_root(cache: &Path) -> PathBuf {
 /// The autosave folder of a project inside its cache folder.
 pub fn autosave_dir(cache: &Path, project_uid: &str) -> PathBuf {
     autosave_root(cache).join(project_uid)
+}
+
+/// Where `project` autosaves: in its own cache folder
+/// ([`crate::settings::CacheFolder::resolve`]) once it has a file at `project_file`, in
+/// `user_cache` (the per-user cache folder) while it has none. Pure path arithmetic; the
+/// app probes the project cache folder and falls back to `user_cache` when it cannot be
+/// written (`app::locations`).
+pub fn autosave_location(
+    project: &Project,
+    project_file: Option<&Path>,
+    user_cache: &Path,
+) -> PathBuf {
+    let cache = project_file
+        .and_then(|file| project.settings().cache_folder.resolve(Some(file)))
+        .unwrap_or_else(|| user_cache.to_path_buf());
+    autosave_dir(&cache, project.uid())
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -48,12 +48,14 @@ pub enum EditLabel {
     TransitionDuration,
     TransitionAlignment,
     Transition,
+    ProjectSettings,
+    SequenceSettings,
     Recover,
     Relink,
 }
 
 impl EditLabel {
-    pub const ALL: [EditLabel; 28] = [
+    pub const ALL: [EditLabel; 30] = [
         EditLabel::AddMedia,
         EditLabel::AddSequence,
         EditLabel::AddTrack,
@@ -80,6 +82,8 @@ impl EditLabel {
         EditLabel::TransitionDuration,
         EditLabel::TransitionAlignment,
         EditLabel::Transition,
+        EditLabel::ProjectSettings,
+        EditLabel::SequenceSettings,
         EditLabel::Recover,
         EditLabel::Relink,
     ];
@@ -112,6 +116,8 @@ impl EditLabel {
             EditLabel::TransitionDuration => "edit.label.transition_duration",
             EditLabel::TransitionAlignment => "edit.label.transition_alignment",
             EditLabel::Transition => "edit.label.transition",
+            EditLabel::ProjectSettings => "edit.label.project_settings",
+            EditLabel::SequenceSettings => "edit.label.sequence_settings",
             EditLabel::Recover => "edit.label.recover",
             EditLabel::Relink => "edit.label.relink",
         }
