@@ -271,6 +271,8 @@ Readback never stalls the UI: the render thread maps buffers asynchronously and 
 
 The encoder and muxer steps are one `media::export::ExportSession` per export, driven by the `glass-export` thread: each readback frame is pushed as a `Picture` borrowing the mapped rows (`Rgba8Unorm`, `Bgra8Unorm`, `Rgba16Unorm` or `Rgb10a2Unorm`, already encoded by the output node), converted to the encoder's YUV or RGB format inside `media`, and the mixed audio is pushed as planar f32 at the export rate; `finish` drains the encoders and closes the file before verification.
 
+Hardware encode (Decision 49): `VideoSettings::encoder_preference` (`EncoderPreference::{Auto, Hardware, Software}`, default `Auto`) makes the session try the platform's hardware encoders before the software one: `h264_videotoolbox` and `hevc_videotoolbox` on macOS, `*_nvenc`, `*_qsv` and `*_amf` on Windows and Linux, then `libx264` or `libx265`. Hardware encoders are fed NV12 or P010 (HEVC Main 10 from 10-bit settings; hardware H.264 is 8-bit only) and a constant quality mapped from the CRF. One that fails to open is replaced at `create`; one that is on trial (opened, but no packet out yet) keeps the frames it was sent, up to 8, and on an error is replaced by the next encoder with those frames converted and replayed, so nothing of it reaches the file. Until the trial ends the muxer has no streams: audio packets wait in the session and the streams are added and the header written with the first video packet. `ExportSummary::video_encoder` names the encoder that wrote the file and `ExportSummary::fallbacks` the ones given up on, with FFmpeg's reason.
+
 ### Audio
 
 ```mermaid

@@ -1,10 +1,12 @@
-//! Export encode speed at 1080p: `media::export::ExportSession` per codec, fed packed
+//! Export encode speed: `media::export::ExportSession` per codec and encoder, fed packed
 //! 8-bit RGBA pictures (as the render readback ring delivers them) and converted to the
-//! encoder's format inside the session. Each case prints the median of 3 runs as frames
-//! per second, including opening the encoder and draining it at the end (the clips are
-//! short, so x264's and x265's look-ahead flush weighs in a little). Audio cases encode
-//! 10 s of 48 kHz stereo and print times realtime. Codecs this FFmpeg build lacks are
-//! skipped. Run alone with `cargo bench -p media --bench export`.
+//! encoder's format inside the session, at 1080p for every codec and at 4K for H.264
+//! and HEVC (VideoToolbox against x264 and x265). Each case prints the median of 3 runs
+//! as frames per second, including opening the encoder and draining it at the end (the
+//! clips are short, so x264's and x265's look-ahead flush weighs in a little). Audio
+//! cases encode 10 s of 48 kHz stereo and print times realtime. Codecs and encoders this
+//! FFmpeg build or platform lacks are skipped. Run alone with
+//! `cargo bench -p media --bench export`.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -16,19 +18,20 @@ use media::export::{
     VideoCodec, VideoSettings,
 };
 
-const W: u32 = 1920;
-const H: u32 = 1080;
-const DISTINCT: usize = 30;
+/// Distinct pictures per size, cycled through.
+fn distinct(width: u32) -> usize {
+    if width > 1920 { 8 } else { 30 }
+}
 
-fn pictures() -> Vec<Vec<u8>> {
-    (0..DISTINCT)
+fn pictures(w: u32, h: u32) -> Vec<Vec<u8>> {
+    (0..distinct(w))
         .map(|n| {
-            let mut out = Vec::with_capacity((W * H * 4) as usize);
+            let mut out = Vec::with_capacity((w * h * 4) as usize);
             let t = n as f32 / 30.0;
-            for y in 0..H {
-                for x in 0..W {
-                    let u = x as f32 / W as f32;
-                    let v = y as f32 / H as f32;
+            for y in 0..h {
+                for x in 0..w {
+                    let u = x as f32 / w as f32;
+                    let v = y as f32 / h as f32;
                     let d = ((u - 0.3 - 0.4 * t).powi(2) + (v - 0.5).powi(2)).sqrt();
                     let disc = ((0.15 - d) * 60.0).clamp(0.0, 1.0);
                     let r = (0.15 + 0.7 * u) * (1.0 - disc) + disc;
@@ -48,7 +51,8 @@ fn pictures() -> Vec<Vec<u8>> {
 }
 
 fn encode_video(dir: &Path, case: &Case, pictures: &[Vec<u8>]) -> Option<(Duration, String)> {
-    let mut video = VideoSettings::new(case.codec, W, H, Rational::new(30, 1));
+    let (w, h) = case.size;
+    let mut video = VideoSettings::new(case.codec, w, h, Rational::new(30, 1));
     video.encoder = case.encoder.map(str::to_string);
     let settings = ExportSettings::new(case.container).with_video(video);
     let _ = std::fs::remove_dir_all(dir);
@@ -67,7 +71,7 @@ fn encode_video(dir: &Path, case: &Case, pictures: &[Vec<u8>]) -> Option<(Durati
     };
     for n in 0..case.frames {
         let data = &pictures[n % pictures.len()];
-        let picture = Picture::rgba8(W, H, data, W as usize * 4);
+        let picture = Picture::rgba8(w, h, data, w as usize * 4);
         session.push_picture(&picture).expect("picture");
     }
     let encoder = session.video_encoder().unwrap_or("?").to_string();
@@ -77,6 +81,7 @@ fn encode_video(dir: &Path, case: &Case, pictures: &[Vec<u8>]) -> Option<(Durati
 
 struct Case {
     name: &'static str,
+    size: (u32, u32),
     codec: VideoCodec,
     container: Container,
     extension: &'static str,
@@ -84,24 +89,85 @@ struct Case {
     frames: usize,
 }
 
+const HD: (u32, u32) = (1920, 1080);
+const UHD: (u32, u32) = (3840, 2160);
+
+/// `encoder: None` is the codec's default (ProRes: VideoToolbox on macOS).
 const CASES: &[Case] = &[
     Case {
+        size: HD,
         name: "H.264 (CRF 23, medium)",
         codec: VideoCodec::H264,
         container: Container::Mp4,
         extension: "mp4",
-        encoder: None,
+        encoder: Some("libx264"),
         frames: 120,
     },
     Case {
+        size: HD,
         name: "HEVC (CRF 28, medium)",
         codec: VideoCodec::Hevc,
         container: Container::Mp4,
         extension: "mp4",
-        encoder: None,
+        encoder: Some("libx265"),
         frames: 60,
     },
     Case {
+        size: HD,
+        name: "H.264 VideoToolbox",
+        codec: VideoCodec::H264,
+        container: Container::Mp4,
+        extension: "mp4",
+        encoder: Some("h264_videotoolbox"),
+        frames: 120,
+    },
+    Case {
+        size: HD,
+        name: "HEVC VideoToolbox",
+        codec: VideoCodec::Hevc,
+        container: Container::Mp4,
+        extension: "mp4",
+        encoder: Some("hevc_videotoolbox"),
+        frames: 120,
+    },
+    Case {
+        size: UHD,
+        name: "H.264 (CRF 23, medium)",
+        codec: VideoCodec::H264,
+        container: Container::Mp4,
+        extension: "mp4",
+        encoder: Some("libx264"),
+        frames: 30,
+    },
+    Case {
+        size: UHD,
+        name: "HEVC (CRF 28, medium)",
+        codec: VideoCodec::Hevc,
+        container: Container::Mp4,
+        extension: "mp4",
+        encoder: Some("libx265"),
+        frames: 15,
+    },
+    Case {
+        size: UHD,
+        name: "H.264 VideoToolbox",
+        codec: VideoCodec::H264,
+        container: Container::Mp4,
+        extension: "mp4",
+        encoder: Some("h264_videotoolbox"),
+        frames: 60,
+    },
+    Case {
+        size: UHD,
+        name: "HEVC VideoToolbox",
+        codec: VideoCodec::Hevc,
+        container: Container::Mp4,
+        extension: "mp4",
+        encoder: Some("hevc_videotoolbox"),
+        frames: 60,
+    },
+    Case {
+        size: HD,
         name: "ProRes 422 HQ",
         codec: VideoCodec::ProRes(ProResProfile::Hq),
         container: Container::Mov,
@@ -110,6 +176,7 @@ const CASES: &[Case] = &[
         frames: 120,
     },
     Case {
+        size: HD,
         name: "ProRes 4444",
         codec: VideoCodec::ProRes(ProResProfile::P4444),
         container: Container::Mov,
@@ -118,6 +185,7 @@ const CASES: &[Case] = &[
         frames: 120,
     },
     Case {
+        size: HD,
         name: "ProRes 422 HQ (software)",
         codec: VideoCodec::ProRes(ProResProfile::Hq),
         container: Container::Mov,
@@ -126,6 +194,7 @@ const CASES: &[Case] = &[
         frames: 60,
     },
     Case {
+        size: HD,
         name: "PNG sequence",
         codec: VideoCodec::Png,
         container: Container::ImageSequence,
@@ -134,6 +203,7 @@ const CASES: &[Case] = &[
         frames: 30,
     },
     Case {
+        size: HD,
         name: "TIFF sequence",
         codec: VideoCodec::Tiff,
         container: Container::ImageSequence,
@@ -142,6 +212,7 @@ const CASES: &[Case] = &[
         frames: 30,
     },
     Case {
+        size: HD,
         name: "GIF",
         codec: VideoCodec::Gif,
         container: Container::Gif,
@@ -177,13 +248,19 @@ fn median(mut times: Vec<Duration>) -> f64 {
 
 fn export(c: &mut Criterion) {
     let scratch = std::env::temp_dir().join(format!("glass-export-bench-{}", std::process::id()));
-    let pictures = pictures();
+    let hd = pictures(HD.0, HD.1);
+    let mut uhd = None;
     for case in CASES {
+        let pictures = if case.size == HD {
+            &hd
+        } else {
+            uhd.get_or_insert_with(|| pictures(UHD.0, UHD.1))
+        };
         let dir = scratch.join(case.extension);
         let mut times = Vec::new();
         let mut encoder = String::new();
         for _ in 0..3 {
-            match encode_video(&dir, case, &pictures) {
+            match encode_video(&dir, case, pictures) {
                 Some((t, e)) => {
                     times.push(t);
                     encoder = e;
@@ -196,8 +273,10 @@ fn export(c: &mut Criterion) {
         }
         let seconds = median(times);
         eprintln!(
-            "{} ({encoder}): 1920x1080, {} frames in {seconds:.3} s median: {:.1} fps",
+            "{} ({encoder}): {}x{}, {} frames in {seconds:.3} s median: {:.1} fps",
             case.name,
+            case.size.0,
+            case.size.1,
             case.frames,
             case.frames as f64 / seconds
         );
@@ -232,7 +311,7 @@ fn export(c: &mut Criterion) {
     let h264 = &CASES[0];
     let dir = scratch.join("criterion");
     group.bench_function("h264_1080p_120_frames", |b| {
-        b.iter(|| encode_video(&dir, h264, &pictures).expect("encode"));
+        b.iter(|| encode_video(&dir, h264, &hd).expect("encode"));
     });
     group.finish();
     let _ = std::fs::remove_dir_all(&scratch);
