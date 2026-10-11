@@ -159,8 +159,9 @@ pub struct ItemRow {
 }
 
 impl ItemRow {
-    /// A row from a pool item; proxy, analysis and thumbnail come from the engine.
-    pub fn from_item(item: &MediaItem) -> Self {
+    /// A row from a pool item; whether its file is offline, proxy, analysis and
+    /// thumbnail come from the engine.
+    pub fn from_item(item: &MediaItem, offline: bool) -> Self {
         let f = &item.facts;
         Self {
             id: item.id,
@@ -174,7 +175,7 @@ impl ItemRow {
             codec: codec_label(f),
             camera: camera_label(item),
             tags: item.tags.clone(),
-            offline: item.status.is_offline(),
+            offline,
             proxy: ProxyState::None,
             analysing: None,
             thumbnail: None,
@@ -308,10 +309,10 @@ pub enum MediaPoolAction {
 
 /// The metadata strip's view of a pool item.
 pub fn metadata_view(item: &MediaItem) -> MetadataView {
-    let file_name = item.path.file_name().map(|n| n.to_string_lossy());
+    let file_name = project::media_pool::file_name(&item.path);
     MetadataView::new(
         &item.name,
-        file_name.as_deref(),
+        (!file_name.is_empty()).then_some(file_name),
         (item.size_bytes > 0).then_some(item.size_bytes),
         &item.facts,
         &item.metadata,
@@ -1959,7 +1960,6 @@ pub fn label_menu(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use project::media_pool::{MediaStatus, OfflineReason};
 
     #[test]
     fn grid_fits_the_board() {
@@ -2007,13 +2007,6 @@ mod tests {
         item.metadata.camera_model = Some("ILME-FX6V".into());
         item.metadata.focal_length_mm = Some(35.0);
         let id = pool.add_item(selects, item).unwrap();
-        pool.set_status(
-            &[id],
-            MediaStatus::Offline {
-                reason: OfflineReason::Missing,
-            },
-        )
-        .unwrap();
 
         let rows = bin_rows(&pool, &BTreeSet::new());
         let names: Vec<(&str, usize)> = rows.iter().map(|r| (r.name.as_str(), r.depth)).collect();
@@ -2024,7 +2017,7 @@ mod tests {
         assert_eq!(open[2].id, a_cam);
         assert_eq!(open[2].depth, 2);
 
-        let row = ItemRow::from_item(pool.item(id).unwrap());
+        let row = ItemRow::from_item(pool.item(id).unwrap(), true);
         assert_eq!(row.codec, "ProRes 422 HQ");
         assert_eq!(row.camera, "ILME-FX6V · 35 mm");
         assert_eq!(ItemStatus::of(&row), ItemStatus::Offline);

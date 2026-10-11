@@ -184,6 +184,21 @@ impl Locations {
         self.config.join("settings.json")
     }
 
+    /// The keymap: a shortcut preset plus the user's changes (`ui::shortcuts::Keymap`).
+    pub fn keymap_file(&self) -> PathBuf {
+        self.config.join("keymap.json")
+    }
+
+    /// The current workspace layout and the saved ones (`ui::workspace::Workspaces`).
+    pub fn workspaces_file(&self) -> PathBuf {
+        self.config.join("workspaces.json")
+    }
+
+    /// Recently opened projects and their cache folders ([`crate::recent`]).
+    pub fn recent_file(&self) -> PathBuf {
+        self.data.join("recent.json")
+    }
+
     /// Where crash reports are written. Nothing reads them but the user.
     pub fn crashes(&self) -> PathBuf {
         self.data.join("crashes")
@@ -193,8 +208,6 @@ impl Locations {
     /// its settings name (resolved against the file's folder when relative), created and
     /// probed; the per-user cache folder when it names none yet (a relative folder before
     /// the first save) or when that folder cannot be written (logged as a warning).
-    // The window shell that opens and saves projects does not exist yet.
-    #[allow(dead_code)]
     pub fn project_cache(&self, project: &Project, project_file: Option<&Path>) -> PathBuf {
         let Some(dir) = project.settings().cache_folder.resolve(project_file) else {
             return self.cache.clone();
@@ -215,7 +228,6 @@ impl Locations {
     /// The autosave folder of `project`: in the per-user cache folder while it has no
     /// file, then in its [`Locations::project_cache`]. Pass it to
     /// `engine::autosave::Autosave::saved_as` after the first save and every Save As.
-    #[allow(dead_code)]
     pub fn autosave_dir(&self, project: &Project, project_file: Option<&Path>) -> PathBuf {
         let cache = match project_file {
             Some(_) => self.project_cache(project, project_file),

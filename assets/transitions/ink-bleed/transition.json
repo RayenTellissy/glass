@@ -1,0 +1,11 @@
+{
+  "id": "ink-bleed",
+  "name": "transition.name.ink_bleed",
+  "category": "stylised",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "seed", "label": "transition.param.seed", "kind": {"int": {"default": 1, "range": {"min": 0, "max": 9999}, "soft": null}}, "unit": "none", "keyframeable": false},
+    {"id": "softness", "label": "transition.param.softness", "kind": {"float": {"default": 0.06, "range": {"min": 0.0, "max": 0.5}, "soft": {"min": 0.0, "max": 0.2}, "decimals": 1}}, "unit": "percent", "keyframeable": false}
+  ]
+}

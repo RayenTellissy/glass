@@ -116,7 +116,7 @@ pub struct Finished {
     pub fallbacks: Vec<EncoderFallback>,
     /// Clips whose media was offline when the export started; they render empty.
     pub offline_media: usize,
-    /// The audio stream holds silence: the engine has no sequence audio mix yet.
+    /// The audio stream holds silence: no audio clip plays in the exported range.
     pub silent_audio: bool,
     pub notification: Notification,
 }

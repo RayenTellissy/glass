@@ -11,7 +11,8 @@ use project::media_pool::{Facts, Gps, Metadata};
 use project::params::{ParamDef, ParamSchema, ParamValue, ParamValues, Range, Unit, builtin};
 
 use super::{
-    SnapshotCase, pool_cases, relink_cases, timeline_cases as tl, track_header_cases as th,
+    SnapshotCase, clip_cases as cl, pool_cases, relink_cases, timeline_cases as tl,
+    track_header_cases as th, workspace_cases as ws,
 };
 use crate::dialogs::about::{self, AboutDialog, AboutInfo, Licence, View};
 use crate::dialogs::recovery::{self, RecoveryDialog, RecoveryPrompt, RecoveryState};
@@ -198,6 +199,96 @@ pub(super) fn all() -> Vec<SnapshotCase> {
             module: "panels/timeline/view",
             size: tl::VIEW_SIZE,
             draw: tl::view,
+        },
+        SnapshotCase {
+            name: "workspace_edit",
+            module: "workspace",
+            size: ws::WORKSPACE_SIZE,
+            draw: ws::edit,
+        },
+        SnapshotCase {
+            name: "workspace_colour",
+            module: "workspace",
+            size: ws::WORKSPACE_SIZE,
+            draw: ws::colour,
+        },
+        SnapshotCase {
+            name: "workspace_audio",
+            module: "workspace",
+            size: ws::WORKSPACE_SIZE,
+            draw: ws::audio,
+        },
+        SnapshotCase {
+            name: "workspace_effects",
+            module: "workspace",
+            size: ws::WORKSPACE_SIZE,
+            draw: ws::effects,
+        },
+        SnapshotCase {
+            name: "preview_paused",
+            module: "panels/preview",
+            size: ws::PANEL_SIZE,
+            draw: ws::preview,
+        },
+        SnapshotCase {
+            name: "preview_empty",
+            module: "panels/preview",
+            size: ws::PANEL_SIZE,
+            draw: ws::preview_empty,
+        },
+        SnapshotCase {
+            name: "inspector_empty",
+            module: "panels/inspector",
+            size: ws::PANEL_SIZE,
+            draw: ws::inspector,
+        },
+        SnapshotCase {
+            name: "placeholder_panel",
+            module: "panels/placeholder",
+            size: ws::PANEL_SIZE,
+            draw: ws::placeholder,
+        },
+        SnapshotCase {
+            name: "timeline_clips_video",
+            module: "panels/timeline/clips",
+            size: cl::CLIPS_SIZE,
+            draw: cl::video,
+        },
+        SnapshotCase {
+            name: "timeline_clips_video_close",
+            module: "panels/timeline/clips",
+            size: cl::CLIPS_SIZE,
+            draw: cl::video_close,
+        },
+        SnapshotCase {
+            name: "timeline_clips_rtl",
+            module: "panels/timeline/clips",
+            size: cl::CLIPS_SIZE,
+            draw: cl::video_rtl,
+        },
+        SnapshotCase {
+            name: "timeline_clips_audio",
+            module: "panels/timeline/clips",
+            size: cl::CLIPS_SIZE,
+            draw: cl::audio,
+        },
+        SnapshotCase {
+            name: "timeline_clips_nested_transitions",
+            module: "panels/timeline/clips",
+            size: cl::CLIPS_SIZE,
+            draw: cl::nested_and_transitions,
+        },
+        SnapshotCase {
+            name: "timeline_clips_blocks",
+            module: "panels/timeline/clips",
+            size: cl::BLOCKS_SIZE,
+            draw: cl::blocks,
+        },
+        SnapshotCase {
+            name: "timeline_clips_loading",
+            module: "panels/timeline/clip_media",
+            size: cl::CLIPS_SIZE,
+            draw: cl::loading,
         },
         SnapshotCase {
             name: "widgets_controls",

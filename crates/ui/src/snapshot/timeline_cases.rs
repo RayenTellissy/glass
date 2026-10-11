@@ -8,9 +8,7 @@ use project::{ClipSpec, Project, Rational, Sequence, SequenceFormat, Time, TimeR
 
 use crate::panels::timeline::minimap::{self, MINIMAP_HEIGHT, MinimapContent};
 use crate::panels::timeline::ruler::{self, RULER_HEIGHT, Timecode};
-use crate::panels::timeline::track_header::{
-    self, HEADER_WIDTH, HeightPreset, TrackHeaderState, TrackHeaderView,
-};
+use crate::panels::timeline::track_header::{self, HEADER_WIDTH, HeightPreset, TrackHeaderView};
 use crate::panels::timeline::view::{
     self, Extent, SCROLLBAR_WIDTH, TimelineView, TrackLayout, ViewPos, ZOOM_SLIDER_WIDTH,
     sequence_duration,
@@ -36,6 +34,15 @@ type TrackSpec = (TrackKind, String, Vec<(i64, i64)>);
 
 /// A sequence at `rate` with `tracks` holding clips at the given frame ranges.
 fn sequence(rate: Rational, drop_frame: bool, tracks: &[TrackSpec]) -> Sequence {
+    project_and_sequence(rate, drop_frame, tracks).1
+}
+
+/// [`sequence`] with the project holding it and its media.
+fn project_and_sequence(
+    rate: Rational,
+    drop_frame: bool,
+    tracks: &[TrackSpec],
+) -> (Project, Sequence) {
     let p = Project::new("uid-timeline", "Timeline");
     let format = SequenceFormat {
         frame_rate: rate,
@@ -65,14 +72,20 @@ fn sequence(rate: Rational, drop_frame: bool, tracks: &[TrackSpec]) -> Sequence 
             };
         }
     }
-    p.sequence(seq).expect("sequence").as_ref().clone()
+    let sequence = p.sequence(seq).expect("sequence").as_ref().clone();
+    (p, sequence)
 }
 
 /// The sample edit: two minutes at 25 fps over six tracks.
-fn sample() -> Sequence {
+pub(super) fn sample() -> Sequence {
+    sample_project().1
+}
+
+/// [`sample`] with the project holding it.
+pub(super) fn sample_project() -> (Project, Sequence) {
     let r = Rational::new(25, 1);
     let s = |sec: i64| sec * 25;
-    sequence(
+    project_and_sequence(
         r,
         false,
         &[
@@ -248,13 +261,9 @@ pub(super) fn minimap_long(ui: &mut egui::Ui) {
 pub(super) fn view(ui: &mut egui::Ui) {
     let seq = sample();
     let content = MinimapContent::from_sequence(&seq);
-    let mut state = TrackHeaderState::default();
-    let music = seq.tracks[5].id;
-    let _ = state.apply(&track_header::TrackHeaderAction::SetHeight {
-        track: music,
-        height: HeightPreset::Large,
-    });
-    let rows = state.rows(&seq, Some(seq.tracks[2].id));
+    let mut rows = track_header::rows(&seq, Some(seq.tracks[2].id));
+    // The music track is tall.
+    rows[5].flags.height = HeightPreset::Large;
     let layout = TrackLayout::from_rows(&rows);
     fill(ui, |ui, rect| {
         let tracks = Rect::from_min_size(

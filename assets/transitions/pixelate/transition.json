@@ -1,0 +1,16 @@
+{
+  "id": "pixelate",
+  "name": "transition.name.pixelate",
+  "category": "stylised",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "block_size", "label": "transition.param.block_size", "kind": {"float": {"default": 0.05, "range": {"min": 0.0, "max": 0.25}, "soft": null, "decimals": 1}}, "unit": "percent", "keyframeable": false}
+  ],
+  "passes": [
+    {"entry": "reduce", "scale": 0.5},
+    {"entry": "reduce", "scale": 0.25},
+    {"entry": "reduce", "scale": 0.125},
+    {"entry": "reduce", "scale": 0.0625}
+  ]
+}

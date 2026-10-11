@@ -56,9 +56,10 @@ fn the_sequence_has_the_tracks_clips_and_transitions_smoke_plays() {
             media.path
         );
     }
-    let [seq] = project.sequences().iter().collect::<Vec<_>>()[..] else {
-        panic!("one sequence expected");
+    let [seq] = project.browser_sequences().collect::<Vec<_>>()[..] else {
+        panic!("one sequence in the browser expected");
     };
+    assert_eq!(project.sequences().len(), 2, "and one compound clip's");
     assert_eq!((seq.resolution.width, seq.resolution.height), (1920, 1080));
     assert_eq!(seq.frame_rate, Rational::new(30, 1));
     let tracks: Vec<_> = seq
@@ -83,12 +84,17 @@ fn the_sequence_has_the_tracks_clips_and_transitions_smoke_plays() {
         .expect("items");
     assert_eq!(end, at(300), "the sequence lasts 10 s");
 
-    let clips: Vec<_> = seq
-        .tracks
+    let clips: Vec<_> = project
+        .sequences()
         .iter()
+        .flat_map(|s| s.tracks.iter())
         .flat_map(|t| t.items.iter())
         .map(|i| i.clip().expect("only clips"))
         .collect();
+    assert!(
+        clips.iter().any(|c| !c.keyframes.is_empty()),
+        "a clip is keyframed"
+    );
     assert!(
         clips
             .iter()
@@ -115,11 +121,17 @@ fn the_sequence_has_the_tracks_clips_and_transitions_smoke_plays() {
     assert_eq!(seq.tracks[1].transitions.len(), 2, "both transitions on V1");
     assert!(seq.markers.len() >= 3, "sequence markers");
 
-    // It compiles for playback: six clips, the transitions between V1's clips.
+    // It compiles for playback: six clips (one inside the compound), the transitions
+    // between V1's clips.
     let plan = TimelinePlan::build(&project, seq.id).expect("plan");
     assert_eq!(plan.canvas(), (1920, 1080));
     assert_eq!(plan.end(), 300);
     assert_eq!(plan.segments().segments().len(), 6);
+    let [compound] = plan.nested_looks() else {
+        panic!("one compound clip expected");
+    };
+    assert!(compound.plan().is_animated(0), "its clip fades in");
+    assert_eq!(plan.nested_clips(), 0);
     assert_eq!(plan.transitions().len(), 2);
     assert_eq!((plan.missing_media(), plan.skipped_effects()), (0, 0));
 }

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use media::analysis::{Control, Stopped};
 use media::export::verify::{self, Expected, VerifyError};
-use media::export::{Container, ExportSession, ExportSettings, Picture, SubtitleSettings};
+use media::export::{Container, ExportSession, Picture, SubtitleSettings};
 use media::{Primaries, SubtitleCue, VideoFrame};
 use project::subtitle_export::{self, Cue};
 use project::{Time, TimeRange};
@@ -24,10 +24,12 @@ use render::wgpu;
 use super::events::{EventKind, ExportFailure, Finished, JobId, Notification, Progress, Stage};
 use super::job::{ExportJob, SubtitleExport, output_encoding, sidecar_path};
 use super::queue::{JobControl, Shared};
+use crate::audio::mixer::Layout;
 use crate::lookahead::{
     FramesError, GopIndexes, Layer, Lookahead, LookaheadConfig, LookaheadFrames, MediaDecoder,
     MediaDecoderOptions, default_depth,
 };
+use crate::mix::{MixFormat, MixSettings, OfflineMix, sample_of};
 use crate::threads::{self, Role};
 use crate::timeline::{FrameOutput, RendererConfig, TimelinePlan, TimelineRenderer};
 
@@ -413,15 +415,23 @@ impl Runner<'_> {
         let plan = TimelinePlan::build(project, job.sequence)
             .map_err(|e| ExportFailure::new("export.error.plan").with("detail", e))?;
         let plan = Arc::new(plan);
-        let range = job.range.clone().unwrap_or(0..plan.end());
-        if range.start < 0 || range.end > plan.end() || range.start >= range.end {
+        let rate = sequence.frame_rate;
+        // An audio-only export may run to the end of the audio, past the last picture.
+        let mut length = plan.end();
+        if job.settings.video.is_none() {
+            length = length.max(
+                audio_end(sequence, rate)
+                    .map_err(|e| ExportFailure::new("export.error.plan").with("detail", e))?,
+            );
+        }
+        let range = job.range.clone().unwrap_or(0..length);
+        if range.start < 0 || range.end > length || range.start >= range.end {
             return Err(ExportFailure::new("export.error.range")
                 .with("start", range.start)
                 .with("end", range.end)
-                .with("length", plan.end())
+                .with("length", length)
                 .into());
         }
-        let rate = sequence.frame_rate;
         let time_range = (|| -> Result<TimeRange, project::TimeError> {
             TimeRange::between(
                 Time::from_frames(range.start, rate)?,
@@ -503,7 +513,14 @@ impl Runner<'_> {
         );
         self.progress.stage(Stage::Rendering);
 
-        let silent_audio = settings.audio.is_some();
+        let mut audio = match &settings.audio {
+            Some(a) => Some(
+                MixedAudio::new(project, job.sequence, time_range, a.sample_rate, a.channels)
+                    .map_err(|e| ExportFailure::new("export.error.plan").with("detail", e))?,
+            ),
+            None => None,
+        };
+        let silent_audio = audio.as_ref().is_some_and(|a| a.silent);
         match &settings.video {
             Some(video) => {
                 let depth = session.pixel_format().map_or(8, |f| f.bit_depth());
@@ -524,9 +541,9 @@ impl Runner<'_> {
                     transfer,
                     format,
                 };
-                self.encode_video(&plan, map, target, working, burn, &mut session, &settings)?;
+                self.encode_video(&plan, map, target, working, burn, &mut session, &mut audio)?;
             }
-            None => self.encode_silence(map, &mut session, &settings)?,
+            None => self.encode_audio_only(map, &mut session, &mut audio)?,
         }
 
         self.progress.stage(Stage::Finishing);
@@ -542,8 +559,8 @@ impl Runner<'_> {
             expected = expected.with_preset(preset);
         }
         if silent_audio {
-            // Silence cannot meet a loudness target; there is nothing to measure until
-            // the sequence audio mix exists.
+            // No audio clip plays in the range: silence cannot meet a loudness target and
+            // there is nothing to measure.
             expected.loudness = None;
         }
         let report = match verify::verify(&outputs.temp, &expected, &JobVerifyControl(self.control))
@@ -587,46 +604,48 @@ impl Runner<'_> {
         })
     }
 
-    /// Pushes silence for output frame `k` (the engine has no sequence audio mix yet).
-    fn push_silence(
+    /// Pushes the mixed audio up to the end of output frame `k`.
+    fn push_audio(
         &self,
         session: &mut ExportSession,
-        settings: &ExportSettings,
         map: &FrameMap,
         k: u64,
-        pushed: &mut u64,
-        zeros: &mut Vec<f32>,
+        audio: &mut Option<MixedAudio>,
     ) -> Result<(), Stop> {
-        let Some(audio) = &settings.audio else {
+        let Some(audio) = audio else {
             return Ok(());
         };
-        let through = map.samples_through(k, audio.sample_rate);
-        let count = usize::try_from(through.saturating_sub(*pushed)).unwrap_or(0);
+        let through = map.samples_through(k, audio.rate);
+        let count = usize::try_from(through.saturating_sub(audio.pushed)).unwrap_or(0);
         if count == 0 {
             return Ok(());
         }
-        if zeros.len() < count {
-            zeros.resize(count, 0.0);
+        audio.mix.render_planar(count, &mut audio.planes);
+        // Channels the mix layout lacks (a count other than 1, 2 or 6) get silence.
+        for plane in audio.planes.iter_mut().skip(audio.mix.channels()) {
+            plane.clear();
+            plane.resize(count, 0.0);
         }
-        let planes: Vec<&[f32]> = (0..audio.channels).map(|_| &zeros[..count]).collect();
+        let planes: Vec<&[f32]> = audio.planes[..audio.channels]
+            .iter()
+            .map(Vec::as_slice)
+            .collect();
         session
             .push_audio(&planes)
             .map_err(|e| ExportFailure::from_export(&e, false))?;
-        *pushed = through;
+        audio.pushed = through;
         Ok(())
     }
 
-    fn encode_silence(
+    fn encode_audio_only(
         &mut self,
         map: FrameMap,
         session: &mut ExportSession,
-        settings: &ExportSettings,
+        audio: &mut Option<MixedAudio>,
     ) -> Result<(), Stop> {
-        let mut pushed = 0;
-        let mut zeros = Vec::new();
         for k in 0..self.progress.total {
             self.checkpoint()?;
-            self.push_silence(session, settings, &map, k, &mut pushed, &mut zeros)?;
+            self.push_audio(session, &map, k, audio)?;
             self.progress.frame_done();
         }
         Ok(())
@@ -641,7 +660,7 @@ impl Runner<'_> {
         working: WorkingSpace,
         burn: Option<BurnSetup>,
         session: &mut ExportSession,
-        settings: &ExportSettings,
+        audio: &mut Option<MixedAudio>,
     ) -> Result<(), Stop> {
         let config = &self.shared.config;
         let canvas = plan.canvas();
@@ -697,7 +716,7 @@ impl Runner<'_> {
             }
         };
 
-        let result = self.encode_frames(&rx, &back_tx, map, target, session, settings);
+        let result = self.encode_frames(&rx, &back_tx, map, target, session, audio);
         // Unblocks the render thread if it waits to send, then waits for it.
         drop(rx);
         if result.is_err() {
@@ -715,10 +734,8 @@ impl Runner<'_> {
         map: FrameMap,
         target: Target,
         session: &mut ExportSession,
-        settings: &ExportSettings,
+        audio: &mut Option<MixedAudio>,
     ) -> Result<(), Stop> {
-        let mut pushed = 0;
-        let mut zeros = Vec::new();
         let total = self.progress.total;
         for k in 0..total {
             self.checkpoint()?;
@@ -751,10 +768,71 @@ impl Runner<'_> {
                 .push_picture(&picture)
                 .map_err(|e| ExportFailure::from_export(&e, false))?;
             let _ = back.send(frame);
-            self.push_silence(session, settings, &map, k, &mut pushed, &mut zeros)?;
+            self.push_audio(session, &map, k, audio)?;
             self.progress.frame_done();
         }
         Ok(())
+    }
+}
+
+/// Timeline frames until the end of the last item on an audio track, rounded up.
+fn audio_end(
+    sequence: &project::Sequence,
+    rate: project::Rational,
+) -> Result<i64, project::TimeError> {
+    let mut end = 0;
+    for track in sequence
+        .tracks
+        .iter()
+        .filter(|t| t.kind == project::TrackKind::Audio)
+    {
+        let time = track.end()?;
+        let frames = time.frames_floor(rate);
+        end = end.max(if Time::from_frames(frames, rate)? < time {
+            frames + 1
+        } else {
+            frames
+        });
+    }
+    Ok(end)
+}
+
+/// The export's audio: the sequence mix (`engine::mix`, every track at its defaults) at the
+/// settings' rate and channels, from the range's first sample.
+struct MixedAudio {
+    mix: OfflineMix,
+    planes: Vec<Vec<f32>>,
+    rate: u32,
+    channels: usize,
+    /// Samples pushed so far.
+    pushed: u64,
+    /// No audio clip plays in the range.
+    silent: bool,
+}
+
+impl MixedAudio {
+    fn new(
+        project: &project::Project,
+        sequence: project::SequenceId,
+        range: TimeRange,
+        rate: u32,
+        channels: usize,
+    ) -> Result<Self, crate::mix::MixError> {
+        let format = MixFormat {
+            sample_rate: rate,
+            layout: Layout::for_channels(channels),
+        };
+        let start = sample_of(range.start, rate)?;
+        let end = sample_of(range.end()?, rate)?;
+        let mix = OfflineMix::new(project, sequence, &MixSettings::default(), format, start)?;
+        Ok(Self {
+            silent: !mix.plays_between(start, end),
+            planes: vec![Vec::new(); format.channels().max(channels)],
+            mix,
+            rate,
+            channels,
+            pushed: 0,
+        })
     }
 }
 

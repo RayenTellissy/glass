@@ -1,8 +1,9 @@
-//! The Glass document model: the immutable edit tree of sequences, tracks, clips,
-//! markers, transitions, keyframes, nested sequences and effect parameter schemas, plus undo history, save
-//! and load, and schema migrations. Pure data: no I/O threads, no GPU, and no dependencies
-//! on other Glass crates.
+//! The Glass document model: the immutable edit tree of the media pool, sequences,
+//! tracks (with their switches), clips, markers, transitions, keyframes, nested sequences
+//! and effect parameter schemas, plus undo history, save and load, and schema migrations.
+//! Pure data: no I/O threads, no GPU, and no dependencies on other Glass crates.
 
+pub mod audio_transition;
 pub mod autosave;
 pub mod clip;
 pub mod diff;
@@ -20,6 +21,7 @@ pub mod relink;
 pub mod schema;
 pub mod settings;
 pub mod subtitle_export;
+pub mod switches;
 pub mod time;
 pub mod transition;
 pub mod validate;
@@ -33,10 +35,10 @@ pub use id::{
 };
 pub use keyframe::{ClipParam, Curve, Handle, HandleSide, Interpolation, Key, KeyTarget};
 pub use marker::{Marker, MarkerOwner, MarkerSpec, TodoState};
-pub use media_pool::ColourLabel;
+pub use media_pool::{Bin, ColourLabel, MediaItem, MediaKind, MediaPool};
 pub use model::{
-    Adjustment, Clip, ClipSource, Item, ItemKind, MediaRef, MediaRefs, Project, Sequence, Subtitle,
-    Track, TrackKind,
+    Adjustment, Clip, ClipSource, Item, ItemKind, MediaRef, Project, Sequence, Subtitle, Track,
+    TrackHeight, TrackKind,
 };
 pub use relink::Relink;
 pub use schema::LoadError;

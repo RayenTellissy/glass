@@ -1108,6 +1108,14 @@ fn v3_json(f: &Fixture) -> Value {
         .expect("project")
         .remove("settings")
         .expect("v6 settings");
+    // v9 media pool items back to v2 references.
+    let refs: Vec<Value> = json["media"]["items"]
+        .as_array()
+        .expect("v9 media items")
+        .iter()
+        .map(|i| json!({ "id": i["id"], "content_hash": i["content_hash"], "path": i["path"] }))
+        .collect();
+    json["media"] = json!({ "refs": refs });
     for key in ["resolution", "drop_frame", "channel_layout", "compound"] {
         json["sequences"][0]
             .as_object_mut()
@@ -1124,6 +1132,13 @@ fn v3_json(f: &Fixture) -> Value {
             .expect("track")
             .remove("transitions")
             .expect("a v5 track has transitions");
+        for key in ["muted", "solo", "visible", "locked", "height"] {
+            track
+                .as_object_mut()
+                .expect("track")
+                .remove(key)
+                .expect("v9 track switches");
+        }
         assert_eq!(transitions, json!([]), "the fixture has no transitions");
         for item in track["items"].as_array_mut().expect("items") {
             if item["type"] == "clip" {

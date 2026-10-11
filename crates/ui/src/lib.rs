@@ -12,6 +12,7 @@ pub mod params;
 pub mod shortcuts;
 pub mod snapshot;
 pub mod theme;
+pub mod workspace;
 
 /// `t!("key")` looks up a user-facing string; see [`assets::i18n`].
 pub use assets::t;
