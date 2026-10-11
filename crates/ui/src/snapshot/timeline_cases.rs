@@ -34,6 +34,15 @@ type TrackSpec = (TrackKind, String, Vec<(i64, i64)>);
 
 /// A sequence at `rate` with `tracks` holding clips at the given frame ranges.
 fn sequence(rate: Rational, drop_frame: bool, tracks: &[TrackSpec]) -> Sequence {
+    project_and_sequence(rate, drop_frame, tracks).1
+}
+
+/// [`sequence`] with the project holding it and its media.
+fn project_and_sequence(
+    rate: Rational,
+    drop_frame: bool,
+    tracks: &[TrackSpec],
+) -> (Project, Sequence) {
     let p = Project::new("uid-timeline", "Timeline");
     let format = SequenceFormat {
         frame_rate: rate,
@@ -63,14 +72,20 @@ fn sequence(rate: Rational, drop_frame: bool, tracks: &[TrackSpec]) -> Sequence 
             };
         }
     }
-    p.sequence(seq).expect("sequence").as_ref().clone()
+    let sequence = p.sequence(seq).expect("sequence").as_ref().clone();
+    (p, sequence)
 }
 
 /// The sample edit: two minutes at 25 fps over six tracks.
-fn sample() -> Sequence {
+pub(super) fn sample() -> Sequence {
+    sample_project().1
+}
+
+/// [`sample`] with the project holding it.
+pub(super) fn sample_project() -> (Project, Sequence) {
     let r = Rational::new(25, 1);
     let s = |sec: i64| sec * 25;
-    sequence(
+    project_and_sequence(
         r,
         false,
         &[

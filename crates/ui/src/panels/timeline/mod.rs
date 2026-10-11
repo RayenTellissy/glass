@@ -3,6 +3,7 @@
 pub mod clip_media;
 pub mod clips;
 pub mod minimap;
+pub mod panel;
 pub mod ruler;
 pub mod track_header;
 pub mod view;

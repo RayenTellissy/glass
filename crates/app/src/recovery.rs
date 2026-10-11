@@ -2,8 +2,11 @@
 //! what the user chooses in `ui::dialogs::recovery`.
 //!
 //! The launch scan (`engine::autosave::launch_scan`) runs before the window opens and
-//! reads only the autosave folders. The app shell shows one [`LaunchRecovery`] dialog at
-//! a time over the welcome screen and passes the choice to [`LaunchRecovery::resolve`]:
+//! reads only the autosave folders: the per-user cache folder and the cache folders of
+//! recently opened projects ([`crate::recent`]). Opening a project checks its own
+//! autosave folder too ([`LaunchRecovery::for_project`]). The window shows one
+//! [`LaunchRecovery`] dialog at a time and passes the choice to
+//! [`LaunchRecovery::resolve`]:
 //! Restore opens the recovered project with a fresh undo history and keeps autosaving
 //! into the same folder (so its unsaved edits stay recoverable), Discard deletes the
 //! folder, and Later keeps it for the next launch.
@@ -11,19 +14,22 @@
 use std::path::{Path, PathBuf};
 
 use engine::autosave::{self, AutosaveConfig, AutosaveError, History, Recovered};
+use engine::project::autosave as project_autosave;
 use ui::dialogs::recovery::{RecoveryAction, RecoveryDialog, RecoveryPrompt};
 
+use crate::recent::Recent;
+
 /// One autosave waiting for the user's decision, with its dialog.
-// The window shell that shows the dialog and calls `resolve` does not exist yet.
-#[allow(dead_code)]
 pub struct LaunchRecovery {
     pub recovered: Recovered,
     pub prompt: RecoveryPrompt,
     pub dialog: RecoveryDialog,
+    /// The project file the autosave belongs to, when known (it was saved and is in the
+    /// recent list, or it was being opened).
+    pub file: Option<PathBuf>,
 }
 
 /// What resolving the prompt led to.
-#[allow(dead_code)]
 pub enum Resolution {
     /// Open this project; its history starts at the recovered root, and autosave goes on
     /// with `autosave` (start it with `history.changes()`).
@@ -45,18 +51,69 @@ impl LaunchRecovery {
     pub fn scan(cache: &Path, now_ms: u64) -> Vec<Self> {
         autosave::launch_scan(cache, now_ms)
             .into_iter()
-            .map(|recovered| Self {
-                prompt: RecoveryPrompt::from_recovered(&recovered, now_ms),
-                recovered,
-                dialog: RecoveryDialog::new(),
-            })
+            .map(|recovered| Self::new(recovered, None, now_ms))
             .collect()
+    }
+
+    fn new(recovered: Recovered, file: Option<PathBuf>, now_ms: u64) -> Self {
+        Self {
+            prompt: RecoveryPrompt::from_recovered(&recovered, now_ms),
+            recovered,
+            dialog: RecoveryDialog::new(),
+            file,
+        }
+    }
+
+    /// [`LaunchRecovery::scan`] over the per-user cache folder and every recent
+    /// project's cache folder, each autosave once, with its project file when the
+    /// recent list names it.
+    pub fn scan_all(user_cache: &Path, recent: &Recent, now_ms: u64) -> Vec<Self> {
+        let mut caches = vec![user_cache];
+        caches.extend(recent.caches().into_iter().filter(|c| *c != user_cache));
+        let mut found: Vec<Self> = Vec::new();
+        for cache in caches {
+            for recovered in autosave::launch_scan(cache, now_ms) {
+                if found
+                    .iter()
+                    .any(|f| f.recovered.info.dir == recovered.info.dir)
+                {
+                    continue;
+                }
+                let file = recent
+                    .file_for_autosave(&recovered.info.dir)
+                    .map(Path::to_path_buf);
+                found.push(Self::new(recovered, file, now_ms));
+            }
+        }
+        found
+    }
+
+    /// The autosave in `autosave_dir` that an unclean exit left while `file` was open,
+    /// if any: checked when a project is opened.
+    pub fn for_project(autosave_dir: &Path, file: &Path, now_ms: u64) -> Option<Self> {
+        match project_autosave::find_recovery(autosave_dir) {
+            Ok(Some(_)) => {}
+            Ok(None) => return None,
+            Err(error) => {
+                tracing::warn!("autosave {}: {error}", autosave_dir.display());
+                return None;
+            }
+        }
+        match project_autosave::recover(autosave_dir) {
+            Ok(recovered) => Some(Self::new(recovered, Some(file.to_path_buf()), now_ms)),
+            Err(error) => {
+                tracing::warn!(
+                    "autosave {} cannot be read: {error}",
+                    autosave_dir.display()
+                );
+                None
+            }
+        }
     }
 
     /// Acts on the user's choice. `None` while the dialog stays up without a decision
     /// ([`RecoveryAction::CancelRestore`]: restoring is instant here, so there is nothing
     /// to cancel).
-    #[allow(dead_code)]
     pub fn resolve(&self, action: RecoveryAction) -> Result<Option<Resolution>, AutosaveError> {
         Ok(match action {
             RecoveryAction::Restore => {
@@ -195,5 +252,33 @@ mod tests {
         ));
         assert!(LaunchRecovery::scan(&cache, now).is_empty());
         let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
+    fn project_cache_folders_are_scanned_with_their_files() {
+        let user = temp_cache("user");
+        let project_cache = temp_cache("project");
+        crashed_session(&project_cache);
+        let now = autosave::now_ms();
+        // Unknown to the recent list: only the per-user folder is read.
+        assert!(LaunchRecovery::scan_all(&user, &Recent::default(), now).is_empty());
+
+        let file = project_cache.join("Harbour.proj");
+        let mut recent = Recent::default();
+        recent.opened(crate::recent::RecentProject {
+            path: file.clone(),
+            cache: project_cache.clone(),
+        });
+        let found = LaunchRecovery::scan_all(&user, &recent, now);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].file.as_deref(), Some(file.as_path()));
+
+        // Opening the project finds the same autosave in its own folder.
+        let dir = found[0].recovered.info.dir.clone();
+        let opened = LaunchRecovery::for_project(&dir, &file, now).expect("found on open");
+        assert_eq!(opened.prompt.edits, 3);
+        assert!(LaunchRecovery::for_project(&user.join("none"), &file, now).is_none());
+        let _ = std::fs::remove_dir_all(&user);
+        let _ = std::fs::remove_dir_all(&project_cache);
     }
 }

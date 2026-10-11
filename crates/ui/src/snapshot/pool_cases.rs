@@ -274,23 +274,28 @@ fn panel(ui: &mut egui::Ui, draw: impl FnOnce(&mut egui::Ui, Rect)) {
 /// The docked panel at real size: bins with `Selects` open, eight clips in every state.
 pub(super) fn grid(ui: &mut egui::Ui) {
     panel(ui, |ui, rect| {
-        let (pool, ids, offline) = sample_pool();
-        let items = rows(&pool, &ids, &offline);
-        let mut view = MediaPoolView {
-            view: PoolView::Grid,
-            bins: bins(),
-            smart_bins: smart_bins(),
-            bin: BinSelection::Bin(BinId(1)),
-            bin_name: t!("sample.bin.selects"),
-            bin_duration_s: 108.0,
-            sort: SortBy::Added,
-            total: items.len(),
-            selected: BTreeSet::from([ids[0]]),
-            items,
-            ..MediaPoolView::default()
-        };
+        let mut view = grid_view();
         let _ = media_pool::media_pool(ui, rect, &mut view);
     });
+}
+
+/// The grid's view: `Selects` open with the first clip selected.
+pub(super) fn grid_view() -> MediaPoolView {
+    let (pool, ids, offline) = sample_pool();
+    let items = rows(&pool, &ids, &offline);
+    MediaPoolView {
+        view: PoolView::Grid,
+        bins: bins(),
+        smart_bins: smart_bins(),
+        bin: BinSelection::Bin(BinId(1)),
+        bin_name: t!("sample.bin.selects"),
+        bin_duration_s: 108.0,
+        sort: SortBy::Added,
+        total: items.len(),
+        selected: BTreeSet::from([ids[0]]),
+        items,
+        ..MediaPoolView::default()
+    }
 }
 
 /// The same panel widened into the list, searching `harbour` with two filters.

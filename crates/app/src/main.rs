@@ -1,15 +1,16 @@
-//! The `glass` binary: creates the window, the GPU device, the threads and the engine,
-//! then hands control to `ui`. Owns command-line flags, safe mode, portable mode and
-//! crash minidumps.
+//! The `glass` binary: sets up logging, crash reports and the folders, then opens the
+//! window ([`app::shell::Shell`]), where eframe creates the GPU device that the preview
+//! renders with. Owns command-line flags, safe mode, portable mode and crash minidumps.
+//!
+//! `glass [project file]` opens that project; `glass --version` prints the build.
 
-mod about;
 mod crash;
 mod ffi;
-mod locations;
-mod recovery;
-mod settings;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
+
+use app::{about, locations, settings, shell};
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
@@ -35,14 +36,32 @@ fn main() -> ExitCode {
         .crash_reports
         .then(|| crash::install(&locations.crashes(), &locations.data));
     crash::trigger_debug_crash();
-    // The window shell shows these one at a time over the welcome screen once it exists.
-    let pending = recovery::LaunchRecovery::scan(&locations.cache, engine::autosave::now_ms());
-    for launch in &pending {
-        tracing::info!(
-            "autosave of {} with {} unsaved edits waits for the recovery prompt",
-            launch.prompt.project_name,
-            launch.prompt.edits
-        );
+
+    let open = args.get(1).map(PathBuf::from);
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title(ui::t!("app.name"))
+            .with_inner_size([1440.0, 900.0])
+            .with_min_inner_size([960.0, 600.0]),
+        wgpu_options: shell::wgpu_options(),
+        ..Default::default()
+    };
+    let result = eframe::run_native(
+        "Glass",
+        options,
+        Box::new(move |cc| {
+            if let Some(rs) = &cc.wgpu_render_state {
+                crash::set_gpu_adapter(rs.adapter.get_info().name);
+            }
+            Ok(Box::new(shell::Shell::new(cc, locations, about, open)))
+        }),
+    );
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!("the window could not open: {error}");
+            eprintln!("glass: the window could not open: {error}");
+            ExitCode::FAILURE
+        }
     }
-    ExitCode::SUCCESS
 }

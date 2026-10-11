@@ -2,7 +2,7 @@
 //! anywhere. There is no network code here: the app and its monitor talk over a local
 //! socket (and a Mach port on macOS).
 //!
-//! When the user has turned crash reports on (see [`crate::settings`]):
+//! When the user has turned crash reports on (see [`app::settings`]):
 //!
 //! - `glass` starts a copy of itself as a monitor process (`glass --crash-monitor
 //!   <socket> <folder>`) and attaches a native crash handler. On a crash the handler asks
@@ -76,7 +76,6 @@ static GPU: Mutex<Option<String>> = Mutex::new(None);
 static INFO_CLIENT: Mutex<Option<Arc<Client>>> = Mutex::new(None);
 
 /// Records the GPU adapter for crash reports, once the renderer knows it.
-#[allow(dead_code)]
 pub fn set_gpu_adapter(name: impl Into<String>) {
     if let Ok(mut gpu) = GPU.lock() {
         *gpu = Some(name.into());

@@ -87,6 +87,9 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 egui = { version = "0.36", default-features = false }
 egui-wgpu = "0.36"
 eframe = { version = "0.36", default-features = false, features = ["accesskit", "wgpu", "wayland", "x11"] }
+# Dockable panels for the workspace (`ui::workspace`): tabs, splits, drag to dock, and
+# serde for saved layouts.
+egui_dock = { version = "0.21", features = ["serde"] }
 pollster = "0.4"
 # The system file picker for importing (`ui::panels::file_dialog`), used asynchronously.
 rfd = "0.17"
