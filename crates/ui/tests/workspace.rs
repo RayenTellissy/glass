@@ -233,7 +233,7 @@ fn the_edit_workspace_with_200_clips_is_within_budget() {
     .expect("headless frames");
     eprintln!(
         "edit workspace, 200 clips ({}): {stats} (M5 standing in for the M1, machine shared \
-         with other agents)",
+         with other builds)",
         headless.adapter()
     );
     stats.assert_within_budget(&headless, "edit workspace");
