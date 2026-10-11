@@ -28,9 +28,26 @@
 //! build next to the existing `v<N>` ones (which stay, unchanged, as prior-version
 //! fixtures).
 //!
-//! Key order is stable: the envelope and every node serialise as structs (fields in
-//! declaration order) and every collection is ordered (by position, or by id for media),
-//! so saving the same tree twice gives the same bytes.
+//! [`save`] writes one canonical form, so a project file diffs cleanly in git and a
+//! saved file loads and saves again to the same bytes:
+//!
+//! - pretty JSON: a 2-space indent, one key or array element per line, `\n` line ends
+//!   and one trailing newline;
+//! - the envelope and every node serialise as structs, fields in declaration order (the
+//!   order in the model's source; Decision 45 lists the item, clip and track orders);
+//! - every map has its keys in ascending byte order: clip `keyframes` by property id
+//!   (not [`crate::keyframe::ClipParam`]'s declaration order), effect `keyframes` and
+//!   `params` by parameter id;
+//! - lists keep model order (sequences, tracks, items, transitions, markers by position,
+//!   media references by id); ids are numbers, times reduced fractions;
+//! - floats in their shortest form that parses back to the same value (`serde_json`'s
+//!   `float_roundtrip` feature makes the parse exact);
+//! - nothing from the machine or the clock: no timestamps, and no hash-ordered
+//!   collection reaches the output.
+//!
+//! [`load`] reads any layout and key order (compact files, files written by other
+//! tools), and saving such a file writes the canonical form. The form is formatting
+//! only, so it did not change [`SCHEMA_VERSION`] (Decision 74).
 //!
 //! Versions:
 //!
