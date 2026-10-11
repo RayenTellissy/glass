@@ -186,14 +186,12 @@ fn draw_within_budget(what: &str, mode: PoolView) {
             headless.frame(draw)
         }
         .expect("headless frame");
-        if frame >= WARMUP {
-            if elapsed.as_secs_f64() > 0.008 {
-                slow.push(format!(
-                    "{frame}{} {:.1} ms",
-                    if swapped { " (new results)" } else { "" },
-                    elapsed.as_secs_f64() * 1e3
-                ));
-            }
+        if frame >= WARMUP && elapsed.as_secs_f64() > 0.008 {
+            slow.push(format!(
+                "{frame}{} {:.1} ms",
+                if swapped { " (new results)" } else { "" },
+                elapsed.as_secs_f64() * 1e3
+            ));
         }
     }
     if !slow.is_empty() {
