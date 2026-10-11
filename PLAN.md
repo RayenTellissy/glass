@@ -221,7 +221,7 @@ Done when: a 1000-clip project round-trips through save and load byte-identicall
 - [x] Versioned schema with a migration function per version, tested with fixtures from every prior version
 - [x] Sequences, tracks (video, audio, subtitle, adjustment), clips, gaps, markers
 - [x] Clip properties: source range, timeline range, speed map, effect stack, transform, audio gain, enabled flag
-- [ ] Transitions as first-class items between two clips with alignment (centre, start, end)
+- [~] Transitions as first-class items between two clips with alignment (centre, start, end)
 - [ ] Nested sequences and compound clips
 - [ ] Adjustment layers
 - [ ] Keyframe curves per parameter: linear, bezier, hold, with time and value scaling
