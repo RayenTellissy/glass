@@ -4,6 +4,7 @@
 //! on other Glass crates.
 
 pub mod autosave;
+pub mod clip;
 pub mod diff;
 pub mod edit;
 pub mod error;
@@ -18,10 +19,11 @@ pub mod schema;
 pub mod time;
 pub mod validate;
 
+pub use clip::{BlendMode, Crop, Effect, SpeedKeep, SpeedKey, SpeedMap, Transform};
 pub use edit::ClipSpec;
 pub use error::EditError;
 pub use history::{EditLabel, History, MemoryStats};
-pub use id::{BinId, ItemId, MarkerId, MediaId, NodeId, SequenceId, TrackId};
+pub use id::{BinId, EffectId, ItemId, MarkerId, MediaId, NodeId, SequenceId, TrackId};
 pub use marker::{Marker, MarkerOwner, MarkerSpec, TodoState};
 pub use media_pool::ColourLabel;
 pub use model::{

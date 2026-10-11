@@ -13,7 +13,7 @@ use crate::decode::VideoFrame;
 use crate::demux::Packet;
 use crate::error::{MediaError, Result};
 use crate::ffi;
-use crate::format::{ColourInfo, ColourRange, MediaKind, PixelFormat};
+use crate::format::{ColourInfo, ColourRange, MediaKind, PixelFormat, SampleFormat};
 use crate::time::Rational;
 
 /// Settings of a video encoder.
@@ -93,11 +93,14 @@ pub enum PcmFormat {
 /// the encoder takes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioEncoderSettings {
-    /// FFmpeg encoder name (`pcm_s16le`, `pcm_s24le`; `aac` and others in Phase 8).
+    /// FFmpeg encoder name (`pcm_s16le`, `pcm_s24le`, `aac`, `flac`).
     pub encoder: String,
     pub sample_rate: u32,
     pub channels: usize,
     pub bit_rate: Option<u64>,
+    /// The sample format to feed the encoder when it takes it (`s32` makes FLAC 24-bit);
+    /// otherwise the encoder's first.
+    pub sample_format: Option<SampleFormat>,
     pub global_header: bool,
     pub options: Vec<(String, String)>,
 }
@@ -115,8 +118,18 @@ impl AudioEncoderSettings {
             sample_rate,
             channels,
             bit_rate: None,
+            sample_format: None,
             global_header: false,
             options: Vec::new(),
+        }
+    }
+
+    /// Settings for any audio encoder at a rate and channel count, everything else
+    /// default.
+    pub fn new(encoder: impl Into<String>, sample_rate: u32, channels: usize) -> Self {
+        Self {
+            encoder: encoder.into(),
+            ..Self::pcm(PcmFormat::S16, sample_rate, channels)
         }
     }
 }
@@ -161,6 +174,17 @@ impl std::fmt::Debug for Encoder {
 pub fn encoder_available(name: &str) -> bool {
     crate::init();
     ffmpeg::encoder::find_by_name(name).is_some()
+}
+
+/// The pixel formats a video encoder of that name takes, empty when the build has no
+/// such encoder or it does not list them.
+pub(crate) fn encoder_pixel_formats(name: &str) -> Vec<PixelFormat> {
+    crate::init();
+    ffmpeg::encoder::find_by_name(name)
+        .and_then(|c| c.video().ok())
+        .and_then(|v| v.formats())
+        .map(|f| f.map(PixelFormat::from_ffmpeg).collect())
+        .unwrap_or_default()
 }
 
 fn dictionary(options: &[(String, String)]) -> ffmpeg::Dictionary<'static> {
@@ -269,10 +293,18 @@ impl Encoder {
         let codec = ffmpeg::encoder::find_by_name(&settings.encoder)
             .ok_or(ffmpeg::Error::EncoderNotFound)
             .map_err(error("finding the encoder"))?;
-        let format = codec
+        let formats: Vec<ffmpeg::format::Sample> = codec
             .audio()
             .ok()
-            .and_then(|a| a.formats().and_then(|mut f| f.next()))
+            .and_then(|a| a.formats())
+            .map(|f| f.collect())
+            .unwrap_or_default();
+        let wanted = settings.sample_format;
+        let format = formats
+            .iter()
+            .copied()
+            .find(|f| wanted.is_some() && SampleFormat::from_ffmpeg(*f) == wanted)
+            .or_else(|| formats.first().copied())
             .ok_or(ffmpeg::Error::InvalidData)
             .map_err(error("choosing a sample format"))?;
         let mut context = ffmpeg::codec::Context::new_with_codec(codec);
@@ -322,6 +354,28 @@ impl Encoder {
     /// Time base of the packets this encoder produces.
     pub fn time_base(&self) -> Rational {
         self.time_base
+    }
+
+    /// Audio: the samples per channel every [`send_audio`](Self::send_audio) call must
+    /// carry (the last may be shorter), or `None` when any count is accepted (PCM).
+    pub fn frame_size(&self) -> Option<usize> {
+        let Inner::Audio(encoder) = &self.inner else {
+            return None;
+        };
+        let variable = encoder.codec().is_some_and(|c| {
+            c.capabilities()
+                .contains(ffmpeg::codec::Capabilities::VARIABLE_FRAME_SIZE)
+        });
+        let size = encoder.frame_size() as usize;
+        (!variable && size > 0).then_some(size)
+    }
+
+    /// Audio: whether the last frame may be shorter than [`frame_size`](Self::frame_size).
+    pub fn accepts_small_last_frame(&self) -> bool {
+        self.codec().is_some_and(|c| {
+            c.capabilities()
+                .contains(ffmpeg::codec::Capabilities::SMALL_LAST_FRAME)
+        })
     }
 
     fn error(&self, action: &'static str) -> impl Fn(ffmpeg::Error) -> MediaError + '_ {

@@ -100,11 +100,7 @@ fn each_track_kind_accepts_only_its_items() {
     }
     for kind in TrackKind::ALL {
         let accepted = [
-            ItemKind::Clip(project::Clip {
-                media: f.media,
-                source_start: Time::ZERO,
-                markers: Default::default(),
-            }),
+            ItemKind::Clip(project::Clip::new(f.media, Time::ZERO)),
             ItemKind::Subtitle(project::Subtitle { text: "x".into() }),
             ItemKind::Adjustment(project::Adjustment::default()),
         ]
@@ -323,7 +319,7 @@ fn clip_markers_are_in_source_time_and_survive_trims() {
         .clip()
         .expect("clip")
         .clone();
-    assert_eq!(clip.source_range(range(0, 40)), range(10, 40));
+    assert_eq!(clip.source_range(range(0, 40)), Ok(range(10, 40)));
 
     // A clip marker need not sit on the sequence grid (the source rate is unknown here).
     let odd = MarkerSpec::at(Time::new(1, 3).expect("t"), ColourLabel::Amber);
