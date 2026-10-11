@@ -10,7 +10,7 @@ State of the work when the session paused on 2026-10-01, and how to pick it up i
 | `goal/phase-2` | Phase 2 (no open tasks left, only needs-human ones), plus tasks pulled forward from Phases 3 to 6, 9, 16 and 17 (below). The integration branch: new task branches start here. Last full check on `3c22cc1`, the About dialog merge (merging this file changed only docs). |
 | `drafts/phase-4-5-wip` | Parked drafts from 2026-09-29. Every task they covered is now merged (see below); nothing on the branch is still needed. |
 
-Phase 2 has no open tasks, but `goal/phase-2` does not merge to `main` yet: its Done when also asks that `smoke` plays the reference project, and `smoke` is still a stub (decode check only) until `tests/fixtures/reference.proj` (Phase 5) and playback (Phase 3) exist.
+Phase 2 has no open tasks. Its Done when also asks that `smoke` plays the reference project: `smoke` now opens `tests/fixtures/reference.proj`, plays 2 s through `engine::timeline::TimelinePlayback` and exports 1 s through `media::export` (silent audio until the engine mixes audio), then verifies the file (Decision 66).
 
 **Done on `goal/phase-2`.**
 
@@ -216,7 +216,7 @@ Full text in `docs/DECISIONS.md`; one line each here.
 
 **Phase 14 / 16 (performance)**
 - Proxy pipeline decodes, scales and encodes on one thread; splitting decode/scale and encode across threads could lift ProRes VT 4K from about 130 to about 230 fps.
-- The frame-budget test `every_theme_renders_within_the_frame_budget` can fail under parallel load or swap; rerun it alone before treating it as a failure.
+- Timing tests hold load-robust figures by default and the strict ones only under `GLASS_STRICT_TIMING=1` (Decision 64); the strict figures still swing with the GPU's clock (a 4K dissolve pass takes 1.3 or 2.2 ms on a quiet machine), so CI's strict step may need looser budgets or a warmed GPU.
 - Integration test binaries could be consolidated per crate to cut link time.
 
 **Phase 17 / release**
@@ -247,7 +247,7 @@ Full text in `docs/DECISIONS.md`; one line each here.
 - The Mac's screen is usually locked and eframe skips painting occluded windows, so tests, benchmarks and the frame-time monitor run headless/offscreen (`ui::headless`, `experiments/proto-ui/src/offscreen.rs`). Only a check that truly needs a visible window gets a needs-human sub-task.
 - Never copy files from other projects on this machine into the repo. The only downloads are crates through cargo and the pinned, checksummed source archives in `scripts/ffmpeg/versions.env` (FFmpeg, x264, x265, dav1d, pkgconf, nasm, meson, ninja). No fonts, models or asset files. Outside the repo only `cargo install` of tools PLAN.md names (`cargo-sweep` 0.8 is installed) and `rustup` components; no `brew install`.
 - Commit messages carry no attribution trailers or footers.
-- Measurements say that the M2 stands in for the M1 reference. Rerun a frame-budget or timing test once if it fails under load and say so.
+- Measurements say that the M2 stands in for the M1 reference. A frame-budget or timing test that fails in its default mode is a regression, not load (Decision 64): do not rerun it to get a pass.
 - Split tasks: the parent keeps its checkbox and becomes `[x]` when every sub-task is `[x]` or `[-]`; if only needs-human sub-tasks remain it gets `(needs-human: blocked only on the sub-task(s) below)`. Needs-human: do the local part, tag the line `(needs-human: <reason>)`, add a Progress Log line, commit `plan: needs-human <task>`, move on. A task that needs a CI job adds it to `ci.yml`, verifies locally what it can and tags only the CI part.
 
 **Machine guidance.** This Mac is an Apple M2 with 8 GB RAM. PLAN.md's hard cap is 10 parallel workers, but in practice about 6 compiling at once is the most that works: with 9, swap reached about 5 GB. `scripts/cargo-serial` forgets the workspace fingerprints whenever the building checkout changes (Decision 28), so with many worktrees nearly every cargo command recompiles the workspace crates; batch a task's cargo steps into one lock hold (`scripts/finish-check.sh`) instead of queueing them one by one. If the Mac starts swapping, export `CARGO_BUILD_JOBS=2` after sourcing `dev-env.sh` (which sets 8) and close other heavy apps. Disk: `scripts/cargo-serial sweep --time 7` (run under the lock so nothing builds meanwhile) freed 27.8 GB on 2026-10-01, leaving about 35 GB; 29 GB was free when this was written (check `df -h /`). Below 15 GB: the sweep, then regenerable caches under the project cache folder, then `cargo clean` (only with no other worktree building). Never delete source or anything outside the repo.

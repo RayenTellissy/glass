@@ -2,6 +2,8 @@
 //! the docked grid and the widened list, each scrolling every frame and showing a new set
 //! of search results from `SearchIndex` once, within the frame budget.
 
+mod support;
+
 use std::collections::BTreeSet;
 
 use egui::{Rect, vec2};
@@ -9,7 +11,7 @@ use project::media_pool::{
     ColourLabel, Facts, MediaItem, MediaKind, MediaPool, MediaStatus, OfflineReason, Query,
     SearchIndex,
 };
-use ui::frame_time::FrameTimeMonitor;
+use support::FrameBudget;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::panels::media_pool::{
     BinSelection, ItemRow, MediaPoolView, PoolView, ProxyState, bin_rows, filter_chips, media_pool,
@@ -150,7 +152,7 @@ fn draw_within_budget(what: &str, mode: PoolView) {
         .collect();
     assert!(results.iter().all(|(_, _, rows)| !rows.is_empty()));
     let mut shown = usize::MAX;
-    let mut monitor = FrameTimeMonitor::default();
+    let mut budget = FrameBudget::new();
     let mut slow = Vec::new();
     for frame in 0..WARMUP + FRAMES {
         let next = usize::from(frame >= WARMUP + FRAMES / 2);
@@ -166,39 +168,38 @@ fn draw_within_budget(what: &str, mode: PoolView) {
             shown = next;
         }
         view.scroll = (frame as f32 * 45.0) % 20_000.0;
-        let elapsed = headless
-            .frame(|ui| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(ui, |ui| {
-                        let full = ui.max_rect();
-                        let rect = match view.view {
-                            PoolView::Grid => {
-                                Rect::from_min_size(full.min, vec2(400.0, full.height()))
-                            }
-                            PoolView::List => full,
-                        };
-                        media_pool(ui, rect, &mut view);
-                    });
-            })
-            .expect("headless frame");
-        if frame >= WARMUP {
-            monitor.record(elapsed);
-            if elapsed.as_secs_f64() > 0.008 {
-                slow.push(format!(
-                    "{frame}{} {:.1} ms",
-                    if swapped { " (new results)" } else { "" },
-                    elapsed.as_secs_f64() * 1e3
-                ));
-            }
+        let draw = |ui: &mut egui::Ui| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| {
+                    let full = ui.max_rect();
+                    let rect = match view.view {
+                        PoolView::Grid => Rect::from_min_size(full.min, vec2(400.0, full.height())),
+                        PoolView::List => full,
+                    };
+                    media_pool(ui, rect, &mut view);
+                });
+        };
+        let elapsed = if frame >= WARMUP {
+            budget.frame(&mut headless, draw)
+        } else {
+            headless.frame(draw)
+        }
+        .expect("headless frame");
+        if frame >= WARMUP && elapsed.as_secs_f64() > 0.008 {
+            slow.push(format!(
+                "{frame}{} {:.1} ms",
+                if swapped { " (new results)" } else { "" },
+                elapsed.as_secs_f64() * 1e3
+            ));
         }
     }
     if !slow.is_empty() {
         eprintln!("{what}: slow frames: {}", slow.join(", "));
     }
-    let stats = monitor.stats();
+    let stats = budget.report();
     eprintln!("{what} ({}): {stats}", headless.adapter());
-    headless.assert_p99_within_budget(what, &stats);
+    stats.assert_within_budget(&headless, what);
 }
 
 /// One test for both views, so their headless frames never run at the same time.

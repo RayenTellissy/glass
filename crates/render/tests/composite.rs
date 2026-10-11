@@ -246,10 +246,12 @@ fn alpha_edge_cases() {
 
 /// Five 4K layers (normal at the bottom, then multiply, screen, overlay and soft light)
 /// in one composite pass, timed with GPU timestamps over 60 frames after a warm-up.
-/// Prints the median and p99 and holds the median under the whole Phase 4 budget (8 ms
-/// for layers, transforms, text, shapes and masks together).
+/// Prints the statistics and holds them to the whole Phase 4 budget (8 ms for layers,
+/// transforms, text, shapes and masks together) by the shared timing rules
+/// (`common::timing`).
 #[test]
 fn five_4k_layers_gpu_time() {
+    let _serial = common::timing::serial();
     let Some((device, queue)) = common::device() else {
         eprintln!("skipped: no GPU adapter");
         return;
@@ -296,9 +298,7 @@ fn five_4k_layers_gpu_time() {
             times.push(timings.total_ms.expect("total"));
         }
     }
-    times.sort_by(f64::total_cmp);
-    let median = times[times.len() / 2];
-    let p99 = times[(times.len() * 99).div_ceil(100) - 1];
-    println!("5 layers at 4K, one pass: GPU median {median:.3} ms, p99 {p99:.3} ms");
-    assert!(median < 8.0, "median {median} ms");
+    let times = common::timing::Samples::new(times);
+    println!("5 layers at 4K, one pass, GPU: {times}");
+    common::timing::assert_gpu_within("5 layers at 4K", &times, 8.0);
 }

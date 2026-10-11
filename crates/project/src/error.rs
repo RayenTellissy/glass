@@ -55,6 +55,8 @@ pub enum EditError {
     InvalidCacheFolder(CacheFolder),
     #[error("track index {index} out of range (sequence has {len} tracks)")]
     TrackIndex { index: usize, len: usize },
+    #[error("track {0} cannot have an empty name")]
+    EmptyTrackName(TrackId),
     #[error("an item cannot move from a {from:?} track to a {to:?} track")]
     TrackKindMismatch { from: TrackKind, to: TrackKind },
     #[error("source time would go before the start of the media: {0} s")]
@@ -153,6 +155,29 @@ pub enum EditError {
         expected: String,
         found: String,
     },
+    #[error("sequence {child} contains sequence {parent}, so it cannot be nested in it")]
+    NestingCycle {
+        parent: SequenceId,
+        child: SequenceId,
+    },
+    #[error("sequence {sequence} is nested by clip {item}")]
+    SequenceInUse { sequence: SequenceId, item: ItemId },
+    #[error("nothing is selected to nest")]
+    NothingToNest,
+    #[error("item {0} is in another sequence than the rest of the selection")]
+    NestAcrossSequences(ItemId),
+    #[error("a compound clip holds either sound (audio tracks) or picture, not both")]
+    NestMixedKinds,
+    #[error("a compound clip needs a selected item on a video or audio track")]
+    NestNeedsClipTrack,
+    #[error("clip {0} does not show a sequence")]
+    NotNested(ItemId),
+    #[error("clip {0} does not show a compound clip's sequence")]
+    NotACompound(ItemId),
+    #[error("clip {item} plays at speed {speed}; only a clip at speed 1 can be broken apart")]
+    BreakApartSpeed { item: ItemId, speed: Rational },
+    #[error("the sequence has no {kind:?} track number {} for the nested items", index + 1)]
+    BreakApartNoTrack { kind: TrackKind, index: usize },
     #[error("media {0} is relinked twice in one batch")]
     RelinkTwice(MediaId),
     #[error("media {0} cannot be relinked to an empty path")]

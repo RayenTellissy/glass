@@ -1108,7 +1108,7 @@ fn v3_json(f: &Fixture) -> Value {
         .expect("project")
         .remove("settings")
         .expect("v6 settings");
-    for key in ["resolution", "drop_frame", "channel_layout"] {
+    for key in ["resolution", "drop_frame", "channel_layout", "compound"] {
         json["sequences"][0]
             .as_object_mut()
             .expect("sequence")

@@ -365,7 +365,7 @@ fn a_format_1_autosave_from_before_schema_v2_is_refused_by_version() {
     );
     fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
 
-    assert_eq!(autosave::FORMAT_VERSION, 7);
+    assert_eq!(autosave::FORMAT_VERSION, 8);
     assert!(matches!(
         autosave::recover(&dir),
         Err(autosave::AutosaveError::Format(1))
@@ -561,6 +561,62 @@ fn a_format_6_autosave_from_before_schema_v7_is_refused_by_version() {
         autosave::recover(&dir),
         Err(autosave::AutosaveError::Format(6))
     ));
+    fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+#[test]
+fn a_format_7_autosave_from_before_schema_v8_is_refused_by_version() {
+    let s = setup();
+    let dir = temp_dir("format-7");
+    let (p, _) = s
+        .project
+        .insert_clip(s.v1, clip(s.media, 0, 5))
+        .expect("clip");
+    let mut writer = AutosaveWriter::open(&dir, &p, None, 0, 0).expect("open");
+    writer.tick(&p, 1, 10).expect("tick");
+    drop(writer);
+    let snapshot = dir.join("snapshot-00000001.json");
+    let mut old: serde_json::Value =
+        serde_json::from_slice(&fs::read(&snapshot).expect("snapshot")).expect("json");
+    old["autosave_format"] = 7.into();
+    old["project"]["sequences"][0]
+        .as_object_mut()
+        .expect("sequence")
+        .remove("compound")
+        .expect("v8 compound flag");
+    assert!(
+        serde_json::from_value::<Project>(old["project"].clone()).is_err(),
+        "a format 7 project no longer parses"
+    );
+    fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
+    assert!(matches!(
+        autosave::recover(&dir),
+        Err(autosave::AutosaveError::Format(7))
+    ));
+    fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// Nesting a selection adds a sequence and moves items between records; the log
+/// recovers it.
+#[test]
+fn nesting_edits_recover_from_the_log() {
+    let s = setup();
+    let dir = temp_dir("nesting");
+    let (p, a) = s
+        .project
+        .insert_clip(s.v1, clip(s.media, 0, 10))
+        .expect("clip");
+    let (p, b) = p.insert_clip(s.v1, clip(s.media, 10, 10)).expect("clip");
+    let mut writer = AutosaveWriter::open(&dir, &p, None, 0, 0).expect("open");
+    let (p, _, nested) = p.nest_items(&[a, b], "Compound").expect("nest");
+    writer.tick(&p, 1, 10).expect("tick");
+    let p = p
+        .set_clip_speed(nested, Rational::new(1, 2), project::SpeedKeep::Timeline)
+        .expect("speed");
+    writer.tick(&p, 1, 20).expect("tick");
+    drop(writer);
+    let recovered = autosave::recover(&dir).expect("recovers");
+    assert!(recovered.project.content_eq(&p));
     fs::remove_dir_all(&dir).expect("cleanup");
 }
 

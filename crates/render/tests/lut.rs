@@ -370,9 +370,11 @@ fn picture_4k(gpu: &Gpu) -> wgpu::Texture {
 /// and 65-point tables (Rec.709 input, so with both transfers), a 1D-only table and the
 /// pass at intensity 0 (a plain copy, for comparison). On a smooth picture, and on
 /// per-pixel noise, the worst case: every pixel looks up a different part of the table,
-/// so the table no longer stays in the texture cache.
+/// so the table no longer stays in the texture cache. Held to the budget by the shared
+/// timing rules (`common::timing`).
 #[test]
 fn lut_pass_at_4k_gpu_time() {
+    let _serial = common::timing::serial();
     let Some(gpu) = gpu() else {
         eprintln!("skipped: no GPU adapter");
         return;
@@ -456,22 +458,18 @@ fn lut_pass_at_4k_gpu_time() {
                     times.extend(timings.passes[0].gpu_ms);
                 }
             }
-            times.sort_by(f64::total_cmp);
-            let median = times[times.len() / 2];
-            let max = times[times.len() - 1];
+            let times = common::timing::Samples::new(times);
             let what = if intensity > 0.0 {
                 *name
             } else {
                 "copy (intensity 0)"
             };
-            println!(
-                "4K LUT pass, {input_name}, {what}: median {median:.3} ms, max {max:.3} ms GPU ({} frames)",
-                times.len()
-            );
-            // Half of the 8 ms compositor budget on pictures, loose for a shared GPU; noise
-            // is reported, and only has to stay under a frame at 60 fps.
+            let what = format!("4K LUT pass, {input_name}, {what}");
+            println!("{what} GPU: {times}");
+            // Half of the 8 ms compositor budget on pictures; noise is reported, and only
+            // has to stay under a frame at 60 fps.
             let limit = if *input_name == "picture" { 4.0 } else { 16.0 };
-            assert!(median < limit, "{input_name}, {what}: {median} ms");
+            common::timing::assert_gpu_within(&what, &times, limit);
         }
     }
 }
