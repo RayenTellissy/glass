@@ -479,6 +479,8 @@
     "import.picker.filter": "Video, audio and pictures",
     "pool.tab.media": "Media",
     "pool.tab.transitions": "Transitions",
+    "transition.category.dissolve": "Dissolves",
+    "transition.name.cross_dissolve": "Cross dissolve",
     "pool.tab.titles": "Titles",
     "pool.tab.effects": "Effects",
     "pool.tab.audio": "Audio",
