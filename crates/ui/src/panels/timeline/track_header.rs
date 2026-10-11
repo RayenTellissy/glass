@@ -913,9 +913,15 @@ mod tests {
             height: HeightPreset::Large,
         };
         let (p, label) = apply(&p, large.clone()).unwrap();
-        assert_eq!((label, flags(&p).height), (EditLabel::TrackHeight, HeightPreset::Large));
+        assert_eq!(
+            (label, flags(&p).height),
+            (EditLabel::TrackHeight, HeightPreset::Large)
+        );
         let (same, _) = apply(&p, large).unwrap();
-        assert!(same.content_eq(&p), "setting the same height changes nothing");
+        assert!(
+            same.content_eq(&p),
+            "setting the same height changes nothing"
+        );
         assert!(
             apply(&p, TrackHeaderAction::ToggleVisible(t)).is_err(),
             "audio tracks have no visibility switch"

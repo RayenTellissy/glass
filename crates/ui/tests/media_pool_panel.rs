@@ -7,7 +7,9 @@ mod support;
 use std::collections::BTreeSet;
 
 use egui::{Rect, vec2};
-use project::media_pool::{ColourLabel, Facts, MediaItem, MediaKind, MediaPool, Query, SearchIndex};
+use project::media_pool::{
+    ColourLabel, Facts, MediaItem, MediaKind, MediaPool, Query, SearchIndex,
+};
 use support::FrameBudget;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::panels::media_pool::{

@@ -5,9 +5,7 @@
 use std::collections::BTreeSet;
 
 use egui::{Rect, vec2};
-use project::media_pool::{
-    ColourLabel, Facts, MediaItem, MediaKind, MediaPool, Query, SortBy,
-};
+use project::media_pool::{ColourLabel, Facts, MediaItem, MediaKind, MediaPool, Query, SortBy};
 use project::{BinId, MediaId};
 
 use crate::panels::media_pool::{
