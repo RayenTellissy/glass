@@ -8,23 +8,21 @@
 //! changes the view), and cannot be renamed.
 //!
 //! [`track_headers`] draws a [`TrackHeaderView`] and returns a [`TrackHeaderAction`]; it
-//! never changes the project. A rename is applied by the caller with
-//! [`project::Project::rename_track`] (undo label [`project::EditLabel::RenameTrack`]).
-//! Mute, solo, lock, visibility and height are not in the project file yet (that needs a
-//! schema version), so they live in [`TrackHeaderState`], which applies those actions
-//! and builds the rows from a sequence.
+//! never changes the project. The switches and heights are track fields in the project
+//! (schema v9, `project::switches`): [`rows`] reads them from a sequence, and [`edit`]
+//! turns an action into the project edit and its undo label for the caller to commit
+//! (rename, mute, solo, visibility, lock, height). Only view state stays here: the rename
+//! in progress, scrolling, hover and focus.
 //!
 //! Keyboard: Tab walks each row, then its switches in drawing order; Enter or Space
 //! presses the focused one; F2 on a row (or a double click on its name) starts renaming,
 //! Enter keeps the new name and Escape drops it.
 
-use std::collections::HashMap;
-
 use egui::{
     Align2, CornerRadius, Id, Key, Rect, Response, Sense, Stroke, StrokeKind, Ui, WidgetInfo,
     WidgetType, pos2, vec2,
 };
-use project::{Sequence, TrackId, TrackKind};
+use project::{EditError, EditLabel, Project, Sequence, Track, TrackHeight, TrackId, TrackKind};
 
 use crate::panels::widgets::{Icon, Paint, Type, icon, size};
 use crate::t;
@@ -86,6 +84,26 @@ impl HeightPreset {
     }
 }
 
+impl From<TrackHeight> for HeightPreset {
+    fn from(height: TrackHeight) -> Self {
+        match height {
+            TrackHeight::Small => HeightPreset::Small,
+            TrackHeight::Medium => HeightPreset::Medium,
+            TrackHeight::Large => HeightPreset::Large,
+        }
+    }
+}
+
+impl From<HeightPreset> for TrackHeight {
+    fn from(height: HeightPreset) -> Self {
+        match height {
+            HeightPreset::Small => TrackHeight::Small,
+            HeightPreset::Medium => TrackHeight::Medium,
+            HeightPreset::Large => TrackHeight::Large,
+        }
+    }
+}
+
 /// A track's switches and height.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TrackFlags {
@@ -94,6 +112,19 @@ pub struct TrackFlags {
     pub locked: bool,
     pub hidden: bool,
     pub height: HeightPreset,
+}
+
+impl TrackFlags {
+    /// The flags a project track carries.
+    pub fn of(track: &Track) -> Self {
+        Self {
+            muted: track.muted,
+            soloed: track.solo,
+            locked: track.locked,
+            hidden: !track.visible,
+            height: track.height.into(),
+        }
+    }
 }
 
 /// Whether an audio track is heard: not muted, and soloed whenever any track is.
@@ -235,86 +266,69 @@ pub enum TrackHeaderAction {
     },
 }
 
-/// The switches and heights of a sequence's tracks, kept beside the project until the
-/// project file stores them.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct TrackHeaderState {
-    flags: HashMap<TrackId, TrackFlags>,
+/// The rows of `sequence`'s tracks, top first, with their switches and heights from the
+/// project.
+pub fn rows(sequence: &Sequence, targeted: Option<TrackId>) -> Vec<TrackRow> {
+    sequence
+        .tracks
+        .iter()
+        .map(|t| TrackRow {
+            id: t.id,
+            kind: t.kind,
+            name: t.name.clone(),
+            flags: TrackFlags::of(t),
+            targeted: targeted == Some(t.id),
+        })
+        .collect()
 }
 
-impl TrackHeaderState {
-    pub fn flags(&self, track: TrackId) -> TrackFlags {
-        self.flags.get(&track).copied().unwrap_or_default()
-    }
-
-    pub fn is_locked(&self, track: TrackId) -> bool {
-        self.flags(track).locked
-    }
-
-    /// Applies a switch or height action; returns whether anything changed. Mute, solo
-    /// and visibility are refused on a locked track. Target and rename are the caller's.
-    pub fn apply(&mut self, action: &TrackHeaderAction) -> bool {
-        let (track, switch) = match *action {
-            TrackHeaderAction::ToggleMute(t)
-            | TrackHeaderAction::ToggleSolo(t)
-            | TrackHeaderAction::ToggleVisible(t) => (t, true),
-            TrackHeaderAction::ToggleLock(t) | TrackHeaderAction::SetHeight { track: t, .. } => {
-                (t, false)
-            }
-            TrackHeaderAction::None
-            | TrackHeaderAction::Target(_)
-            | TrackHeaderAction::Rename { .. } => return false,
-        };
-        if switch && self.is_locked(track) {
-            return false;
-        }
-        let flags = self.flags.entry(track).or_default();
-        let before = *flags;
-        match *action {
-            TrackHeaderAction::ToggleMute(_) => flags.muted = !flags.muted,
-            TrackHeaderAction::ToggleSolo(_) => flags.soloed = !flags.soloed,
-            TrackHeaderAction::ToggleVisible(_) => flags.hidden = !flags.hidden,
-            TrackHeaderAction::ToggleLock(_) => flags.locked = !flags.locked,
-            TrackHeaderAction::SetHeight { height, .. } => flags.height = height,
-            _ => {}
-        }
-        *flags != before
-    }
-
-    /// Whether `track` of `sequence` is heard: audio, not muted, and soloed whenever any
-    /// audio track of the sequence is.
-    pub fn audible(&self, sequence: &Sequence, track: TrackId) -> bool {
-        let Some(t) = sequence.tracks.iter().find(|t| t.id == track) else {
-            return false;
-        };
-        let any_solo = sequence
-            .tracks
-            .iter()
-            .any(|t| t.kind == TrackKind::Audio && self.flags(t.id).soloed);
-        let flags = self.flags(track);
-        t.kind == TrackKind::Audio && audible(flags.muted, flags.soloed, any_solo)
-    }
-
-    /// The rows of `sequence`'s tracks, top first.
-    pub fn rows(&self, sequence: &Sequence, targeted: Option<TrackId>) -> Vec<TrackRow> {
-        sequence
-            .tracks
-            .iter()
-            .map(|t| TrackRow {
-                id: t.id,
-                kind: t.kind,
-                name: t.name.clone(),
-                flags: self.flags(t.id),
-                targeted: targeted == Some(t.id),
-            })
-            .collect()
-    }
-
-    /// Forgets tracks no longer in `sequence`.
-    pub fn retain(&mut self, sequence: &Sequence) {
-        self.flags
-            .retain(|id, _| sequence.tracks.iter().any(|t| t.id == *id));
-    }
+/// The project edit for a header action, with its undo label: rename
+/// ([`Project::rename_track`]), mute, solo, visibility, lock and height (each toggle sets
+/// the opposite of the track's current switch). `None` for actions that are not edits
+/// (none, target). A locked track refuses everything but unlocking and height with
+/// [`EditError::TrackLocked`]; an edit that changes nothing returns the project as it
+/// was, which the history does not record.
+pub fn edit(
+    project: &Project,
+    action: &TrackHeaderAction,
+) -> Option<Result<(Project, EditLabel), EditError>> {
+    let track = |id: TrackId| {
+        project
+            .find_track(id)
+            .map(|(_, t)| t.clone())
+            .ok_or(EditError::UnknownTrack(id))
+    };
+    let pick = |on: bool, yes: EditLabel, no: EditLabel| if on { yes } else { no };
+    let result = match action {
+        TrackHeaderAction::None | TrackHeaderAction::Target(_) => return None,
+        TrackHeaderAction::Rename { track, name } => project
+            .rename_track(*track, name)
+            .map(|p| (p, EditLabel::RenameTrack)),
+        TrackHeaderAction::ToggleMute(id) => track(*id).and_then(|t| {
+            let on = !t.muted;
+            let label = pick(on, EditLabel::MuteTrack, EditLabel::UnmuteTrack);
+            project.set_track_muted(*id, on).map(|p| (p, label))
+        }),
+        TrackHeaderAction::ToggleSolo(id) => track(*id).and_then(|t| {
+            let on = !t.solo;
+            let label = pick(on, EditLabel::SoloTrack, EditLabel::UnsoloTrack);
+            project.set_track_solo(*id, on).map(|p| (p, label))
+        }),
+        TrackHeaderAction::ToggleVisible(id) => track(*id).and_then(|t| {
+            let on = !t.visible;
+            let label = pick(on, EditLabel::ShowTrack, EditLabel::HideTrack);
+            project.set_track_visible(*id, on).map(|p| (p, label))
+        }),
+        TrackHeaderAction::ToggleLock(id) => track(*id).and_then(|t| {
+            let on = !t.locked;
+            let label = pick(on, EditLabel::LockTrack, EditLabel::UnlockTrack);
+            project.set_track_locked(*id, on).map(|p| (p, label))
+        }),
+        TrackHeaderAction::SetHeight { track, height } => project
+            .set_track_height(*track, (*height).into())
+            .map(|p| (p, EditLabel::TrackHeight)),
+    };
+    Some(result)
 }
 
 /// A row's parts, mirrored for right to left.
@@ -882,33 +896,66 @@ mod tests {
     }
 
     #[test]
-    fn state_applies_switches_and_refuses_them_on_locked_tracks() {
-        let t = TrackId(7);
-        let mut state = TrackHeaderState::default();
-        assert!(state.apply(&TrackHeaderAction::ToggleMute(t)));
-        assert!(state.flags(t).muted);
-        assert!(state.apply(&TrackHeaderAction::SetHeight {
+    fn actions_become_project_edits_refused_on_locked_tracks() {
+        let p = Project::new("uid-th-unit", "Headers");
+        let (p, seq) = p
+            .add_sequence("Main", project::Rational::new(25, 1), 48_000)
+            .unwrap();
+        let (p, t) = p.add_track(seq, TrackKind::Audio, "A1", None).unwrap();
+        let apply = |p: &Project, action: TrackHeaderAction| edit(p, &action).unwrap();
+        let flags = |p: &Project| TrackFlags::of(p.find_track(t).unwrap().1);
+
+        let (p, label) = apply(&p, TrackHeaderAction::ToggleMute(t)).unwrap();
+        assert_eq!(label, EditLabel::MuteTrack);
+        assert!(flags(&p).muted);
+        let large = TrackHeaderAction::SetHeight {
             track: t,
-            height: HeightPreset::Large
-        }));
-        assert!(!state.apply(&TrackHeaderAction::SetHeight {
-            track: t,
-            height: HeightPreset::Large
-        }));
-        assert!(state.apply(&TrackHeaderAction::ToggleLock(t)));
-        assert!(!state.apply(&TrackHeaderAction::ToggleMute(t)));
-        assert!(!state.apply(&TrackHeaderAction::ToggleSolo(t)));
-        assert!(!state.apply(&TrackHeaderAction::ToggleVisible(t)));
-        assert!(state.flags(t).muted, "locked tracks keep their switches");
+            height: HeightPreset::Large,
+        };
+        let (p, label) = apply(&p, large.clone()).unwrap();
+        assert_eq!(
+            (label, flags(&p).height),
+            (EditLabel::TrackHeight, HeightPreset::Large)
+        );
+        let (same, _) = apply(&p, large).unwrap();
+        assert!(
+            same.content_eq(&p),
+            "setting the same height changes nothing"
+        );
+        assert!(
+            apply(&p, TrackHeaderAction::ToggleVisible(t)).is_err(),
+            "audio tracks have no visibility switch"
+        );
+
+        let (p, label) = apply(&p, TrackHeaderAction::ToggleLock(t)).unwrap();
+        assert_eq!(label, EditLabel::LockTrack);
+        for action in [
+            TrackHeaderAction::ToggleMute(t),
+            TrackHeaderAction::ToggleSolo(t),
+            TrackHeaderAction::Rename {
+                track: t,
+                name: "Music".into(),
+            },
+        ] {
+            assert_eq!(apply(&p, action), Err(EditError::TrackLocked(t)));
+        }
+        assert!(flags(&p).muted, "locked tracks keep their switches");
         // Height is a view setting and still changes.
-        assert!(state.apply(&TrackHeaderAction::SetHeight {
-            track: t,
-            height: HeightPreset::Small
-        }));
-        assert!(state.apply(&TrackHeaderAction::ToggleLock(t)));
-        assert!(state.apply(&TrackHeaderAction::ToggleMute(t)));
-        assert!(!state.flags(t).muted);
-        assert!(!state.apply(&TrackHeaderAction::Target(t)));
+        let (p, _) = apply(
+            &p,
+            TrackHeaderAction::SetHeight {
+                track: t,
+                height: HeightPreset::Small,
+            },
+        )
+        .unwrap();
+        let (p, label) = apply(&p, TrackHeaderAction::ToggleLock(t)).unwrap();
+        assert_eq!(label, EditLabel::UnlockTrack);
+        let (p, label) = apply(&p, TrackHeaderAction::ToggleMute(t)).unwrap();
+        assert_eq!(label, EditLabel::UnmuteTrack);
+        assert!(!flags(&p).muted);
+        assert!(edit(&p, &TrackHeaderAction::Target(t)).is_none());
+        assert!(edit(&p, &TrackHeaderAction::None).is_none());
     }
 
     #[test]

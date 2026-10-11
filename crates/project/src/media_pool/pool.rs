@@ -4,14 +4,14 @@
 //! thousand leaves the other 9,999 items the same allocations in the old and new pool
 //! (undo keeps both for the cost of one item).
 //!
-//! The pool is standalone until the project root embeds it (Phase 5 schema work). It
-//! hands out its own ids from its own counter, and [`MediaPool::insert_item`] accepts an
-//! id chosen by the caller, so the project's node counter can take over later without
-//! changing this API.
+//! The project embeds a pool as [`crate::Project::media`] (schema v9), whose edits go
+//! through the edit tree ([`crate::media_pool::edit`]) with ids from the project's node
+//! counter. A pool can also be built on its own (views, tests): [`MediaPool::add_item`]
+//! and [`MediaPool::add_bin`] then hand out the next id after the highest in use, and
+//! [`MediaPool::insert_item`] takes an id the caller chose.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use imbl::OrdMap;
@@ -93,36 +93,45 @@ impl MediaKind {
     }
 }
 
-/// Why a file cannot be used right now.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OfflineReason {
-    /// The file is not at its path any more (moved, renamed or deleted).
-    Missing,
-    /// The drive or card it was on is not connected.
-    VolumeNotConnected,
-    /// The file is there but cannot be read (permissions, damaged, changed content).
-    Unreadable,
-}
-
-/// Whether a media item's file can be used.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "state")]
-pub enum MediaStatus {
-    #[default]
-    Online,
-    Offline {
-        reason: OfflineReason,
-    },
-}
-
-impl MediaStatus {
-    pub fn is_offline(&self) -> bool {
-        matches!(self, MediaStatus::Offline { .. })
+impl MediaKind {
+    /// A first guess from a path's extension, for references added without a probe
+    /// ([`crate::Project::add_media`]): audio and still image extensions, anything else
+    /// video. The import (`engine::media_mgmt`) classifies files properly.
+    pub fn guess(path: &str) -> MediaKind {
+        let ext = file_name(path)
+            .rsplit_once('.')
+            .map(|(_, ext)| ext.to_ascii_lowercase())
+            .unwrap_or_default();
+        match ext.as_str() {
+            "wav" | "aif" | "aiff" | "mp3" | "m4a" | "aac" | "flac" | "ogg" | "opus" | "caf" => {
+                MediaKind::Audio
+            }
+            "png" | "jpg" | "jpeg" | "tif" | "tiff" | "heic" | "heif" | "bmp" | "gif" | "webp"
+            | "exr" | "dpx" => MediaKind::Still,
+            _ => MediaKind::Video,
+        }
     }
 }
 
-/// One source file (or spanned recording, or image sequence) in the pool.
+/// The last component of a path written with `/` or `\` separators (both, on every
+/// platform, so a project file names its media the same everywhere).
+pub fn file_name(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+/// The file name without its last extension (`A014_C003.MXF` → `A014_C003`); a name
+/// that is only an extension (`.wav`) stays whole.
+pub fn file_stem(path: &str) -> &str {
+    let name = file_name(path);
+    match name.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => stem,
+        _ => name,
+    }
+}
+
+/// One source file (or spanned recording, or image sequence) in the pool. Saved in the
+/// project file as it is (schema v9); whether its file is available right now is engine
+/// runtime state (`engine::media_mgmt::offline`), never stored here.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MediaItem {
     /// Set by the pool when the item is added.
@@ -131,39 +140,34 @@ pub struct MediaItem {
     pub bin: BinId,
     pub name: String,
     pub kind: MediaKind,
-    /// The first (or only) file; for a sequence, its first frame.
-    pub path: PathBuf,
+    /// The first (or only) file; for a sequence, its first frame. A string, as the user
+    /// chose it, so every path can be saved.
+    pub path: String,
     /// Further files of a recording the camera split, in order.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub spanned: Vec<PathBuf>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sidecars: Vec<PathBuf>,
-    /// The content hash (hex) the analysis cache and relinking key on.
-    #[serde(default)]
-    pub content_hash: Option<String>,
-    #[serde(default)]
+    pub spanned: Vec<String>,
+    /// Camera sidecar files (XML, SRT) the metadata came from.
+    pub sidecars: Vec<String>,
+    /// The content hash (`media::ContentHash`, hex) the analysis cache and relinking key
+    /// on; empty when unknown.
+    pub content_hash: String,
     pub size_bytes: u64,
     /// The camera card format the item came from (`XDCAM`, `DJI`).
-    #[serde(default)]
     pub card: Option<String>,
-    /// When it was imported, seconds since the Unix epoch.
-    #[serde(default)]
+    /// When it was imported, seconds since the Unix epoch (0 when unknown).
     pub added_unix: u64,
-    #[serde(default)]
+    /// Stream facts read at import, kept so the pool can show and search them while
+    /// the file is offline.
     pub facts: Facts,
-    #[serde(default)]
+    /// Camera metadata read at import.
     pub metadata: Metadata,
-    #[serde(default)]
     pub label: Option<ColourLabel>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
-    #[serde(default)]
-    pub status: MediaStatus,
 }
 
 impl MediaItem {
-    /// A new, online item with no label or tags (the pool assigns `id` and `bin`).
-    pub fn new(name: impl Into<String>, kind: MediaKind, path: impl Into<PathBuf>) -> Self {
+    /// A new item with no label or tags and nothing known about the file (the pool
+    /// assigns `id` and `bin`).
+    pub fn new(name: impl Into<String>, kind: MediaKind, path: impl Into<String>) -> Self {
         Self {
             id: MediaId(0),
             bin: BinId(0),
@@ -172,7 +176,7 @@ impl MediaItem {
             path: path.into(),
             spanned: Vec::new(),
             sidecars: Vec::new(),
-            content_hash: None,
+            content_hash: String::new(),
             size_bytes: 0,
             card: None,
             added_unix: 0,
@@ -180,12 +184,11 @@ impl MediaItem {
             metadata: Metadata::default(),
             label: None,
             tags: Vec::new(),
-            status: MediaStatus::Online,
         }
     }
 
     /// Every media file of the item, in order.
-    pub fn files(&self) -> impl Iterator<Item = &PathBuf> {
+    pub fn files(&self) -> impl Iterator<Item = &String> {
         std::iter::once(&self.path).chain(&self.spanned)
     }
 
@@ -213,6 +216,8 @@ pub enum PoolError {
     NoSuchItem(MediaId),
     #[error("media item {0} is already in the pool")]
     DuplicateItem(MediaId),
+    #[error("bin {0} is already in the pool")]
+    DuplicateBin(BinId),
     #[error("the root bin cannot be removed or moved")]
     RootBin,
     #[error("a bin cannot move into itself or one of its own bins")]
@@ -232,19 +237,20 @@ pub enum SortBy {
     Size,
 }
 
-/// The media pool: bins, items and label names. See the module docs.
+/// The media pool: bins, items and label names. See the module docs. Saved as
+/// `{"bins": [...], "items": [...], "label_names": {...}}`, bins and items by id (the
+/// root bin first), label names by label; [`MediaPool::check`] holds the invariants.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "PoolFile", into = "PoolFile")]
+#[serde(from = "PoolFile", into = "PoolFile")]
 pub struct MediaPool {
-    pub(super) bins: OrdMap<BinId, Arc<Bin>>,
-    pub(super) items: OrdMap<MediaId, Arc<MediaItem>>,
+    pub(crate) bins: OrdMap<BinId, Arc<Bin>>,
+    pub(crate) items: OrdMap<MediaId, Arc<MediaItem>>,
     /// Names the user gave the colour labels (`Selects`, `Interviews`).
-    pub(super) label_names: OrdMap<ColourLabel, String>,
-    /// The next id [`MediaPool::add_bin`] and [`MediaPool::add_item`] hand out.
-    next_id: u64,
+    pub(crate) label_names: OrdMap<ColourLabel, String>,
 }
 
-const ROOT: BinId = BinId(0);
+/// The root bin's id. Node ids start at 1, so it never names another node.
+pub const ROOT: BinId = BinId(0);
 
 impl Default for MediaPool {
     fn default() -> Self {
@@ -264,20 +270,19 @@ impl MediaPool {
             bins: OrdMap::unit(ROOT, Arc::new(root)),
             items: OrdMap::new(),
             label_names: OrdMap::new(),
-            next_id: 1,
         }
     }
 
-    fn alloc(&mut self) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
+    /// The id after the highest bin or item id in use.
+    fn alloc(&self) -> u64 {
+        let bins = self.bins.get_max().map_or(0, |(id, _)| id.0);
+        let items = self.items.get_max().map_or(0, |(id, _)| id.0);
+        bins.max(items) + 1
     }
 
     /// True when `other` is this very version (nothing edited in between).
     pub fn ptr_eq(&self, other: &MediaPool) -> bool {
-        self.next_id == other.next_id
-            && self.bins.ptr_eq(&other.bins)
+        self.bins.ptr_eq(&other.bins)
             && self.items.ptr_eq(&other.items)
             && self.label_names.ptr_eq(&other.label_names)
     }
@@ -320,15 +325,29 @@ impl MediaPool {
     }
 
     pub fn add_bin(&mut self, parent: BinId, name: impl Into<String>) -> Result<BinId, PoolError> {
-        self.check_bin(parent)?;
         let id = BinId(self.alloc());
+        self.insert_bin(id, parent, name)?;
+        Ok(id)
+    }
+
+    /// Adds a bin under an id the caller chose (the project's node counter).
+    pub fn insert_bin(
+        &mut self,
+        id: BinId,
+        parent: BinId,
+        name: impl Into<String>,
+    ) -> Result<(), PoolError> {
+        self.check_bin(parent)?;
+        if self.bins.contains_key(&id) {
+            return Err(PoolError::DuplicateBin(id));
+        }
         let bin = Bin {
             id,
             name: name.into(),
             parent: Some(parent),
         };
         self.bins.insert(id, Arc::new(bin));
-        Ok(id)
+        Ok(())
     }
 
     /// The bin at `path` under `parent`, creating the missing ones (folder import).
@@ -349,7 +368,11 @@ impl MediaPool {
         Ok(at)
     }
 
+    /// Renames a bin; the root bin carries the project's name and is refused.
     pub fn rename_bin(&mut self, id: BinId, name: impl Into<String>) -> Result<(), PoolError> {
+        if id == ROOT {
+            return Err(PoolError::RootBin);
+        }
         let bin = self.bins.get_mut(&id).ok_or(PoolError::NoSuchBin(id))?;
         Arc::make_mut(bin).name = name.into();
         Ok(())
@@ -453,6 +476,18 @@ impl MediaPool {
         self.items.get(&id)
     }
 
+    /// The item (reference) with id `id`: [`MediaPool::item`] under the name the
+    /// timeline code reads references by.
+    pub fn get(&self, id: MediaId) -> Option<&Arc<MediaItem>> {
+        self.items.get(&id)
+    }
+
+    /// Every item by id: [`MediaPool::items`] under the name the timeline code reads
+    /// references by.
+    pub fn iter(&self) -> impl Iterator<Item = &Arc<MediaItem>> {
+        self.items.values()
+    }
+
     pub fn contains(&self, id: MediaId) -> bool {
         self.items.contains_key(&id)
     }
@@ -466,7 +501,7 @@ impl MediaPool {
     }
 
     /// Adds `item` to `bin` under an id the caller chose (the project's node counter, or
-    /// a relinked item keeping its identity). Later ids from the pool skip past it.
+    /// a relinked item keeping its identity).
     pub fn insert_item(
         &mut self,
         id: MediaId,
@@ -477,7 +512,6 @@ impl MediaPool {
         if self.items.contains_key(&id) {
             return Err(PoolError::DuplicateItem(id));
         }
-        self.next_id = self.next_id.max(id.0 + 1);
         self.put(id, bin, item);
         Ok(())
     }
@@ -488,7 +522,7 @@ impl MediaPool {
         self.items.insert(id, Arc::new(item));
     }
 
-    /// Changes one item in place (name, facts, metadata, status...). Its `id` and `bin`
+    /// Changes one item in place (name, path, facts, metadata...). Its `id` and `bin`
     /// stay as they were; move items with [`MediaPool::move_items`].
     pub fn update_item(
         &mut self,
@@ -504,7 +538,7 @@ impl MediaPool {
     }
 
     /// Removes an item from the pool (the caller checks the timeline no longer uses it;
-    /// to keep edits, take it offline instead).
+    /// [`crate::Project::remove_media`] does).
     pub fn remove_item(&mut self, id: MediaId) -> Result<Arc<MediaItem>, PoolError> {
         self.items.remove(&id).ok_or(PoolError::NoSuchItem(id))
     }
@@ -583,15 +617,6 @@ impl MediaPool {
         })
     }
 
-    pub fn set_status(&mut self, ids: &[MediaId], status: MediaStatus) -> Result<(), PoolError> {
-        self.each_mut(ids, |item| {
-            (item.status != status).then(|| MediaItem {
-                status,
-                ..item.clone()
-            })
-        })
-    }
-
     /// Adds `tag` to each item that does not have it. Tags compare ignoring case, and a
     /// tag already in use keeps its first spelling.
     pub fn add_tag(&mut self, ids: &[MediaId], tag: &str) -> Result<(), PoolError> {
@@ -658,16 +683,41 @@ impl MediaPool {
     pub fn find_by_hash(&self, hash_hex: &str) -> Option<&Arc<MediaItem>> {
         self.items
             .values()
-            .find(|i| i.content_hash.as_deref() == Some(hash_hex))
+            .find(|i| !hash_hex.is_empty() && i.content_hash == hash_hex)
     }
 
-    pub fn find_by_path(&self, path: &Path) -> Option<&Arc<MediaItem>> {
+    pub fn find_by_path(&self, path: &str) -> Option<&Arc<MediaItem>> {
         self.items.values().find(|i| i.files().any(|f| f == path))
     }
 
-    /// Items that are offline.
-    pub fn offline(&self) -> impl Iterator<Item = &Arc<MediaItem>> {
-        self.items.values().filter(|i| i.status.is_offline())
+    /// The pool's invariants, checked when a pool comes from a file: a root bin with no
+    /// parent, every other bin under an existing bin and none in a cycle, every bin and
+    /// item stored under its own id, every item in an existing bin.
+    pub fn check(&self) -> Result<(), String> {
+        match self.bins.get(&ROOT) {
+            Some(root) if root.parent.is_none() => {}
+            _ => return Err("media pool has no root bin".into()),
+        }
+        for (id, bin) in &self.bins {
+            if *id != bin.id {
+                return Err(format!("bin {} stored under {id}", bin.id));
+            }
+            if bin.id != ROOT && !bin.parent.is_some_and(|p| self.bins.contains_key(&p)) {
+                return Err(format!("bin {} has no parent bin", bin.id));
+            }
+            if !self.is_within(bin.id, ROOT) {
+                return Err(format!("bin {} is in a cycle", bin.id));
+            }
+        }
+        for (id, item) in &self.items {
+            if *id != item.id {
+                return Err(format!("media {} stored under {id}", item.id));
+            }
+            if !self.bins.contains_key(&item.bin) {
+                return Err(format!("media item {} is in a missing bin", item.id));
+            }
+        }
+        Ok(())
     }
 
     /// Sorts `items` for the list or grid; ties fall back to the name, then the id.
@@ -692,14 +742,13 @@ impl MediaPool {
     }
 }
 
-/// The pool as stored: plain lists, checked on load.
+/// The pool as stored: plain lists (checked by [`MediaPool::check`] when a project
+/// validates).
 #[derive(Serialize, Deserialize)]
 struct PoolFile {
     bins: Vec<Arc<Bin>>,
     items: Vec<Arc<MediaItem>>,
-    #[serde(default)]
     label_names: BTreeMap<ColourLabel, String>,
-    next_id: u64,
 }
 
 impl From<MediaPool> for PoolFile {
@@ -708,47 +757,17 @@ impl From<MediaPool> for PoolFile {
             bins: pool.bins.values().cloned().collect(),
             items: pool.items.values().cloned().collect(),
             label_names: pool.label_names.into_iter().collect(),
-            next_id: pool.next_id,
         }
     }
 }
 
-impl TryFrom<PoolFile> for MediaPool {
-    type Error = String;
-
-    fn try_from(file: PoolFile) -> Result<Self, String> {
-        let bins: OrdMap<BinId, Arc<Bin>> = file.bins.into_iter().map(|b| (b.id, b)).collect();
-        match bins.get(&ROOT) {
-            Some(root) if root.parent.is_none() => {}
-            _ => return Err("media pool has no root bin".into()),
-        }
-        if let Some(bin) = bins
-            .values()
-            .find(|b| b.id != ROOT && !b.parent.is_some_and(|p| bins.contains_key(&p)))
-        {
-            return Err(format!("bin {} has no parent bin", bin.id));
-        }
-        let items: OrdMap<MediaId, Arc<MediaItem>> =
-            file.items.into_iter().map(|i| (i.id, i)).collect();
-        if let Some(item) = items.values().find(|i| !bins.contains_key(&i.bin)) {
-            return Err(format!("media item {} is in a missing bin", item.id));
-        }
-        let max_id = bins
-            .keys()
-            .map(|b| b.0)
-            .chain(items.keys().map(|i| i.0))
-            .max()
-            .unwrap_or(0);
-        let pool = Self {
-            bins,
-            items,
+impl From<PoolFile> for MediaPool {
+    fn from(file: PoolFile) -> Self {
+        Self {
+            bins: file.bins.into_iter().map(|b| (b.id, b)).collect(),
+            items: file.items.into_iter().map(|i| (i.id, i)).collect(),
             label_names: file.label_names.into_iter().collect(),
-            next_id: file.next_id.max(max_id + 1),
-        };
-        if let Some(bin) = pool.bins.values().find(|b| !pool.is_within(b.id, ROOT)) {
-            return Err(format!("bin {} is in a cycle", bin.id));
         }
-        Ok(pool)
     }
 }
 
@@ -887,7 +906,7 @@ mod tests {
     }
 
     #[test]
-    fn ids_from_the_caller_and_status() {
+    fn ids_from_the_caller() {
         let mut pool = MediaPool::new("");
         let root = pool.root();
         pool.insert_item(MediaId(40), root, clip("Relinked"))
@@ -898,12 +917,18 @@ mod tests {
         );
         let next = pool.add_item(root, clip("Next")).unwrap();
         assert_eq!(next, MediaId(41));
+        assert_eq!(
+            pool.insert_bin(BinId(41), root, "Taken"),
+            Ok(()),
+            "bins and items are separate maps"
+        );
+        assert_eq!(
+            pool.insert_bin(BinId(41), root, "Again"),
+            Err(PoolError::DuplicateBin(BinId(41)))
+        );
+        assert_eq!(pool.add_bin(root, "Next").unwrap(), BinId(42));
+        assert_eq!(pool.rename_bin(root, "Project"), Err(PoolError::RootBin));
 
-        let offline = MediaStatus::Offline {
-            reason: OfflineReason::VolumeNotConnected,
-        };
-        pool.set_status(&[next], offline).unwrap();
-        assert_eq!(pool.offline().count(), 1);
         pool.update_item(next, |item| {
             item.name = "Renamed".into();
             item.bin = BinId(1234);
@@ -911,7 +936,8 @@ mod tests {
         .unwrap();
         let item = pool.item(next).unwrap();
         assert_eq!((item.name.as_str(), item.bin), ("Renamed", root));
-        assert!(pool.find_by_path(Path::new("/card/Next.mov")).is_some());
+        assert!(pool.find_by_path("/card/Next.mov").is_some());
+        assert!(pool.check().is_ok());
         assert_eq!(pool.remove_item(next).unwrap().name, "Renamed");
         assert!(!pool.contains(next));
     }
@@ -931,11 +957,35 @@ mod tests {
         let json = serde_json::to_string(&pool).unwrap();
         let back: MediaPool = serde_json::from_str(&json).unwrap();
         assert_eq!(back, pool);
+        assert!(back.check().is_ok());
         let mut back = back;
         assert_eq!(back.add_bin(root, "New").unwrap(), BinId(3));
 
         let orphan = json.replace(r#""parent":0"#, r#""parent":77"#);
-        assert!(serde_json::from_str::<MediaPool>(&orphan).is_err());
+        let orphan: MediaPool = serde_json::from_str(&orphan).unwrap();
+        assert_eq!(orphan.check(), Err("bin #1 has no parent bin".into()));
+        let lost = json.replace(r#""bin":1"#, r#""bin":9"#);
+        let lost: MediaPool = serde_json::from_str(&lost).unwrap();
+        assert_eq!(
+            lost.check(),
+            Err("media item #2 is in a missing bin".into())
+        );
+    }
+
+    #[test]
+    fn kinds_and_names_from_paths() {
+        assert_eq!(MediaKind::guess("/a/b/Tone.WAV"), MediaKind::Audio);
+        assert_eq!(
+            MediaKind::guess("C:\\stills\\IMG_0001.heic"),
+            MediaKind::Still
+        );
+        assert_eq!(MediaKind::guess("/a/A014_C003.mxf"), MediaKind::Video);
+        assert_eq!(MediaKind::guess("noext"), MediaKind::Video);
+        assert_eq!(file_stem("/a/b/A014_C003.MXF"), "A014_C003");
+        assert_eq!(file_stem("C:\\clips\\take.2.mov"), "take.2");
+        assert_eq!(file_stem("/a/.wav"), ".wav");
+        assert_eq!(file_stem("plain"), "plain");
+        assert_eq!(file_name("dir/"), "");
     }
 
     #[test]

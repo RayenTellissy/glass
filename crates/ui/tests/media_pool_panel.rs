@@ -8,8 +8,7 @@ use std::collections::BTreeSet;
 
 use egui::{Rect, vec2};
 use project::media_pool::{
-    ColourLabel, Facts, MediaItem, MediaKind, MediaPool, MediaStatus, OfflineReason, Query,
-    SearchIndex,
+    ColourLabel, Facts, MediaItem, MediaKind, MediaPool, Query, SearchIndex,
 };
 use support::FrameBudget;
 use ui::headless::{HeadlessUi, Viewport};
@@ -59,21 +58,21 @@ fn shoot() -> MediaPool {
             tags[(i / 5) % tags.len()].into(),
         ];
         item.label = i.is_multiple_of(6).then_some(ColourLabel::ALL[i % 5]);
-        if i.is_multiple_of(97) {
-            item.status = MediaStatus::Offline {
-                reason: OfflineReason::VolumeNotConnected,
-            };
-        }
         pool.add_item(bins[i % bins.len()], item).unwrap();
     }
     pool
+}
+
+/// Every 97th clip's card is not connected (engine availability, beside the pool).
+fn offline(id: project::MediaId) -> bool {
+    (id.0 as usize).is_multiple_of(97)
 }
 
 fn rows(pool: &MediaPool, ids: &[project::MediaId]) -> Vec<ItemRow> {
     ids.iter()
         .filter_map(|id| pool.item(*id))
         .map(|item| {
-            let mut row = ItemRow::from_item(item);
+            let mut row = ItemRow::from_item(item, offline(item.id));
             let n = item.id.0 as usize;
             row.proxy = match n % 3 {
                 0 => ProxyState::Ready,
@@ -90,10 +89,10 @@ fn rows(pool: &MediaPool, ids: &[project::MediaId]) -> Vec<ItemRow> {
 fn view_rows_follow_the_search() {
     let pool = shoot();
     let index = SearchIndex::build(&pool);
-    let all = index.query(&pool, &Query::default());
+    let all = index.query(&pool, &Query::default(), offline);
     assert_eq!(all.len(), CLIPS);
     let query = Query::parse("harbour type:video", &pool);
-    let found = index.query(&pool, &query);
+    let found = index.query(&pool, &query, offline);
     assert_eq!(found.len(), CLIPS / 6);
     let chips = filter_chips(&query, &pool);
     assert_eq!(chips.len(), 1);
@@ -112,7 +111,7 @@ fn draw_within_budget(what: &str, mode: PoolView) {
     ui::theme::builtin(ThemeKind::Dark).apply(headless.context());
     let pool = shoot();
     let mut index = SearchIndex::build(&pool);
-    let ids = index.query(&pool, &Query::default());
+    let ids = index.query(&pool, &Query::default(), offline);
     let items = rows(&pool, &ids);
     let expanded: BTreeSet<_> = pool.children(pool.root()).iter().map(|b| b.id).collect();
     let base = MediaPoolView {
@@ -142,7 +141,7 @@ fn draw_within_budget(what: &str, mode: PoolView) {
         .iter()
         .map(|text| {
             let query = Query::parse(text, &pool);
-            let found = index.query(&pool, &query);
+            let found = index.query(&pool, &query, offline);
             (
                 text.to_string(),
                 filter_chips(&query, &pool),

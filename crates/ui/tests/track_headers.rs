@@ -6,11 +6,11 @@
 mod support;
 
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
-use project::{Project, Rational, TrackId, TrackKind};
+use project::{EditLabel, History, Project, Rational, TrackId, TrackKind};
 use support::FrameBudget;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::panels::timeline::track_header::{
-    HEADER_WIDTH, HeightPreset, Part, TrackFlags, TrackHeaderAction, TrackHeaderState,
+    self as track_header, HEADER_WIDTH, HeightPreset, Part, TrackFlags, TrackHeaderAction,
     TrackHeaderView, TrackRow, part_id, track_headers,
 };
 use ui::theme::{self, ThemeKind};
@@ -231,23 +231,40 @@ fn solo_silences_the_other_audio_tracks_of_the_sequence() {
     let (p, v1) = p.add_track(seq, TrackKind::Video, "V1", None).expect("v1");
     let (p, a1) = p.add_track(seq, TrackKind::Audio, "A1", None).expect("a1");
     let (p, a2) = p.add_track(seq, TrackKind::Audio, "A2", None).expect("a2");
-    let sequence = p.sequence(seq).expect("sequence");
+    let sequence = p.sequence(seq).expect("sequence").clone();
+    assert!(sequence.audible(a1) && sequence.audible(a2));
+    assert!(!sequence.audible(v1), "video is never heard");
+    // Header actions are project edits committed with their undo labels.
+    let mut history = History::new(p);
+    let mut act = |action: TrackHeaderAction| {
+        let (next, label) = track_header::edit(history.current(), &action)
+            .expect("an edit")
+            .expect("allowed");
+        history.commit(label, next);
+        history.current().sequence(seq).expect("sequence").clone()
+    };
 
-    let mut state = TrackHeaderState::default();
-    assert!(state.audible(sequence, a1) && state.audible(sequence, a2));
-    assert!(!state.audible(sequence, v1), "video is never heard");
-    state.apply(&TrackHeaderAction::ToggleSolo(a1));
-    assert!(state.audible(sequence, a1));
-    assert!(!state.audible(sequence, a2));
-    state.apply(&TrackHeaderAction::ToggleMute(a1));
-    assert!(!state.audible(sequence, a1), "mute wins over solo");
-    state.apply(&TrackHeaderAction::ToggleSolo(a1));
-    assert!(state.audible(sequence, a2));
+    let sequence = act(TrackHeaderAction::ToggleSolo(a1));
+    assert!(sequence.audible(a1));
+    assert!(!sequence.audible(a2));
+    let sequence = act(TrackHeaderAction::ToggleMute(a1));
+    assert!(!sequence.audible(a1), "mute wins over solo");
+    let sequence = act(TrackHeaderAction::ToggleSolo(a1));
+    assert!(sequence.audible(a2));
 
-    let rows = state.rows(sequence, Some(a2));
+    let rows = track_header::rows(&sequence, Some(a2));
     assert_eq!(rows.iter().map(|r| r.id).collect::<Vec<_>>(), [v1, a1, a2]);
     assert!(rows[0].flags == TrackFlags::default() && rows[1].flags.muted);
     assert!(rows[2].targeted && !rows[1].targeted);
+
+    // Each switch is its own undo step.
+    assert_eq!(history.undo_label(), Some(EditLabel::UnsoloTrack));
+    history.undo();
+    assert_eq!(history.undo_label(), Some(EditLabel::MuteTrack));
+    history.undo();
+    history.undo();
+    let sequence = history.current().sequence(seq).expect("sequence");
+    assert!(sequence.audible(a1) && sequence.audible(a2));
 }
 
 #[test]

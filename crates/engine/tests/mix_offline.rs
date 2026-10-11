@@ -1,6 +1,6 @@
 //! The offline mix of a sequence (`engine::mix`) against sums worked out from the tone
-//! files' own samples: clip gain, fader, pan, mute and solo, sends and a bus, automation
-//! from project curves, and the default `mix_range`.
+//! files' own samples: clip gain, fader, pan, the project's track mute and solo, sends
+//! and a bus, automation from project curves, and the default `mix_range`.
 
 mod mix_common;
 
@@ -109,7 +109,8 @@ fn the_mix_of_tones_is_their_exact_sum() {
     };
 
     // A1: -3 dB, panned left, post-fader send to the bus at -6. A2: to the bus, panned
-    // right. A3: muted. The bus at -2 dB to the master, which is at -0.5 dB.
+    // right. A3: muted in the project. The bus at -2 dB to the master, at -0.5 dB.
+    let project = project.set_track_muted(a3, true).unwrap();
     let mut settings = MixSettings::default();
     settings.tracks.insert(
         a1,
@@ -129,13 +130,6 @@ fn the_mix_of_tones_is_their_exact_sum() {
         TrackMix {
             pan: 0.5,
             output: Route::Bus(0),
-            ..TrackMix::default()
-        },
-    );
-    settings.tracks.insert(
-        a3,
-        TrackMix {
-            mute: true,
             ..TrackMix::default()
         },
     );
@@ -162,15 +156,16 @@ fn the_mix_of_tones_is_their_exact_sum() {
     assert!(error <= 1e-6, "worst error {error:e}");
 
     // Solo A3 (unmuted): only it plays.
-    settings.track_mut(a3).mute = false;
-    settings.track_mut(a3).solo = true;
-    let out = mix_range_with(&project, built.sequence, range, &settings, format).unwrap();
+    let soloed = project.set_track_muted(a3, false).unwrap();
+    let soloed = soloed.set_track_solo(a3, true).unwrap();
+    let out = mix_range_with(&soloed, built.sequence, range, &settings, format).unwrap();
     let error = worst(&out, |k, c| {
         clip_sample(&tones[2], k, c, 0.0, 1.25, 0.0) * db(-0.5)
     });
     assert!(error <= 1e-6, "solo: worst error {error:e}");
 
     // The defaults: every track at unity to the master, the clip gain still applies.
+    let project = project.set_track_muted(a3, false).unwrap();
     let out = mix_range(&project, built.sequence, range).unwrap();
     let error = worst(&out, |k, c| {
         clip_sample(&tones[0], k, c, 0.0, 1.0, 0.0) * db(-6.0)
@@ -197,6 +192,63 @@ fn the_mix_of_tones_is_their_exact_sum() {
     assert_eq!(whole.len(), pieces.len());
     let error = worst(&pieces, |k, c| f64::from(whole[k * 2 + c]));
     assert!(error <= 1e-7, "pieces: worst error {error:e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Mute and solo are project track switches (schema v9): the default `mix_range` hears
+/// them with no mixer settings at all, and undoing them brings the track back.
+#[test]
+fn project_mute_and_solo_change_the_default_mix() {
+    let dir = temp_dir("switches");
+    let tones = tones();
+    let files: Vec<_> = tones[..2]
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let path = dir.join(format!("tone{i}.wav"));
+            t.write(&path);
+            path
+        })
+        .collect();
+    let place = |media| {
+        vec![Place {
+            media,
+            start: 0.0,
+            length: 1.0,
+            source_start: 0.0,
+        }]
+    };
+    let built = build(&files, &[place(0), place(1)]);
+    let a1 = built.tracks[0];
+    let range = TimeRange::new(Time::ZERO, samples(1.0));
+    let x0 = |k, c| clip_sample(&tones[0], k, c, 0.0, 1.0, 0.0);
+    let x1 = |k, c| clip_sample(&tones[1], k, c, 0.0, 1.0, 0.0);
+
+    let both = mix_range(&built.project, built.sequence, range).unwrap();
+    let error = worst(&both, |k, c| x0(k, c) + x1(k, c));
+    assert!(error <= 1e-6, "both: worst error {error:e}");
+
+    let muted = built.project.set_track_muted(a1, true).unwrap();
+    let out = mix_range(&muted, built.sequence, range).unwrap();
+    let error = worst(&out, x1);
+    assert!(error <= 1e-6, "A1 muted: worst error {error:e}");
+
+    let soloed = built.project.set_track_solo(a1, true).unwrap();
+    let out = mix_range(&soloed, built.sequence, range).unwrap();
+    let error = worst(&out, x0);
+    assert!(error <= 1e-6, "A1 soloed: worst error {error:e}");
+
+    // A muted solo track is silent, and so is every other track.
+    let out = mix_range(
+        &soloed.set_track_muted(a1, true).unwrap(),
+        built.sequence,
+        range,
+    )
+    .unwrap();
+    assert!(out.iter().all(|&s| s == 0.0), "muted solo");
+
+    let back = soloed.set_track_solo(a1, false).unwrap();
+    assert_eq!(mix_range(&back, built.sequence, range).unwrap(), both);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

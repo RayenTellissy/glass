@@ -15,7 +15,7 @@ use std::sync::Arc;
 use imbl::OrdMap;
 use imbl::ordmap::DiffItem;
 
-use super::{ColourLabel, MediaItem, MediaKind, MediaPool};
+use super::{ColourLabel, MediaItem, MediaKind, MediaPool, file_name};
 use crate::id::{BinId, MediaId};
 
 /// Field weights: a name match outranks a tag match outranks a metadata match.
@@ -155,14 +155,13 @@ impl Query {
             && self.bin.is_none()
     }
 
-    /// Whether `item` passes the filters (not the text).
-    pub fn admits(&self, pool: &MediaPool, item: &MediaItem) -> bool {
+    /// Whether `item` passes the filters (not the text). `offline` says whether its file
+    /// is unavailable right now (engine runtime state, not in the pool).
+    pub fn admits(&self, pool: &MediaPool, item: &MediaItem, offline: bool) -> bool {
         self.kind.is_none_or(|k| item.kind == k)
             && self.label.is_none_or(|l| item.label == Some(l))
             && self.tags.iter().all(|t| item.has_tag(t))
-            && self
-                .offline
-                .is_none_or(|off| item.status.is_offline() == off)
+            && self.offline.is_none_or(|off| offline == off)
             && self.bin.is_none_or(|bin| {
                 if self.recursive {
                     pool.is_within(item.bin, bin)
@@ -194,9 +193,7 @@ fn item_terms(item: &MediaItem, pool: &MediaPool) -> Vec<(String, u8)> {
         out.extend(tokens(text).into_iter().map(|t| (t, weight)));
     };
     add(&item.name, NAME);
-    if let Some(name) = item.path.file_name() {
-        add(&name.to_string_lossy(), NAME);
-    }
+    add(file_name(&item.path), NAME);
     for tag in &item.tags {
         add(tag, TAG);
     }
@@ -254,9 +251,6 @@ fn item_terms(item: &MediaItem, pool: &MediaPool) -> Vec<(String, u8)> {
     }
     if let Some(card) = &item.card {
         add(card, OTHER);
-    }
-    if item.status.is_offline() {
-        add("offline", OTHER);
     }
     // Best weight first within each token, then keep one entry per token.
     out.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
@@ -429,12 +423,22 @@ impl SearchIndex {
     }
 
     /// The ids `query` finds in `pool`: text hits best first, or with no text every item
-    /// by id; filters applied either way. Call [`SearchIndex::refresh`] first.
-    pub fn query(&self, pool: &MediaPool, query: &Query) -> Vec<MediaId> {
-        let admits = |id: MediaId| pool.item(id).is_some_and(|i| query.admits(pool, i));
+    /// by id; filters applied either way. `offline` says which items' files are
+    /// unavailable (for `is:offline` and `is:online`). Call [`SearchIndex::refresh`]
+    /// first.
+    pub fn query(
+        &self,
+        pool: &MediaPool,
+        query: &Query,
+        offline: impl Fn(MediaId) -> bool,
+    ) -> Vec<MediaId> {
+        let admits = |id: MediaId| {
+            pool.item(id)
+                .is_some_and(|i| query.admits(pool, i, offline(id)))
+        };
         if query.text.trim().is_empty() {
             pool.items()
-                .filter(|i| query.admits(pool, i))
+                .filter(|i| query.admits(pool, i, offline(i.id)))
                 .map(|i| i.id)
                 .collect()
         } else {
@@ -527,7 +531,7 @@ fn bounded_distance(a: &[char], b: &str, max: usize) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::media_pool::{Facts, MediaStatus, Metadata, OfflineReason};
+    use crate::media_pool::{Facts, Metadata};
 
     fn pool() -> MediaPool {
         let mut pool = MediaPool::new("Harbour film");
@@ -655,56 +659,58 @@ mod tests {
         assert!(!index.is_current(&pool));
         assert!(index.refresh(&pool));
         assert_eq!(
-            names(&pool, index.query(&pool, &Query::parse("selects", &pool))),
+            names(
+                &pool,
+                index.query(&pool, &Query::parse("selects", &pool), |_| false)
+            ),
             ["Rope detail"]
         );
 
         let q = Query::parse("label:selects", &pool);
         assert_eq!(q.label, Some(ColourLabel::Amber));
         assert!(q.text.is_empty());
-        assert_eq!(names(&pool, index.query(&pool, &q)), ["Rope detail"]);
+        assert_eq!(
+            names(&pool, index.query(&pool, &q, |_| false)),
+            ["Rope detail"]
+        );
 
         let q = Query::parse("type:video tag:interview harb", &pool);
         assert_eq!(q.kind, Some(MediaKind::Video));
         assert_eq!(q.text, "harb");
         assert_eq!(
-            names(&pool, index.query(&pool, &q)),
+            names(&pool, index.query(&pool, &q, |_| false)),
             ["Harbourmaster interview"]
         );
         assert_eq!(Query::parse("foo:bar", &pool).text, "foo:bar");
 
-        pool.set_status(
-            &[rope],
-            MediaStatus::Offline {
-                reason: OfflineReason::Missing,
-            },
-        )
-        .unwrap();
-        index.refresh(&pool);
+        // Availability is runtime state the caller passes in.
+        let offline = |id: MediaId| id == rope;
         assert_eq!(
             names(
                 &pool,
-                index.query(&pool, &Query::parse("is:offline", &pool))
+                index.query(&pool, &Query::parse("is:offline", &pool), offline)
             ),
             ["Rope detail"]
         );
         assert_eq!(
-            index.query(&pool, &Query::parse("is:online", &pool)).len(),
+            index
+                .query(&pool, &Query::parse("is:online", &pool), offline)
+                .len(),
             4
         );
-        assert_eq!(hits(&pool, &index, "offline"), ["Rope detail"]);
+        assert!(hits(&pool, &index, "offline").is_empty());
 
         let q = Query {
             bin: Some(pool.root()),
             recursive: false,
             ..Query::default()
         };
-        assert!(index.query(&pool, &q).is_empty());
+        assert!(index.query(&pool, &q, |_| false).is_empty());
         let q = Query {
             recursive: true,
             ..q
         };
-        assert_eq!(index.query(&pool, &q).len(), 5);
+        assert_eq!(index.query(&pool, &q, |_| false).len(), 5);
         assert!(Query::default().is_empty());
     }
 

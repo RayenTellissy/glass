@@ -6,11 +6,13 @@
 //!
 //! ```text
 //!   frame  0        45        90        135                 285   300
-//!   V2         [E scenes, PiP, 80%]          [F scenes, 150%, 60%   ]
+//!   V2         [E scenes, PiP, 0→80%]        [F scenes, 150%, 60%   ]
 //!   V1     [A h264 ][B prores][C hevc  ][D h264 at 0.5x     ]
 //!                 ><        dissolve  ><  dip to black
 //!   A1     [audio_48k_stereo, -6 dB]
 //! ```
+//!
+//! E fades in over its first second (keyframed opacity) and sits in a compound clip.
 //!
 //! Media paths are relative to the project file (`generated/<fixture>`), with no content
 //! hash, so the file is the same in every checkout; [`open`] points them at the files
@@ -19,9 +21,9 @@
 use std::path::{Path, PathBuf};
 
 use engine::project::{
-    self, Alignment, ClipSpec, ColourLabel, MarkerOwner, MarkerSpec, MediaId, Project, Rational,
-    Relink, Resolution, SequenceFormat, SequenceId, SpeedKeep, Time, TimeRange, TodoState,
-    TrackKind, Transform, TransitionSpec,
+    self, Alignment, ClipParam, ClipSpec, ColourLabel, KeyTarget, MarkerOwner, MarkerSpec, MediaId,
+    Project, Rational, Relink, Resolution, SequenceFormat, SequenceId, SpeedKeep, Time, TimeRange,
+    TodoState, TrackKind, Transform, TransitionSpec, params::ParamValue,
 };
 
 /// The project file, relative to the repository root.
@@ -141,6 +143,17 @@ pub fn build() -> Result<Project, String> {
         )
         .map_err(e)?;
     let p = p.set_clip_opacity(pip, 0.8).map_err(e)?;
+    // It fades in over its first second.
+    let fade = KeyTarget::Clip {
+        item: pip,
+        param: ClipParam::Opacity,
+    };
+    let one = seconds(1)?;
+    let p = p
+        .animate_param(fade, Time::ZERO)
+        .and_then(|p| p.set_key(fade, Time::ZERO, ParamValue::Float(0.0)))
+        .and_then(|p| p.set_key(fade, one, ParamValue::Float(0.8)))
+        .map_err(e)?;
     let (p, wide) = p
         .insert_clip(v2, clip(scenes, 200, LENGTH, seconds(6)?)?)
         .map_err(e)?;
@@ -205,7 +218,10 @@ pub fn build() -> Result<Project, String> {
         note: "Check the black frame".to_owned(),
         ..m.spec()
     };
-    p.update_marker(dip_marker, spec).map_err(e)
+    let p = p.update_marker(dip_marker, spec).map_err(e)?;
+    // The picture in picture becomes a compound clip.
+    let (p, ..) = p.nest_items(&[pip], "Picture in picture").map_err(e)?;
+    Ok(p)
 }
 
 /// The repository root: the first folder up from the working directory that holds

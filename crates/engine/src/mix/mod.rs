@@ -21,10 +21,14 @@
 //! through the `crossfade` kind's `curve`, `project::audio_transition`), and fades from or
 //! to nothing next to gaps; declick ramps at hard cuts are an option.
 //!
-//! **Mixer settings** ([`MixSettings`]): fader, pan, mute, solo, output, sends and fader
-//! and pan automation per track, user buses and the master. The project file has no place
-//! for them yet (a schema version will add one), so they are an input here: the UI holds
-//! mute and solo (Decision 68) and passes them in. Automation curves are project
+//! **Track mute and solo** are the project's own track switches (schema v9, Decision 77):
+//! the graph reads `Track::muted` and `Track::solo` from the snapshot it plays, so muting
+//! a track is an edit, with undo, and the next [`AudioPlayback::update`] or offline mix
+//! hears it.
+//!
+//! **Mixer settings** ([`MixSettings`]): fader, pan, output, sends and fader and pan
+//! automation per track, user buses and the master. The project file has no place for
+//! them yet (a schema version will add one), so they are an input here. Automation curves are project
 //! [`Curve`]s with keys in sequence time, turned into mixer lanes by [`lane_from_curve`]:
 //! linear and hold keys map one to one, bezier segments are flattened through
 //! `Curve::value_at` every [`BEZIER_STEP_SECONDS`].
@@ -109,14 +113,12 @@ pub fn layout(layout: ChannelLayout) -> Layout {
     }
 }
 
-/// One audio track's mixer settings.
+/// One audio track's mixer settings; its mute and solo are the project track's.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrackMix {
     pub fader_db: f64,
     /// -1 (left) to 1 (right).
     pub pan: f64,
-    pub mute: bool,
-    pub solo: bool,
     pub output: Route,
     pub sends: Vec<SendSpec>,
     /// Fader automation in dB, keys in sequence time.
@@ -130,8 +132,6 @@ impl Default for TrackMix {
         Self {
             fader_db: 0.0,
             pan: 0.0,
-            mute: false,
-            solo: false,
             output: Route::Master,
             sends: Vec::new(),
             fader_curve: None,
@@ -239,8 +239,8 @@ pub fn graph_spec(
                 id: track.id.0,
                 fader_db: mix.fader_db,
                 pan: mix.pan,
-                mute: mix.mute,
-                solo: mix.solo,
+                mute: track.muted,
+                solo: track.solo,
                 output: mix.output,
                 sends: mix.sends.clone(),
                 fader_lane: lane(&mix.fader_curve)?,

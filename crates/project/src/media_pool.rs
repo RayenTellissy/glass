@@ -1,15 +1,23 @@
 //! The media pool: every source file a project uses, organised into bins, with colour
-//! labels, tags and camera metadata. Plain serde data with no dependency on the rest of
-//! the document model, so the project root can embed a [`MediaPool`] as it is.
+//! labels, tags and camera metadata. The project root embeds a [`MediaPool`] as
+//! [`crate::Project::media`] (schema v9): its items are the project's media references,
+//! and its edits are project edits with undo ([`edit`]).
+//!
+//! Saved with the project: bins, items (name, kind, paths, content hash, size, card,
+//! import time, stream facts, camera metadata, colour label, tags) and the colour labels'
+//! names. Derived and never saved: the search index ([`SearchIndex`]) and whether each
+//! file is available (`engine::media_mgmt::offline`, Decision 29), which views and
+//! queries take as a separate input.
 
 use serde::{Deserialize, Serialize};
 
+pub mod edit;
 mod pool;
 mod search;
 
 pub use pool::{
-    Bin, ColourLabel, MediaItem, MediaKind, MediaPool, MediaStatus, OfflineReason, PoolError,
-    SortBy, natural_cmp,
+    Bin, ColourLabel, MediaItem, MediaKind, MediaPool, PoolError, ROOT, SortBy, file_name,
+    file_stem, natural_cmp,
 };
 pub use search::{Hit, Query, SearchIndex, tokens};
 
