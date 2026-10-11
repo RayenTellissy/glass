@@ -166,6 +166,8 @@ It writes H.264 (8-bit 1080p, 10-bit 720p, 4K), 10-bit HEVC, ProRes 422, VP9, AV
 
 The script uses `$FFMPEG_DIR/bin/ffmpeg` (the pinned build, see [FFmpeg](#ffmpeg)) before any `ffmpeg` on `PATH`. The pinned build has no VP9, Opus, AV1 or MP3 encoder, so with it `vp9_720p30.webm`, `sync_vp9_opus.webm`, `av1_1080p30.mp4` and `audio_44k1_mono.mp3` are skipped with a note and left out of the manifest, and the tests that use them skip. An FFmpeg with libvpx, libopus, libsvtav1 and libmp3lame writes them too: `FFMPEG_DIR=<its prefix> tests/fixtures/generate.sh`.
 
+`tests/fixtures/reference.proj` is the reference project `smoke` opens, plays (2 s) and exports (1 s, then verified). It is generated, not hand-edited: after a schema bump or a change to the generator in `crates/smoke/src/reference.rs`, run `scripts/cargo-serial run --bin smoke -- --write-reference` and commit the file (`crates/smoke/tests/reference.rs` fails until you do). Its media paths are relative to the file and point at `tests/fixtures/generated/`, so `smoke` fails with a message until the generated media exists; without a GPU it skips play and export unless `GLASS_REQUIRE_GPU=1`.
+
 ## Benchmarks
 
 Micro-benchmarks use `criterion` and live in each crate's `benches/` folder (a `[[bench]]` target with `harness = false`, plus `[lib] bench = false` so the library's test harness does not receive criterion's flags). Benchmarks are timing measurements, so run them serially and alone: no other build, test or benchmark on the machine at the same time, and no other agent or heavy app running. They build with the release profile.

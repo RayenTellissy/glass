@@ -10,7 +10,7 @@ State of the work when the session paused on 2026-10-01, and how to pick it up i
 | `goal/phase-2` | Phase 2 (no open tasks left, only needs-human ones), plus tasks pulled forward from Phases 3 to 6, 9, 16 and 17 (below). The integration branch: new task branches start here. Last full check on `3c22cc1`, the About dialog merge (merging this file changed only docs). |
 | `drafts/phase-4-5-wip` | Parked drafts from 2026-09-29. Every task they covered is now merged (see below); nothing on the branch is still needed. |
 
-Phase 2 has no open tasks, but `goal/phase-2` does not merge to `main` yet: its Done when also asks that `smoke` plays the reference project, and `smoke` is still a stub (decode check only) until `tests/fixtures/reference.proj` (Phase 5) and playback (Phase 3) exist.
+Phase 2 has no open tasks. Its Done when also asks that `smoke` plays the reference project: `smoke` now opens `tests/fixtures/reference.proj`, plays 2 s through `engine::timeline::TimelinePlayback` and exports 1 s through `media::export` (silent audio until the engine mixes audio), then verifies the file (Decision 66).
 
 **Done on `goal/phase-2`.**
 

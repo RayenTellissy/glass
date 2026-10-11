@@ -2809,6 +2809,7 @@ name = "smoke"
 version = "0.1.0"
 dependencies = [
  "engine",
+ "pollster",
  "tracing",
 ]
 
