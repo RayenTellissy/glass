@@ -888,7 +888,7 @@ impl Project {
         check_fits(track, grid, &transition)?;
         let (_, track) = next.track_at_mut(si, ti);
         track.transitions.push_back(Arc::new(transition));
-        Ok((next, id))
+        Ok((self.unlocked(next)?, id))
     }
 
     /// Removes a transition: the cut becomes a plain cut again.
@@ -896,7 +896,7 @@ impl Project {
         let (si, ti, xi) = self.locate_transition(transition)?;
         let mut next = self.clone();
         next.track_at_mut(si, ti).1.transitions.remove(xi);
-        Ok(next)
+        self.unlocked(next)
     }
 
     /// Changes how long a transition lasts. Error order: [`EditError::EmptyRange`],
@@ -1045,7 +1045,7 @@ impl Project {
         }
         let mut next = self.clone();
         next.track_at_mut(si, ti).1.transitions[xi] = Arc::new(changed);
-        Ok(next)
+        self.unlocked(next)
     }
 }
 

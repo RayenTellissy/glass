@@ -728,7 +728,7 @@ impl Project {
         if refit {
             fit_track(track, grid);
         }
-        Ok(next)
+        self.unlocked(next)
     }
 }
 

@@ -135,7 +135,7 @@ fn media_pool(c: &mut Criterion) {
     }
     let filtered = Query::parse("type:video label:amber tag:wide harbour", &pool);
     group.bench_function("query_10k_filters_and_text", |b| {
-        b.iter(|| black_box(index.query(&pool, black_box(&filtered))))
+        b.iter(|| black_box(index.query(&pool, black_box(&filtered), |_| false)))
     });
     let bin_only = Query {
         bin: pool.children(pool.root()).first().map(|b| b.id),
@@ -143,7 +143,7 @@ fn media_pool(c: &mut Criterion) {
         ..Query::default()
     };
     group.bench_function("query_10k_bin_recursive", |b| {
-        b.iter(|| black_box(index.query(&pool, black_box(&bin_only))))
+        b.iter(|| black_box(index.query(&pool, black_box(&bin_only), |_| false)))
     });
     let first = pool.items().next().unwrap().id;
     group.bench_function("set_label_one_of_10k", |b| {

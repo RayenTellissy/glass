@@ -8,10 +8,12 @@ use std::sync::Arc;
 
 use crate::error::EditError;
 use crate::id::{ItemId, MediaId, SequenceId, TrackId};
+use crate::media_pool::{MediaItem, MediaKind, ROOT, file_stem};
 use crate::model::{
-    Adjustment, Clip, Item, ItemKind, MediaRef, Project, Sequence, Subtitle, Track, TrackKind,
+    Adjustment, Clip, Item, ItemKind, Project, Sequence, Subtitle, Track, TrackKind,
 };
 use crate::settings::SequenceFormat;
+use crate::switches::fit_switches;
 use crate::time::{Rational, Time, TimeRange};
 use crate::transition::fit_track;
 
@@ -25,21 +27,22 @@ pub struct ClipSpec {
 }
 
 impl Project {
-    /// Adds a reference to a source file.
+    /// Adds a reference to a source file the caller has not probed: a media pool item
+    /// in the root bin named after the file ([`file_stem`]), its kind guessed from the
+    /// extension ([`MediaKind::guess`]), nothing else known. An import with probe facts
+    /// goes through [`Project::import_media`]; both are one undo step labelled
+    /// [`crate::EditLabel::AddMedia`].
     pub fn add_media(
         &self,
         content_hash: impl Into<String>,
         path: impl Into<String>,
     ) -> Result<(Project, MediaId), EditError> {
-        let mut next = self.clone();
-        let id = MediaId(next.alloc_id());
-        let media = MediaRef {
-            id,
-            content_hash: content_hash.into(),
-            path: path.into(),
-        };
-        next.media.0.insert(id, Arc::new(media));
-        Ok((next, id))
+        let path = path.into();
+        let (name, kind) = (file_stem(&path).to_string(), MediaKind::guess(&path));
+        let mut item = MediaItem::new(name, kind, path);
+        item.content_hash = content_hash.into();
+        let (next, ids) = self.import_media(ROOT, [item])?;
+        Ok((next, ids[0]))
     }
 
     /// Adds an empty sequence after the existing ones at `frame_rate` and `sample_rate`,
@@ -110,29 +113,22 @@ impl Project {
         if index > len {
             return Err(EditError::TrackIndex { index, len });
         }
-        seq.tracks.insert(
-            index,
-            Arc::new(Track {
-                id,
-                kind,
-                name: name.into(),
-                items: imbl::Vector::new(),
-                transitions: imbl::Vector::new(),
-            }),
-        );
+        seq.tracks
+            .insert(index, Arc::new(Track::new(id, kind, name)));
         Ok((next, id))
     }
 
-    /// Removes a track and everything on it.
+    /// Removes a track and everything on it. Refused while it is locked.
     pub fn remove_track(&self, track: TrackId) -> Result<Project, EditError> {
         let mut next = self.clone();
         let (si, ti) = next.locate_track(track)?;
         next.sequence_at_mut(si).tracks.remove(ti);
-        Ok(next)
+        self.unlocked(next)
     }
 
     /// Changes what a track holds. Every item on it must be accepted by the new kind and
-    /// sit on its grid (an empty track can become anything).
+    /// sit on its grid (an empty track can become anything). The switches the new kind
+    /// does not have go back to their defaults ([`crate::switches`]).
     pub fn set_track_kind(&self, track: TrackId, kind: TrackKind) -> Result<Project, EditError> {
         let mut next = self.clone();
         let (si, ti) = next.locate_track(track)?;
@@ -154,7 +150,8 @@ impl Project {
             }
         }
         track.kind = kind;
-        Ok(next)
+        fit_switches(track);
+        self.unlocked(next)
     }
 
     /// Renames a track. The name is trimmed; an empty name is refused, and an unchanged
@@ -171,7 +168,7 @@ impl Project {
             return Ok(self.clone());
         }
         track.name = name.to_string();
-        Ok(next)
+        self.unlocked(next)
     }
 
     /// Places a clip on a video or audio track, with every property at its default
@@ -225,7 +222,7 @@ impl Project {
         let grid = seq_grid(seq, track.kind)?;
         place(grid, track, Arc::new(item))?;
         fit_track(track, grid);
-        Ok((next, id))
+        Ok((self.unlocked(next)?, id))
     }
 
     /// Removes an item, leaving empty space. Transitions on its cuts go with it.
@@ -236,7 +233,7 @@ impl Project {
         let grid = seq_grid(seq, track.kind)?;
         track.items.remove(ii);
         fit_track(track, grid);
-        Ok(next)
+        self.unlocked(next)
     }
 
     /// Moves an item to `start` on `to_track` (which may be its own track). The target
@@ -271,7 +268,7 @@ impl Project {
         if dest != ti {
             fit_track(next.track_at_mut(si, ti).1, grid);
         }
-        Ok(next)
+        self.unlocked(next)
     }
 
     /// Changes an item's timeline range. For a clip, moving the start trims its head:
@@ -301,7 +298,7 @@ impl Project {
         node.range = range;
         place(grid, track, trimmed)?;
         fit_track(track, grid);
-        Ok(next)
+        self.unlocked(next)
     }
 
     fn sequence_mut(&mut self, id: SequenceId) -> Result<&mut Sequence, EditError> {

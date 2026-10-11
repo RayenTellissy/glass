@@ -438,7 +438,6 @@ fn loading_refuses_malformed_sources_and_compound_flags_as_model_errors() {
 }
 
 #[test]
-#[ignore = "suspected bug: a clip naming both \"media\" and \"sequence\" loads, silently taking one of them"]
 fn loading_refuses_a_clip_that_names_both_a_media_and_a_sequence() {
     let c = chain();
     let mut both = saved(&c.project);
@@ -1258,7 +1257,6 @@ fn edits_store_frame_rates_in_lowest_terms_for_new_sequences_and_compounds() {
 }
 
 #[test]
-#[ignore = "suspected bug: nest_items copies a loaded parent's unreduced frame rate (50/2) into the compound"]
 fn a_compound_nested_from_a_file_with_an_unreduced_rate_stores_it_reduced() {
     let p = Project::new("uid-reduced", "Reduced");
     let (p, m) = p.add_media("aa01", "/media/a.mov").expect("m");

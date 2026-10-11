@@ -8,9 +8,7 @@ use project::{ClipSpec, Project, Rational, Sequence, SequenceFormat, Time, TimeR
 
 use crate::panels::timeline::minimap::{self, MINIMAP_HEIGHT, MinimapContent};
 use crate::panels::timeline::ruler::{self, RULER_HEIGHT, Timecode};
-use crate::panels::timeline::track_header::{
-    self, HEADER_WIDTH, HeightPreset, TrackHeaderState, TrackHeaderView,
-};
+use crate::panels::timeline::track_header::{self, HEADER_WIDTH, HeightPreset, TrackHeaderView};
 use crate::panels::timeline::view::{
     self, Extent, SCROLLBAR_WIDTH, TimelineView, TrackLayout, ViewPos, ZOOM_SLIDER_WIDTH,
     sequence_duration,
@@ -248,13 +246,9 @@ pub(super) fn minimap_long(ui: &mut egui::Ui) {
 pub(super) fn view(ui: &mut egui::Ui) {
     let seq = sample();
     let content = MinimapContent::from_sequence(&seq);
-    let mut state = TrackHeaderState::default();
-    let music = seq.tracks[5].id;
-    let _ = state.apply(&track_header::TrackHeaderAction::SetHeight {
-        track: music,
-        height: HeightPreset::Large,
-    });
-    let rows = state.rows(&seq, Some(seq.tracks[2].id));
+    let mut rows = track_header::rows(&seq, Some(seq.tracks[2].id));
+    // The music track is tall.
+    rows[5].flags.height = HeightPreset::Large;
     let layout = TrackLayout::from_rows(&rows);
     fill(ui, |ui, rect| {
         let tracks = Rect::from_min_size(

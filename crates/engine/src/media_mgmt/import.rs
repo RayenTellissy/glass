@@ -24,7 +24,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use media::{ContentHash, MediaInfo, StreamDetail};
-use project::media_pool::{Facts, Metadata};
+use project::media_pool::{Facts, MediaItem, MediaKind, Metadata};
 
 use super::classify::MediaClass;
 use super::scan::{self, ImportPlan, ImportSource, ScanOptions};
@@ -69,6 +69,37 @@ pub struct ImportedClip {
     /// The probe of the first file (`None` for stills FFmpeg does not read, such as
     /// HEIC on some builds; their facts come from the picture header).
     pub info: Option<MediaInfo>,
+}
+
+impl ImportedClip {
+    /// The media pool item for this clip, to add with `Project::import_media` (into
+    /// the bin [`ImportSource::bin`] names when folders are kept as bins): its name,
+    /// kind, files, sidecars, content hash, size, card format, stream facts and camera
+    /// metadata. `added_unix` is the import time in seconds since the Unix epoch.
+    pub fn media_item(&self, added_unix: u64) -> MediaItem {
+        let source = &self.source;
+        let path = |p: &PathBuf| p.to_string_lossy().into_owned();
+        let kind = match source.class {
+            MediaClass::Video => MediaKind::Video,
+            MediaClass::Audio => MediaKind::Audio,
+            MediaClass::Still => MediaKind::Still,
+            MediaClass::Sequence => MediaKind::Sequence,
+        };
+        let mut item = MediaItem::new(source.name.clone(), kind, path(&source.files[0]));
+        // An image sequence is one item named by its first frame; spanned files are the
+        // further parts of a recording the camera split.
+        if source.class != MediaClass::Sequence {
+            item.spanned = source.files[1..].iter().map(path).collect();
+        }
+        item.sidecars = source.sidecars.iter().map(|s| path(&s.path)).collect();
+        item.content_hash = self.hash.to_hex();
+        item.size_bytes = source.size_bytes;
+        item.card = source.card.map(|c| c.name().to_string());
+        item.added_unix = added_unix;
+        item.facts = self.facts.clone();
+        item.metadata = self.metadata.clone();
+        item
+    }
 }
 
 /// Why a clip was not imported.
