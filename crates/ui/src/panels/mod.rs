@@ -7,4 +7,5 @@ pub mod format;
 pub mod import;
 pub mod media_pool;
 pub mod metadata;
+pub mod timeline;
 pub mod widgets;
