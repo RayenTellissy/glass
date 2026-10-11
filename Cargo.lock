@@ -790,7 +790,6 @@ dependencies = [
  "audio",
  "criterion",
  "crossbeam-queue",
- "crossbeam-utils",
  "media",
  "plugins",
  "pollster",

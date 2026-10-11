@@ -336,3 +336,10 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Decision:** `.cargo/config.toml` sets `[build] jobs = 8` and `scripts/dev-env.sh` exports `CARGO_BUILD_JOBS=8`, up from 4. `scripts/ffmpeg/build.sh` follows `CARGO_BUILD_JOBS`, so it also uses 8 make jobs after `dev-env.sh` is sourced.
 - **Reason:** Development moved from an 8 GB Apple M2 to a 10-core Apple M5 with 24 GB RAM. Four jobs left half the cores idle, and `scripts/cargo-serial` still allows only one cargo command at a time, so the cap bounds one build, not the sum across agents.
 - **Consequences:** Peak memory of a build roughly doubles. On a machine with less RAM, export a lower `CARGO_BUILD_JOBS` after sourcing `dev-env.sh` (the env var wins over the config file).
+
+## 44. Frame queues park on their own mutex-and-condvar parker
+
+- **Date:** 2026-10-11
+- **Decision:** `engine::frame_queue` replaces `crossbeam-utils`' `Parker` with a small private parker (a wake-up token in a `std::sync::Mutex<bool>` and a `Condvar`). `Parker::new` locks the mutex, waits on the condition variable with a zero timeout and notifies it once, so the standard library allocates both there. `crossbeam-utils` is no longer a direct dependency (amends Decision 27).
+- **Reason:** On macOS the standard library allocates a mutex and condition variable on first use. The old warm-up (`park_deadline(now + 1 µs)`) could return before it reached the condition variable when the thread was preempted, so the first real wait allocated: `frame_queue_alloc` failed 48 of 300 runs under 12 parallel copies. With the new parker it failed 0 of 1,800.
+- **Consequences:** `unpark` always takes the parker's mutex. That costs nothing extra on the hot path, because a side only unparks the other after seeing its waiting flag.

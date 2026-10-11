@@ -35,24 +35,24 @@
 //!   late (`skipped`). When nothing is due the presenter keeps showing the frame it
 //!   already holds.
 //!
-//! **Waiting.** A side that waits parks its thread (crossbeam's `Parker`), it never spins:
+//! **Waiting.** A side that waits parks its thread (a [`Parker`] on a std mutex and
+//! condition variable), it never spins:
 //! it announces that it is waiting, checks the queue once more and sleeps; the other side
 //! looks at that flag after each push or pop (behind a `SeqCst` fence on both sides) and
 //! unparks it. Parking and unparking are the only slow path; the producers' unparkers sit
 //! in a short list behind a mutex that is locked only when a producer is waiting.
 //!
-//! **Allocation.** Creating a queue or a producer allocates (and initialises its parker
-//! with a 1 µs wait, since the standard library allocates a mutex and condition variable
-//! on first use); after that, push, pop, waiting, waking and `advance` allocate nothing
+//! **Allocation.** Creating a queue or a producer allocates, and initialises its parker's
+//! mutex and condition variable (the standard library allocates them on first use); after
+//! that, push, pop, waiting, waking and `advance` allocate nothing
 //! (`tests/frame_queue_alloc.rs`).
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering, fence};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use crossbeam_queue::ArrayQueue;
-use crossbeam_utils::sync::{Parker, Unparker};
 use media::{HwFrame, Timestamp, VideoFrame};
 use render::wgpu;
 
@@ -277,12 +277,86 @@ impl Shared {
     }
 }
 
-/// A parker whose mutex and condition variable are already initialised (the standard
-/// library allocates them on first use), so the first real wait does not allocate.
-fn warm_parker() -> Parker {
-    let parker = Parker::new();
-    parker.park_deadline(Instant::now() + Duration::from_micros(1));
-    parker
+/// Puts one thread to sleep until its [`Unparker`] is called: a wake-up token behind a
+/// mutex and condition variable. An `unpark` before `park` is kept, so the next `park`
+/// returns at once.
+///
+/// The standard library allocates a mutex and a condition variable on their first use
+/// (on macOS), so `new` uses both once and later waits and wakes allocate nothing.
+struct Parker {
+    inner: Arc<ParkerInner>,
+}
+
+struct ParkerInner {
+    notified: Mutex<bool>,
+    wake: Condvar,
+}
+
+#[derive(Clone)]
+struct Unparker {
+    inner: Arc<ParkerInner>,
+}
+
+impl Parker {
+    fn new() -> Self {
+        let inner = Arc::new(ParkerInner {
+            notified: Mutex::new(false),
+            wake: Condvar::new(),
+        });
+        let notified = lock(&inner.notified);
+        drop(
+            inner
+                .wake
+                .wait_timeout(notified, Duration::ZERO)
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+        inner.wake.notify_one();
+        Self { inner }
+    }
+
+    fn unparker(&self) -> Unparker {
+        Unparker {
+            inner: self.inner.clone(),
+        }
+    }
+
+    /// Sleeps until unparked, or returns at once if an unpark is pending.
+    fn park(&self) {
+        let mut notified = lock(&self.inner.notified);
+        while !*notified {
+            notified = self
+                .inner
+                .wake
+                .wait(notified)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        *notified = false;
+    }
+
+    /// [`park`](Self::park) that also returns at `deadline`.
+    fn park_deadline(&self, deadline: Instant) {
+        let mut notified = lock(&self.inner.notified);
+        while !*notified {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                return;
+            };
+            notified = self
+                .inner
+                .wake
+                .wait_timeout(notified, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        *notified = false;
+    }
+}
+
+impl Unparker {
+    /// Wakes the parked thread, or makes its next `park` return at once.
+    fn unpark(&self) {
+        *lock(&self.inner.notified) = true;
+        self.inner.wake.notify_one();
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -298,9 +372,9 @@ struct ProducerSide {
 
 impl ProducerSide {
     fn new(shared: Arc<Shared>) -> Self {
-        let parker = warm_parker();
+        let parker = Parker::new();
         let id = shared.next_producer.fetch_add(1, Ordering::Relaxed);
-        lock(&shared.producer_unparkers).push((id, parker.unparker().clone()));
+        lock(&shared.producer_unparkers).push((id, parker.unparker()));
         shared.producers.fetch_add(1, Ordering::AcqRel);
         Self { shared, parker, id }
     }
@@ -457,8 +531,8 @@ impl Drop for ConsumerSide {
 }
 
 fn consumer_side(generation: &Generation) -> ConsumerSide {
-    let parker = warm_parker();
-    let shared = Shared::new(generation, parker.unparker().clone());
+    let parker = Parker::new();
+    let shared = Shared::new(generation, parker.unparker());
     ConsumerSide {
         shared,
         parker,
