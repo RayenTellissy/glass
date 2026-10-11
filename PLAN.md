@@ -308,7 +308,7 @@ Done when: the transition browser has 150+ items, the title browser 60+, the LUT
 - [x] Wipes: linear in 8 directions, radial, clock, iris shapes, barn door, venetian, checker
 - [x] Motion: push, slide, whip pan with blur, zoom in and out, spin, swirl, roll
 - [x] Multi-pass transitions: a transition may declare extra passes at reduced scales; whip pan and zoom blur at reduced resolution within 3 ms at 4K, zoom out minified through a pyramid
-- [ ] Stylised: glitch, RGB split, pixelate, VHS, light leak, film burn, ink bleed, paper tear, liquid
+- [~] Stylised: glitch, RGB split, pixelate, VHS, light leak, film burn, ink bleed, paper tear, liquid
 - [ ] Shape and mask: circle, heart, star, custom SVG, text-shaped
 - [ ] 3D: cube, flip, page turn, door
 - [ ] Morph cut for jump cuts in talking-head footage (feature flag, optical flow)
