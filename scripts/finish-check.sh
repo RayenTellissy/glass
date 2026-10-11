@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs a task branch's finish check under a single cargo-serial lock hold, so the
-# steps don't queue behind other agents one by one. Continues past a failing step
+# steps don't queue behind other builds one by one. Continues past a failing step
 # and exits 1 if any step failed.
 #
 # Usage (from the worktree root, after `source scripts/dev-env.sh`):
