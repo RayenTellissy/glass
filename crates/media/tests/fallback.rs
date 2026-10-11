@@ -48,7 +48,7 @@ fn vp9_and_av1_fall_back_with_the_codec_reason() {
         ("av1_1080p30.mp4", "av1", "AV1"),
     ] {
         let Some(path) = common::fixture(file) else {
-            return;
+            continue;
         };
         let mut reader = FrameReader::open_with(&path, StreamSelect::BestVideo, auto())
             .unwrap_or_else(|e| panic!("{file}: {e}"));
