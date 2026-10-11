@@ -129,6 +129,26 @@ fn check_file(file: &str, hw: HwPreference) {
         }
     }
 
+    // Inside the frame just returned (first GOP and later): it stays on screen until
+    // the next frame's presentation time.
+    for k in [0, 1, 5, frames.len() / 2, frames.len().saturating_sub(2)] {
+        let Some(&[(a, sum), (b, next_sum)]) = frames.get(k..k + 2) else {
+            continue;
+        };
+        for t in [a.value, a.value + (b.value - a.value) / 2, b.value - 1] {
+            let got = seek_frame(&mut reader, a);
+            assert_eq!(got.pts(), Some(a), "{label}: frame {k}");
+            for _ in 0..2 {
+                let got = seek_frame(&mut reader, Timestamp::new(t, a.time_base));
+                assert_eq!(got.pts(), Some(a), "{label}: {t} inside frame {k}");
+                assert_eq!(checksum(&got), sum, "{label}: {t} inside frame {k}");
+            }
+        }
+        let got = seek_frame(&mut reader, b);
+        assert_eq!(got.pts(), Some(b), "{label}: frame {k} then the next");
+        assert_eq!(checksum(&got), next_sum, "{label}: frame {k} then the next");
+    }
+
     // Before the first frame: the first frame.
     let first = frames[0].0;
     let got = seek_frame(
