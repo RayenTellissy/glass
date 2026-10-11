@@ -1,11 +1,13 @@
 //! The recovery dialog: its flow driven by pointer and keys on a real egui context, its
 //! layout against the board, and every state within the frame budget.
 
+mod support;
+
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2};
+use support::FrameBudget;
 use ui::dialogs::recovery::{
     Control, RecoveryAction, RecoveryDialog, RecoveryPrompt, RecoveryState, WIDTH,
 };
-use ui::frame_time::FrameTimeMonitor;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::theme::{self, ThemeKind};
 
@@ -190,22 +192,19 @@ fn every_state_within_the_frame_budget() {
     for kind in ThemeKind::ALL {
         theme::set(headless.context(), kind);
         let mut dialog = RecoveryDialog::new();
-        let mut monitor = FrameTimeMonitor::default();
-        headless
-            .run(30, 240, &mut monitor, |ui, frame| {
-                let state = states[(frame / 20) % states.len()];
-                if let RecoveryState::Restoring { .. } = state {
-                    dialog.set_progress((frame % 100) as f32 / 100.0);
-                } else {
-                    dialog.set_state(state);
-                }
-                egui::CentralPanel::default().show(ui, |_| {});
-                dialog.show(ui.ctx(), &prompt);
-            })
-            .expect("headless frames");
+        let stats = FrameBudget::run(&mut headless, 30, 240, |ui, frame| {
+            let state = states[(frame / 20) % states.len()];
+            if let RecoveryState::Restoring { .. } = state {
+                dialog.set_progress((frame % 100) as f32 / 100.0);
+            } else {
+                dialog.set_state(state);
+            }
+            egui::CentralPanel::default().show(ui, |_| {});
+            dialog.show(ui.ctx(), &prompt);
+        })
+        .expect("headless frames");
         assert!(dialog.control_rect(Control::Close).is_some(), "{kind:?}");
-        let stats = monitor.stats();
         eprintln!("recovery dialog {kind:?} ({}): {stats}", headless.adapter());
-        headless.assert_p99_within_budget("recovery dialog", &stats);
+        stats.assert_within_budget(&headless, "recovery dialog");
     }
 }

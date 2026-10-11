@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 engine.workspace = true
+pollster.workspace = true
 tracing.workspace = true
 
 [lints]

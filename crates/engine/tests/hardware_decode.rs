@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use common::timing::{Samples, Stat};
 use common::{diff, fixture, gpu, nth_frame, read_rgba8, target};
 
 use media::{
@@ -121,24 +122,38 @@ fn hevc_10bit_hardware_frame_matches_software() {
     );
 }
 
+/// The wall-clock time of each frame decoding the whole file `passes` times, with
+/// `per_frame` run on each: from the end of the previous frame (or the start) to the end
+/// of this one, so the mean is the inverse of the frame rate.
+fn decode_times(
+    path: &PathBuf,
+    options: DecoderOptions,
+    passes: usize,
+    mut per_frame: impl FnMut(VideoFrame),
+) -> Samples {
+    let mut reader = FrameReader::open_with(path, StreamSelect::BestVideo, options).expect("open");
+    let mut last = Instant::now();
+    let mut times = Vec::new();
+    for _ in 0..passes {
+        while let Some(frame) = reader.next_frame().expect("decode") {
+            per_frame(frame.into_video().expect("video"));
+            let now = Instant::now();
+            times.push((now - last).as_secs_f64() * 1e3);
+            last = now;
+        }
+        reader.seek_to_start().expect("rewind");
+    }
+    Samples::new(times)
+}
+
 /// Frames per second decoding the whole file `passes` times, with `per_frame` run on each.
 fn decode_fps(
     path: &PathBuf,
     options: DecoderOptions,
     passes: usize,
-    mut per_frame: impl FnMut(VideoFrame),
+    per_frame: impl FnMut(VideoFrame),
 ) -> f64 {
-    let mut reader = FrameReader::open_with(path, StreamSelect::BestVideo, options).expect("open");
-    let start = Instant::now();
-    let mut frames = 0usize;
-    for _ in 0..passes {
-        while let Some(frame) = reader.next_frame().expect("decode") {
-            per_frame(frame.into_video().expect("video"));
-            frames += 1;
-        }
-        reader.seek_to_start().expect("rewind");
-    }
-    frames as f64 / start.elapsed().as_secs_f64()
+    1e3 / decode_times(path, options, passes, per_frame).mean()
 }
 
 #[test]
@@ -152,6 +167,7 @@ fn h264_4k_hardware_throughput() {
         eprintln!("skipped: no Metal adapter");
         return;
     };
+    let _serial = common::timing::serial();
     let hw = DecoderOptions::with_hw(HwPreference::Require);
     let decode_only = decode_fps(&path, hw, PASSES, |f| assert!(f.is_hardware()));
 
@@ -168,7 +184,7 @@ fn h264_4k_hardware_throughput() {
         .collect();
     let mut in_flight = VecDeque::new();
     let mut n = 0usize;
-    let full = decode_fps(&path, hw, PASSES, |frame| {
+    let full_times = decode_times(&path, hw, PASSES, |frame| {
         let surface = frame.hardware().expect("hardware frame");
         let imported = importer.import(&gpu.device, surface).expect("import");
         if in_flight.len() == IN_FLIGHT {
@@ -202,6 +218,7 @@ fn h264_4k_hardware_throughput() {
         .expect("poll");
     in_flight.clear();
     let (hits, misses) = importer.stats();
+    let full = 1e3 / full_times.mean();
 
     let software = decode_fps(&path, DecoderOptions::default(), PASSES, |f| {
         assert!(!f.is_hardware())
@@ -223,7 +240,14 @@ fn h264_4k_hardware_throughput() {
         misses <= 32,
         "surfaces are wrapped once and reused ({misses} misses)"
     );
-    assert!(full >= 60.0, "4K hardware path at {full:.0} fps, under 60");
+    // 60 fps: the mean frame time (the frame rate) under `GLASS_STRICT_TIMING=1`, the
+    // median otherwise, by the shared timing rules (`common::timing`).
+    common::timing::assert_wall_within(
+        "4K hardware decode, import and conversion per frame",
+        &full_times,
+        Stat::Mean,
+        1e3 / 60.0,
+    );
 }
 
 #[test]

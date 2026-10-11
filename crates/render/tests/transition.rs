@@ -526,10 +526,11 @@ fn an_edited_transition_shader_reloads_and_a_broken_one_is_kept_out() {
     let _ = std::fs::remove_dir_all(&shaders);
 }
 
-/// GPU time of one 4K cross dissolve pass over noise, median of 30 frames from the pass
-/// timestamps.
+/// GPU time of one 4K cross dissolve pass over noise, 30 frames from the pass
+/// timestamps, held to the budget by the shared timing rules (`common::timing`).
 #[test]
 fn cross_dissolve_at_4k_gpu_time() {
+    let _serial = common::timing::serial();
     let registry = TransitionRegistry::bundled();
     let Some(gpu) = gpu(&registry) else {
         eprintln!("skipped: no GPU adapter");
@@ -567,13 +568,8 @@ fn cross_dissolve_at_4k_gpu_time() {
             times.extend(timings.passes[0].gpu_ms);
         }
     }
-    times.sort_by(f64::total_cmp);
-    let median = times[times.len() / 2];
-    let max = times[times.len() - 1];
-    println!(
-        "4K cross dissolve: median {median:.3} ms, max {max:.3} ms GPU ({} frames)",
-        times.len()
-    );
-    // A quarter of the 8 ms compositor budget, loose for a shared GPU.
-    assert!(median < 2.0, "{median} ms");
+    let times = common::timing::Samples::new(times);
+    println!("4K cross dissolve GPU: {times}");
+    // A quarter of the 8 ms compositor budget.
+    common::timing::assert_gpu_within("4K cross dissolve", &times, 2.0);
 }

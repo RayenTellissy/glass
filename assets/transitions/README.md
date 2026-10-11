@@ -37,4 +37,7 @@ Compiled after `crates/render/shaders/common.wgsl` and
 `crates/render/shaders/transition.wgsl`, which declares the uniform `tr` and the inputs A
 (outgoing) and B (incoming), premultiplied linear light in the working space. The shader
 defines `@fragment fn fs(in: VsOut) -> @location(0) vec4<f32>` and must return exactly A
-at progress 0 and exactly B at progress 1. See `transition.wgsl` for the uniform layout.
+at progress 0 and exactly B at progress 1. See `transition.wgsl` for the uniform layout and the shared helpers: the
+wipes' edge kernel and composite (`edge`, `wipe`) and the motion transitions' moved
+frames (`frame_a`, `frame_b`, transparent black outside with anti-aliased edges), `over`,
+`rotate` and `jitter`.

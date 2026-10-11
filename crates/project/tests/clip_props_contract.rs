@@ -1099,8 +1099,9 @@ const V4_CLIP_KEYS: [&str; 8] = [
     "effects",
 ];
 
-/// The fixture as a v3 `project` value: clips without their v4 properties, tracks without
-/// their v5 transitions, no v6 project settings or sequence formats.
+/// The fixture as a v3 `project` value: clips without their v4 properties or v7
+/// keyframes, tracks without their v5 transitions, no v6 project settings or sequence
+/// formats.
 fn v3_json(f: &Fixture) -> Value {
     let mut json = serde_json::to_value(&f.project).expect("ser");
     json.as_object_mut()
@@ -1129,6 +1130,10 @@ fn v3_json(f: &Fixture) -> Value {
                 for key in V4_CLIP_KEYS {
                     item.as_object_mut().expect("item").remove(key).expect(key);
                 }
+                item.as_object_mut()
+                    .expect("item")
+                    .remove("keyframes")
+                    .expect("v7 keyframes");
             }
         }
     }

@@ -7,7 +7,7 @@
 //! - `snapshot-<g>.json`: the whole project at the start of generation `g`, written to a
 //!   `.partial` name, flushed to disk and renamed, so a snapshot is either complete or
 //!   absent.
-//! - `log-<g>.jsonl`: a header line (`{"autosave_format":6,"generation":g}`), then one
+//! - `log-<g>.jsonl`: a header line (`{"autosave_format":7,"generation":g}`), then one
 //!   [`Record`] per line, each a [`Diff`] from the previous state, appended and flushed to
 //!   disk (`sync_data`) before the next. A crash can only tear the last line; recovery
 //!   ignores a torn or unreadable tail and reports it.
@@ -54,8 +54,9 @@ pub const SNAPSHOT_EVERY: u64 = 30;
 /// of their own (`diff::Node::Marker`). 4: project schema v4 (clip properties, which
 /// travel inside their item's record). 5: project schema v5 (track transitions, as
 /// records of their own, `diff::Node::Transition`). 6: project schema v6 (project
-/// settings in the root record, sequence formats in the sequence records).
-pub const FORMAT_VERSION: u32 = 6;
+/// settings in the root record, sequence formats in the sequence records). 7: project
+/// schema v7 (keyframe curves, which travel inside their item's record).
+pub const FORMAT_VERSION: u32 = 7;
 
 /// How long the autosave of a session that did not quit normally is kept (the recovery
 /// dialog promises seven days).

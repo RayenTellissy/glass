@@ -15,6 +15,10 @@ pub mod scrub;
 pub mod threads;
 pub mod timeline;
 
+// The crates the engine's API is made of, for binaries that depend on the engine alone
+// (`smoke`, Decision 66).
+pub use {audio, media, project, render};
+
 /// Names of the optional codec and AI features compiled into this build.
 pub fn enabled_features() -> Vec<&'static str> {
     let mut features = media::enabled_features();

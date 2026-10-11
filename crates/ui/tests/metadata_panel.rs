@@ -2,9 +2,11 @@
 //! through a camera clip, a phone clip and a voice memo every frame (the view is rebuilt
 //! from the pool's facts and metadata each time), within the frame budget.
 
+mod support;
+
 use egui::{Rect, pos2, vec2};
 use project::media_pool::{Facts, Gps, Metadata};
-use ui::frame_time::FrameTimeMonitor;
+use support::FrameBudget;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::panels::metadata::{METADATA_PANEL_HEIGHT, MetadataView, metadata_panel};
 use ui::theme::ThemeKind;
@@ -80,29 +82,26 @@ fn metadata_panel_draws_within_budget() {
     };
     ui::theme::builtin(ThemeKind::Dark).apply(headless.context());
     let items = items();
-    let mut monitor = FrameTimeMonitor::default();
-    headless
-        .run(30, 240, &mut monitor, |ui, frame| {
-            egui::CentralPanel::default().show(ui, |ui| {
-                for row in 0..4 {
-                    let (name, facts, metadata) = &items[(frame + row) % items.len()];
-                    let view = MetadataView::new(
-                        name,
-                        Some("A014_C003.mov"),
-                        Some(2_100_000_000 + frame as u64),
-                        facts,
-                        metadata,
-                    );
-                    let rect = Rect::from_min_size(
-                        pos2(24.0, 24.0 + row as f32 * (METADATA_PANEL_HEIGHT + 16.0)),
-                        vec2(880.0, METADATA_PANEL_HEIGHT),
-                    );
-                    metadata_panel(ui, rect, &view);
-                }
-            });
-        })
-        .expect("headless frames");
-    let stats = monitor.stats();
+    let stats = FrameBudget::run(&mut headless, 30, 240, |ui, frame| {
+        egui::CentralPanel::default().show(ui, |ui| {
+            for row in 0..4 {
+                let (name, facts, metadata) = &items[(frame + row) % items.len()];
+                let view = MetadataView::new(
+                    name,
+                    Some("A014_C003.mov"),
+                    Some(2_100_000_000 + frame as u64),
+                    facts,
+                    metadata,
+                );
+                let rect = Rect::from_min_size(
+                    pos2(24.0, 24.0 + row as f32 * (METADATA_PANEL_HEIGHT + 16.0)),
+                    vec2(880.0, METADATA_PANEL_HEIGHT),
+                );
+                metadata_panel(ui, rect, &view);
+            }
+        });
+    })
+    .expect("headless frames");
     eprintln!("metadata panel ({}): {stats}", headless.adapter());
-    headless.assert_p99_within_budget("metadata panel", &stats);
+    stats.assert_within_budget(&headless, "metadata panel");
 }

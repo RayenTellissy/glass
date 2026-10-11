@@ -1,0 +1,8 @@
+{
+  "id": "roll",
+  "name": "transition.name.roll",
+  "category": "motion",
+  "directions": ["right", "left", "down", "up"],
+  "thumbnail": 0.5,
+  "params": []
+}

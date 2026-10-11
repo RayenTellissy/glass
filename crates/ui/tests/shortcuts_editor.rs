@@ -1,9 +1,11 @@
 //! The keyboard shortcuts editor: recording, clashes and Escape driven by key events on
 //! a real egui context, and every state within the frame budget.
 
+mod support;
+
 use egui::{Event, Key, Modifiers, Pos2, RawInput, Rect, pos2, vec2};
+use support::FrameBudget;
 use ui::dialogs::shortcuts::{Filter, ShortcutsAction, ShortcutsEditor, ShortcutsResponse, WIDTH};
-use ui::frame_time::FrameTimeMonitor;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::shortcuts::{Chord, Keymap, Mods, Platform, PresetId};
 use ui::theme::{self, ThemeKind};
@@ -130,48 +132,45 @@ fn every_state_within_the_frame_budget() {
         let mut editor = ShortcutsEditor::new(Platform::Mac);
         let mut keymap = Keymap::default();
         keymap.set("edit.freeze_frame", vec![Chord::key(Key::F)]);
-        let mut monitor = FrameTimeMonitor::default();
-        headless
-            // The warm-up shows every state once, so new glyphs and text layouts are
-            // cached before timing (as they are after the window's first second).
-            .run(STATES * STATE_FRAMES, 240, &mut monitor, |ui, frame| {
-                // A new state every 20 frames: plain, a layer, recording, a clash, the
-                // preset menu, a key search, the changed filter, another preset.
-                match (frame / STATE_FRAMES) % STATES {
-                    0 => editor = ShortcutsEditor::new(Platform::Mac),
-                    1 => editor.set_layer(Mods {
-                        cmd: true,
-                        ..Mods::NONE
-                    }),
-                    2 => {
-                        if editor.recording().is_none() {
-                            editor.start_recording(&keymap, "tool.roll", false);
-                            editor.capture(Chord::key(Key::J).ctrl().alt());
-                        }
+        // The warm-up shows every state once, so new glyphs and text layouts are
+        // cached before timing (as they are after the window's first second).
+        let stats = FrameBudget::run(&mut headless, STATES * STATE_FRAMES, 240, |ui, frame| {
+            // A new state every 20 frames: plain, a layer, recording, a clash, the
+            // preset menu, a key search, the changed filter, another preset.
+            match (frame / STATE_FRAMES) % STATES {
+                0 => editor = ShortcutsEditor::new(Platform::Mac),
+                1 => editor.set_layer(Mods {
+                    cmd: true,
+                    ..Mods::NONE
+                }),
+                2 => {
+                    if editor.recording().is_none() {
+                        editor.start_recording(&keymap, "tool.roll", false);
+                        editor.capture(Chord::key(Key::J).ctrl().alt());
                     }
-                    3 => {
-                        if editor.pending_clash().is_none() {
-                            editor.start_recording(&keymap, "view.snapping", false);
-                            editor.capture(Chord::key(Key::S));
-                            editor.keep(&mut keymap);
-                        }
-                    }
-                    4 => editor.set_preset_menu(true),
-                    5 => editor.set_search_chord(Some(Chord::key(Key::Z).shift())),
-                    6 => editor.set_filter(Filter::Changed),
-                    _ => keymap.switch_preset(PresetId::Premiere, true),
                 }
-                egui::CentralPanel::default().show(ui, |_| {});
-                let height = editor.height(&keymap);
-                let rect = Rect::from_min_size(pos2(80.0, 40.0), vec2(WIDTH, height));
-                editor.show(ui, rect, &mut keymap);
-            })
-            .expect("headless frames");
-        let stats = monitor.stats();
+                3 => {
+                    if editor.pending_clash().is_none() {
+                        editor.start_recording(&keymap, "view.snapping", false);
+                        editor.capture(Chord::key(Key::S));
+                        editor.keep(&mut keymap);
+                    }
+                }
+                4 => editor.set_preset_menu(true),
+                5 => editor.set_search_chord(Some(Chord::key(Key::Z).shift())),
+                6 => editor.set_filter(Filter::Changed),
+                _ => keymap.switch_preset(PresetId::Premiere, true),
+            }
+            egui::CentralPanel::default().show(ui, |_| {});
+            let height = editor.height(&keymap);
+            let rect = Rect::from_min_size(pos2(80.0, 40.0), vec2(WIDTH, height));
+            editor.show(ui, rect, &mut keymap);
+        })
+        .expect("headless frames");
         eprintln!(
             "shortcuts editor {kind:?} ({}): {stats}",
             headless.adapter()
         );
-        headless.assert_p99_within_budget("shortcuts editor", &stats);
+        stats.assert_within_budget(&headless, "shortcuts editor");
     }
 }
