@@ -106,7 +106,7 @@ pub struct RenderedFrame {
 
 enum Picture {
     Uploaded(UploadedFrame),
-    Imported(ImportedFrame),
+    Imported(Box<ImportedFrame>),
 }
 
 impl Picture {
@@ -299,7 +299,7 @@ impl TimelineRenderer {
                 Some(hw) => self
                     .importer
                     .import(&device, hw)
-                    .map(Picture::Imported)
+                    .map(|f| Picture::Imported(Box::new(f)))
                     .map_err(|e| {
                         tracing::warn!("timeline: frame {} cannot be imported: {e}", desc.frame)
                     }),
