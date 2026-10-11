@@ -55,6 +55,8 @@ pub enum Role {
     AudioDecode,
     /// `glass-render`: render graphs and the frames handed to present.
     Render,
+    /// `glass-scrub`: exact and prefetched frames while the playhead is dragged.
+    Scrub,
     /// `glass-audio`: the audio device callback (owned by the backend).
     AudioCallback,
     /// `glass-analysis-<n>`: the analysis pool.
@@ -78,6 +80,7 @@ impl Role {
             Self::Decode => "glass-decode",
             Self::AudioDecode => "glass-audio-decode",
             Self::Render => "glass-render",
+            Self::Scrub => "glass-scrub",
             Self::AudioCallback => "glass-audio",
             Self::Analysis => "glass-analysis",
             Self::Import => "glass-import",

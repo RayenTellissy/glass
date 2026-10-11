@@ -78,7 +78,7 @@ impl GopIndexes {
     }
 
     /// The source's index, scanned outside the lock on first use.
-    fn get(&self, source: &SourceRef) -> Result<Arc<GopIndex>, MediaError> {
+    pub(crate) fn get(&self, source: &SourceRef) -> Result<Arc<GopIndex>, MediaError> {
         if let Some(index) = self.lock().get(&source.id) {
             return Ok(index.clone());
         }
