@@ -457,6 +457,17 @@ pub enum ClipParam {
     GainDb,
 }
 
+/// Writes a clip's `keyframes` map with its keys in byte order of their ids, like every
+/// other map in a project file, rather than in [`ClipParam`]'s declaration order.
+pub(crate) fn serialize_clip_curves<S: serde::Serializer>(
+    curves: &OrdMap<ClipParam, Arc<Curve>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut sorted: Vec<_> = curves.iter().map(|(p, c)| (p.id(), c)).collect();
+    sorted.sort_unstable_by_key(|(id, _)| *id);
+    serializer.collect_map(sorted)
+}
+
 impl ClipParam {
     pub const ALL: [ClipParam; 11] = [
         ClipParam::Position,

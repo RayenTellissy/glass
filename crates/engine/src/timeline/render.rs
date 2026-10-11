@@ -40,11 +40,13 @@ use render::graph::{Graph, Port, TexturePool};
 use render::interop::{ImportedFrame, SurfaceImporter};
 use render::lut::Lut;
 use render::nodes::{
-    CompositeNode, GpuLut, Layer as CompositeLayer, LutNode, OutputNode, YuvSourceNode,
-    composite_stack_capped,
+    CompositeNode, GpuLut, Layer as CompositeLayer, LutNode, OutputNode, OutputTransfer,
+    YuvSourceNode, composite_stack_capped,
 };
 use render::renderer::Renderer;
 use render::shaders::ShaderLibrary;
+use render::subtitle;
+use render::text::{GlyphAtlas, PreparedText};
 use render::transform::{Affine2, Resample, Transform2D};
 use render::transition::{Direction, ParamValue, Transition, TransitionNode, TransitionRegistry};
 use render::upload::{UploadedFrame, upload_frame};
@@ -288,7 +290,67 @@ impl TimelineRenderer {
             f64::from(size.0) / f64::from(self.canvas.0),
             f64::from(size.1) / f64::from(self.canvas.1),
         );
-        let cap = quality.max_resample();
+        let output = OutputNode::preview(self.working);
+        let target = Target {
+            size,
+            to_preview,
+            cap: quality.max_resample(),
+            output,
+            format: PREVIEW_FORMAT,
+            burn_in: None,
+        };
+        self.render_target(plan, desc, layers, target)
+    }
+
+    /// Timeline frame `frame` for delivery (export): full quality, never cached, at the
+    /// output's size (the canvas fitted inside, centred, keeping its shape), encoded by
+    /// the output's primaries, transfer and format, with an optional burned-in text
+    /// drawn over the composite in linear light. The texture can be copied from (the
+    /// readback ring). Returns the texture and the submission that renders it.
+    pub fn render_output(
+        &mut self,
+        plan: &TimelinePlan,
+        frame: i64,
+        layers: &[Layer<VideoFrame>],
+        output: &FrameOutput<'_>,
+    ) -> (wgpu::Texture, wgpu::SubmissionIndex) {
+        let size = (output.size.0.max(1), output.size.1.max(1));
+        let (cw, ch) = (f64::from(self.canvas.0), f64::from(self.canvas.1));
+        let scale = (f64::from(size.0) / cw).min(f64::from(size.1) / ch);
+        let fit = Affine2::translate(
+            (f64::from(size.0) - cw * scale) / 2.0,
+            (f64::from(size.1) - ch * scale) / 2.0,
+        )
+        .then_apply(&Affine2::scale(scale, scale));
+        let target = Target {
+            size,
+            to_preview: fit,
+            cap: QualityLevel::Full.max_resample(),
+            output: OutputNode::new(
+                self.working,
+                output.primaries,
+                output.transfer,
+                output.format,
+            ),
+            format: output.format,
+            burn_in: output.burn_in,
+        };
+        self.render_target(plan, &plan.frame(frame), layers, target)
+    }
+
+    fn render_target(
+        &mut self,
+        plan: &TimelinePlan,
+        desc: &FrameDesc,
+        layers: &[Layer<VideoFrame>],
+        spec: Target<'_>,
+    ) -> (wgpu::Texture, wgpu::SubmissionIndex) {
+        let Target {
+            size,
+            to_preview,
+            cap,
+            ..
+        } = spec;
         let device = self.renderer.device().clone();
         let queue = self.renderer.queue().clone();
 
@@ -333,7 +395,7 @@ impl TimelineRenderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: PREVIEW_FORMAT,
+            format: spec.format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_SRC,
@@ -352,10 +414,11 @@ impl TimelineRenderer {
         let picture = self
             .composite(&mut graph, &pictures, &level, desc, cap)
             .unwrap_or_else(|| empty(&mut graph, size));
-        let output = graph.add(
-            OutputNode::preview(self.working).with_seed(desc.frame as u32),
-            &[picture],
-        );
+        let picture = match spec.burn_in {
+            Some((atlas, text)) => subtitle::add_burn_in(&mut graph, picture, atlas, text, size),
+            None => picture,
+        };
+        let output = graph.add(spec.output.with_seed(desc.frame as u32), &[picture]);
         graph.export(output.out(0), &target_view);
         let submission = match graph.compile() {
             Ok(compiled) => compiled.execute(&self.renderer, &mut self.pool, None),
@@ -722,6 +785,30 @@ impl FrameRender for TimelineRenderer {
     fn counters(&self) -> (RenderStats, FrameCacheStats) {
         (self.stats, self.cache.stats())
     }
+}
+
+/// How [`TimelineRenderer::render_output`] delivers a frame.
+#[derive(Clone, Copy, Debug)]
+pub struct FrameOutput<'a> {
+    /// The picture in pixels; the canvas is fitted inside it, centred.
+    pub size: (u32, u32),
+    pub primaries: Primaries,
+    pub transfer: OutputTransfer,
+    /// A format the output node writes (`Rgba8Unorm`, `Rgb10a2Unorm`, `Rgba16Unorm`).
+    pub format: wgpu::TextureFormat,
+    /// Text drawn over the composite (a burned-in subtitle), laid out for `size`.
+    pub burn_in: Option<(&'a GlyphAtlas, &'a PreparedText)>,
+}
+
+/// Where and how one frame is rendered.
+struct Target<'a> {
+    size: (u32, u32),
+    /// Canvas pixels to target pixels.
+    to_preview: Affine2,
+    cap: Resample,
+    output: OutputNode,
+    format: wgpu::TextureFormat,
+    burn_in: Option<(&'a GlyphAtlas, &'a PreparedText)>,
 }
 
 /// One sequence being composited: a plan at one of its frames, into a target.

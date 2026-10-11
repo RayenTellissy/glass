@@ -8,8 +8,9 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, ErrorKind, SampleFormat, StreamConfig};
 
 use crate::OutputConfig;
-use crate::callback::{self, Feeder, Timing};
+use crate::callback::{self, Callback, Feeder, Timing};
 use crate::clock::{Clock, Shared, Source};
+use crate::mixer::Mixer;
 
 /// Why an output stream could not be opened.
 #[derive(Debug, thiserror::Error)]
@@ -38,6 +39,44 @@ impl OutputStream {
     /// The stream asks for the configured channel count and falls back to the nearest the
     /// device offers: extra device channels get silence, missing ones are dropped.
     pub fn open_default(config: &OutputConfig) -> Result<(Self, Feeder, Clock), OutputError> {
+        let mut feeder = None;
+        let (stream, clock) = Self::open(config, |shared, device_channels| {
+            let (callback, f) = callback::channel(
+                shared,
+                usize::from(config.channels.max(1)),
+                device_channels,
+                config.ring_frames,
+            );
+            feeder = Some(f);
+            callback
+        })?;
+        let feeder = feeder.expect("the callback is made before the stream opens");
+        Ok((stream, feeder, clock))
+    }
+
+    /// Opens the default output device like [`open_default`](Self::open_default), at the
+    /// mixer's rate and channel count, with `mixer` filling the device buffer.
+    pub fn open_with_mixer(
+        config: &OutputConfig,
+        mixer: Mixer,
+    ) -> Result<(Self, Clock), OutputError> {
+        let mix = mixer.config();
+        let config = OutputConfig {
+            sample_rate: Some(mix.sample_rate),
+            channels: mix.layout.channels() as u16,
+            ..*config
+        };
+        let mut mixer = Some(mixer);
+        Self::open(&config, |shared, device_channels| {
+            let mixer = mixer.take().expect("the callback is made once");
+            callback::mixing(shared, mixer, device_channels)
+        })
+    }
+
+    fn open(
+        config: &OutputConfig,
+        make_callback: impl FnOnce(Arc<Shared>, usize) -> Callback,
+    ) -> Result<(Self, Clock), OutputError> {
         let host = cpal::default_host();
         let device = host.default_output_device().ok_or(OutputError::NoDevice)?;
         let sample_rate = match config.sample_rate {
@@ -63,12 +102,7 @@ impl OutputStream {
         };
 
         let shared = Shared::new(sample_rate, Source::Device);
-        let (mut callback, feeder) = callback::channel(
-            Arc::clone(&shared),
-            usize::from(wanted),
-            usize::from(device_channels),
-            config.ring_frames,
-        );
+        let mut callback = make_callback(Arc::clone(&shared), usize::from(device_channels));
         let timing_shared = Arc::clone(&shared);
         let channels = usize::from(device_channels);
         let rate = f64::from(sample_rate);
@@ -98,7 +132,7 @@ impl OutputStream {
             shared,
             device_channels,
         };
-        Ok((output, feeder, clock))
+        Ok((output, clock))
     }
 
     /// The device's channel count (may differ from the feeder's).

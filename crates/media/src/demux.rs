@@ -322,6 +322,10 @@ impl Packet {
         &self.inner
     }
 
+    pub(crate) fn raw_mut(&mut self) -> &mut ffmpeg::Packet {
+        &mut self.inner
+    }
+
     pub(crate) fn into_raw(self) -> ffmpeg::Packet {
         self.inner
     }
