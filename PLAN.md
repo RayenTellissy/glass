@@ -283,7 +283,7 @@ Done when: the v0.1 checklist passes on both platforms and a tagged build ships 
   - [x] Encoder preference (Auto, Hardware, Software) with fallback to x264 or x265 when the hardware encoder fails to open or on the first frames; the summary names the encoder that ran
   - [x] VideoToolbox H.264 and HEVC on macOS (HEVC Main 10 for 10-bit settings), colour tags as the software path, constant quality mapped from the CRF
   - [ ] NVENC, QSV and AMF: encoder names, selection order, pixel formats and rate options wired behind `cfg!` for Windows and Linux, compile-checked only (needs-human: no NVIDIA, Intel or AMD GPU and no Windows or Linux machine here; verify encode, fallback, colour tags and the quality mapping on each)
-- [ ] Presets: YouTube, TikTok, Instagram, X, Vimeo, broadcast, archival
+- [~] Presets: YouTube, TikTok, Instagram, X, Vimeo, broadcast, archival
 - [ ] Custom preset editor: bitrate, CRF, two-pass, colour tags, audio settings
 - [ ] Background export queue with progress, pause, cancel, notifications
 - [ ] Smart export: reuse cached rendered segments, stream-copy untouched ranges when the codec matches
