@@ -97,13 +97,13 @@ The quality gates that apply to every task, from PLAN.md:
 
 ### Machine limits
 
-The reference development machine is an Apple M2 with 8 GB of RAM and a small disk, so these limits hold for everyone sharing it, people and scripts alike.
+The development machine is an Apple M5 with 10 cores and 24 GB of RAM, shared by up to 7 agents or compiling tasks at once, so these limits hold for everyone sharing it, people and scripts alike. It stands in for the Apple M1 reference machine in benchmarks; numbers in `PLAN.md` from before 2026-10-11 were taken on an Apple M2.
 
 #### Concurrency
 
 - **One cargo command at a time** on the machine (build, test, clippy, run, bench). Anything else that compiles waits. `scripts/cargo-serial` enforces this across every checkout and worktree of the repo, so run cargo through it.
 - The compiler is capped at eight jobs: `.cargo/config.toml` sets `[build] jobs = 8`, and `scripts/dev-env.sh` exports `CARGO_BUILD_JOBS=8` for tools that ignore the config.
-- At most 10 concurrent workers (terminals running tasks, automated sessions), coordinator included; 3 to 5 is better. Each works in its own worktree (see [Working in parallel](#working-in-parallel)).
+- At most 7 concurrent workers or compiling tasks (terminals running tasks, automated sessions), coordinator included, all sharing the one cargo lock through `scripts/cargo-serial`. Each works in its own worktree (see [Working in parallel](#working-in-parallel)). A wait for the lock can outlast a 10-minute shell timeout, so run cargo-serial commands in the background and wait for them to finish.
 - **Benchmarks and the stress project run alone:** serially, with no build, test or other heavy app running. Timing taken on a busy machine is not a result.
 - If the machine swaps, or a build takes more than three times its usual time, drop to a single worker for the rest of the session.
 

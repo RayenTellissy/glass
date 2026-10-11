@@ -8,7 +8,7 @@ Status words used below:
 - **Planned**: decided here, built in the phase named next to it.
 - **Pending hardware**: decided, but the prototype could not run locally (no Windows PC, no NVIDIA GPU).
 
-All local measurements come from an Apple M2 (8 logical cores, 10-core GPU), which stands in for the Apple M1 reference machine. The M1 is somewhat slower, so the numbers here are a lower bound for it.
+Local measurements stand in for the Apple M1 reference machine. Those taken before 2026-10-11 come from an Apple M2 (8 logical cores, 10-core GPU, 8 GB); later ones come from the current development machine, an Apple M5 (10 cores, 24 GB) shared by up to 7 agents or compiling tasks through one cargo lock (`scripts/cargo-serial`). The M1 is slower than both, so the numbers here are a lower bound for it.
 
 ---
 
