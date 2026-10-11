@@ -113,7 +113,9 @@ fn the_plan_skips_hidden_video_tracks() {
 
     // Mute, solo, lock and height leave the picture as it was.
     let p = f.p.set_track_locked(f.v2, true).expect("lock");
-    let p = p.set_track_height(f.v1, TrackHeight::Large).expect("height");
+    let p = p
+        .set_track_height(f.v1, TrackHeight::Large)
+        .expect("height");
     let p = p.set_track_muted(f.a1, true).expect("mute");
     let p = p.set_track_solo(f.a1, true).expect("solo");
     let same = TimelinePlan::build(&p, f.seq).expect("plan");
@@ -139,7 +141,8 @@ fn mute_solo_lock_and_height_dirty_nothing() {
         f.p.set_track_solo(f.a1, true).expect("solo"),
         f.p.set_track_locked(f.v1, true).expect("lock"),
         f.p.set_track_locked(f.a1, true).expect("lock audio"),
-        f.p.set_track_height(f.v2, TrackHeight::Small).expect("height"),
+        f.p.set_track_height(f.v2, TrackHeight::Small)
+            .expect("height"),
         f.p.rename_track(f.v1, "Picture").expect("rename"),
     ];
     for (i, edited) in edits.iter().enumerate() {
@@ -174,7 +177,9 @@ fn pool_edits_dirty_nothing_but_a_new_file_dirties_its_clips() {
         .set_media_label(&[f.media], Some(ColourLabel::Amber))
         .expect("label");
     let tagged = labelled.add_media_tag(&[f.media], "Wide").expect("tag");
-    let (with_bin, bin) = tagged.add_bin(tagged.media().root(), "Selects").expect("bin");
+    let (with_bin, bin) = tagged
+        .add_bin(tagged.media().root(), "Selects")
+        .expect("bin");
     let moved = with_bin.move_media(&[f.media], bin).expect("move");
     assert!(DirtyRanges::between(&f.p, &moved).is_empty());
     let relinked = moved
@@ -186,8 +191,5 @@ fn pool_edits_dirty_nothing_but_a_new_file_dirties_its_clips() {
         }])
         .expect("relink");
     // Every picture clip of the media: V1 and V2 (and the subtitle cue is not a clip).
-    assert_eq!(
-        dirty(&moved, &relinked, f.seq),
-        ranges(&[0..60, 70..80])
-    );
+    assert_eq!(dirty(&moved, &relinked, f.seq), ranges(&[0..60, 70..80]));
 }
