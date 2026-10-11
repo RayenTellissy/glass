@@ -34,7 +34,7 @@ Several tasks can be worked on at once, each in its own git worktree, while the 
    ```
 
    `scripts/worktree-setup.sh` generates the worktree's own test media (git-ignored, about 25 MB) and prints the resolved `CARGO_TARGET_DIR` and `FFMPEG_DIR`. Running it again is harmless.
-2. **Source the environment** in every shell: `source scripts/dev-env.sh`. In any worktree it points `CARGO_TARGET_DIR` at the main checkout's `target/` and `FFMPEG_DIR` at the main checkout's `.glass-cache/ffmpeg/<host-triple>/`, so dependencies and `ffmpeg-sys` compile once for all worktrees. Workspace crates do not get their own artifacts per worktree: cargo names them by their path relative to the workspace root, so `project` built in one worktree has the same fingerprint and artifact names as `project` built in any other, and a stale build from another worktree can look fresh (Decision 28). `scripts/cargo-serial` handles this (next step); a plain `cargo` command in a worktree does not.
+2. **Source the environment** in every shell: `source scripts/dev-env.sh`. It adds `~/.cargo/bin` to `PATH` when `cargo` is not found (non-login shells skip rustup's profile line). In any worktree it points `CARGO_TARGET_DIR` at the main checkout's `target/` and `FFMPEG_DIR` at the main checkout's `.glass-cache/ffmpeg/<host-triple>/`, so dependencies and `ffmpeg-sys` compile once for all worktrees. Workspace crates do not get their own artifacts per worktree: cargo names them by their path relative to the workspace root, so `project` built in one worktree has the same fingerprint and artifact names as `project` built in any other, and a stale build from another worktree can look fresh (Decision 28). `scripts/cargo-serial` handles this (next step); a plain `cargo` command in a worktree does not.
 3. **Run every cargo command through `scripts/cargo-serial`**: build, test, clippy, run and bench. It waits for any cargo command running in another checkout, prints what it is waiting for and for how long, and holds the lock until its own command, test runs included, has finished:
 
    ```sh
@@ -163,6 +163,8 @@ tests/fixtures/generate.sh --verify
 ```
 
 It writes H.264 (8-bit 1080p, 10-bit 720p, 4K), 10-bit HEVC, ProRes 422, VP9, AV1, a VFR clip, a small MOV with a 90° display matrix and a `01:02:03:04` timecode track, PNG and JPEG stills, a PNG image sequence and a 48 kHz stereo WAV into `tests/fixtures/generated/` (git-ignored, about 25 MB), plus `MANIFEST.json` describing each file's codec, size, frame rate, duration, pixel format, rotation, timecode and whether it is VFR. Existing files are kept unless you pass `--force`; `--verify` checks every file with `ffprobe` against the manifest. Tests that need the media skip when the manifest is missing.
+
+The script uses `$FFMPEG_DIR/bin/ffmpeg` (the pinned build, see [FFmpeg](#ffmpeg)) before any `ffmpeg` on `PATH`. The pinned build has no VP9, Opus, AV1 or MP3 encoder, so with it `vp9_720p30.webm`, `sync_vp9_opus.webm`, `av1_1080p30.mp4` and `audio_44k1_mono.mp3` are skipped with a note and left out of the manifest, and the tests that use them skip. An FFmpeg with libvpx, libopus, libsvtav1 and libmp3lame writes them too: `FFMPEG_DIR=<its prefix> tests/fixtures/generate.sh`.
 
 ## Benchmarks
 

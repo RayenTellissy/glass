@@ -6,3 +6,4 @@ pub mod fonts;
 pub mod i18n;
 pub mod licences;
 pub mod theme;
+pub mod transitions;

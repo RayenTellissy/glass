@@ -167,6 +167,12 @@ impl Muxer {
         result.map_err(self.error("setting the display matrix"))
     }
 
+    /// Sets the codec tag of a stream (`hvc1` for HEVC that QuickTime players accept).
+    pub fn set_codec_tag(&mut self, stream: usize, fourcc: [u8; 4]) -> Result<()> {
+        let result = ffi::set_stream_codec_tag(&mut self.output, stream, fourcc);
+        result.map_err(self.error("setting the codec tag"))
+    }
+
     /// A muxer option applied when the header is written (`movflags`, ...).
     pub fn set_option(&mut self, key: &str, value: &str) {
         self.options.push((key.to_string(), value.to_string()));

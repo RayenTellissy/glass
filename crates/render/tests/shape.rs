@@ -861,14 +861,9 @@ fn mixed_shapes() -> Vec<Shape> {
 
 /// GPU time of 50 mixed shapes into a 4K layer, timed with timestamps over 60 frames
 /// after a warm-up (the node rebuilt every frame, as the engine will). Prints the median
-/// and p99 GPU time and the CPU time to build the node, and holds the median under the
-/// whole Phase 4 budget.
-///
-/// Ignored until the PLAN.md Phase 4 task "Vector shapes within the 4K budget" lands: on
-/// the M2 the median is 9.3 ms in most runs (3.4 ms in one of four), over the 8 ms budget.
-/// Run it with `--ignored`.
+/// and p99 GPU time, the CPU time to build the node and the fragments each kind of pass
+/// shades, and holds the median under the whole Phase 4 budget.
 #[test]
-#[ignore = "50 shapes at 4K take 9.3 ms, over the 8 ms budget (PLAN.md Phase 4)"]
 fn fifty_shapes_4k_gpu_time() {
     let Some(mut gpu) = Gpu::new() else { return };
     let mut profiler = GpuProfiler::new(&gpu.device, &gpu.queue, 4);
@@ -883,11 +878,13 @@ fn fifty_shapes_4k_gpu_time() {
     let mut times = Vec::new();
     let mut build = Vec::new();
     let mut stats = (0, 0, 0);
+    let mut fragments = (0, 0);
     for frame in 0..70 {
         let started = std::time::Instant::now();
         let node = gpu.node(canvas, &shapes);
         build.push(started.elapsed().as_secs_f64() * 1e3);
         stats = (node.outline_count(), node.edge_count(), node.batch_count());
+        fragments = (node.accumulate_fragments(), node.paint_fragments());
         let mut g = Graph::new();
         let id = g.add(node, &[]);
         g.export(id.out(0), &view);
@@ -911,35 +908,10 @@ fn fifty_shapes_4k_gpu_time() {
         stats.2,
         build[build.len() / 2]
     );
-    // Fragments each pass shades: an edge's quad spans its rows from itself to its box's
-    // right edge; paint covers each box.
-    let (mut accumulate, mut paint) = (0u64, 0u64);
-    for shape in &shapes {
-        for outline in [shape.fill_outline(), shape.stroke_outline()]
-            .into_iter()
-            .flatten()
-        {
-            let Some((lo, hi)) = outline.bounds() else {
-                continue;
-            };
-            let (x0, y0) = (lo.x.floor().max(0.0), lo.y.floor().max(0.0));
-            let x1 = hi.x.ceil().min(3840.0);
-            let y1 = hi.y.ceil().min(2160.0);
-            if x1 <= x0 || y1 <= y0 {
-                continue;
-            }
-            paint += ((x1 - x0) * (y1 - y0)) as u64;
-            for (a, b) in outline.edges() {
-                let rows = (a.y.max(b.y).ceil().min(y1) - a.y.min(b.y).floor().max(y0)).max(0.0);
-                let from = a.x.min(b.x).floor().clamp(x0, x1);
-                accumulate += (rows * (x1 - from)) as u64;
-            }
-        }
-    }
     println!(
         "fragments: accumulate {:.1} M, paint {:.1} M",
-        accumulate as f64 / 1e6,
-        paint as f64 / 1e6
+        fragments.0 as f64 / 1e6,
+        fragments.1 as f64 / 1e6
     );
     let pixels = common::read(&gpu.device, &gpu.queue, &out);
     assert!(pixels.iter().filter(|p| p[3] > 0.0).count() > 3840 * 2160 / 10);

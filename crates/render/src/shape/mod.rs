@@ -10,14 +10,17 @@
 //! same way and are filled with the non-zero rule, which unions them.
 //!
 //! Outlines are rasterised on the GPU as exact box-filtered coverage by signed-area
-//! accumulation: every edge draws a quad from itself to the right edge of the outline's
-//! bounds, adding, in each pixel, the edge's height within the pixel's row times the
-//! fraction of the pixel to the right of the edge, with additive blending into an
+//! accumulation: in each pixel, every edge adds its height within the pixel's row times
+//! the fraction of the pixel to the right of the edge, with additive blending into an
 //! `R32Float` texture. The sum in a pixel is the
 //! integral of the winding number over it, from which the fill rule gives coverage:
 //! `min(|a|, 1)` for non-zero, a triangle wave of period 2 for even-odd. Coverage is
-//! exact for straight edges, needs no multisampling, and the work per outline is about
-//! twice its area whatever the number of edges.
+//! exact for straight edges and needs no multisampling. Right of every edge crossing a
+//! row the sum is constant, so the CPU bins each outline into bands of 4 rows
+//! (`strips`): edges accumulate only across the columns some edge crosses in their
+//! band, the CPU adds up what they carry to the right, and the paint pass reads the
+//! accumulation only there and paints the gaps between with the carried sum. The work
+//! per outline is about its area plus its edges' strips.
 //! The one approximation: the fill rule is applied to the pixel's integral, not point
 //! by point, so a pixel where a region wound twice (overlapping stroke pieces at an inner
 //! join, a pentagram's centre) meets an empty one is off by up to the smaller of the two
@@ -34,6 +37,7 @@
 mod geometry;
 mod node;
 pub mod reference;
+mod strips;
 mod stroke;
 
 pub use geometry::{Affine, Path, Point, Verb};
