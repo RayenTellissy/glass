@@ -106,7 +106,7 @@ enum State {
     Software {
         first: Option<VideoFrame>,
         until: Option<Timestamp>,
-        handoff: Option<VideoFrame>,
+        handoff: Option<Box<VideoFrame>>,
     },
 }
 
@@ -193,7 +193,7 @@ impl MediaDecoder {
         self.state = State::Software {
             first,
             until,
-            handoff,
+            handoff: handoff.map(Box::new),
         };
         Ok(())
     }
@@ -244,7 +244,7 @@ impl SegmentDecoder for MediaDecoder {
                         (None, _) => false,
                     };
                     if switch {
-                        let first = handoff.take();
+                        let first = handoff.take().map(|frame| *frame);
                         self.state = State::Steady { first: None };
                         first
                     } else {
