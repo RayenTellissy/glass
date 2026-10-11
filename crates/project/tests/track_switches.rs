@@ -113,14 +113,14 @@ fn new_tracks_have_their_switches_at_the_defaults() {
     assert_eq!(TrackHeight::default(), TrackHeight::Medium);
 }
 
+/// One switch edit of the fixture.
+type Step = fn(&Project, &Fixture) -> Result<Project, EditError>;
+
 #[test]
 fn each_switch_is_an_edit_with_its_own_undo_label() {
     let f = fixture();
     let mut h = History::new(f.project.clone());
-    let steps: [(
-        EditLabel,
-        fn(&Project, &Fixture) -> Result<Project, EditError>,
-    ); 9] = [
+    let steps: [(EditLabel, Step); 9] = [
         (EditLabel::MuteTrack, |p, f| p.set_track_muted(f.a1, true)),
         (EditLabel::SoloTrack, |p, f| p.set_track_solo(f.a2, true)),
         (EditLabel::HideTrack, |p, f| {
