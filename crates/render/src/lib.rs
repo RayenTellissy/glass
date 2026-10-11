@@ -18,7 +18,9 @@
 //! reference lives in [`blend`]; each layer is sampled through its [`transform`], cut by its
 //! [`crop`] and scaled by its opacity inside the same pass. Vector shapes ([`shape`]) are
 //! rasterised as exact coverage by [`shape::ShapeNode`] into a layer, or by
-//! [`shape::CoverageNode`] for masks.
+//! [`shape::CoverageNode`] for masks. A layer's [`mask`]s (shapes unioned, feathered,
+//! inverted, combined by union or intersection) multiply it in [`nodes::MaskNode`] before
+//! it is composited.
 //!
 //! Rendered preview frames are kept by [`frame_cache::FrameCache`]: an LRU of textures in
 //! VRAM that spills to RAM through the async readback ring.
@@ -37,6 +39,7 @@ pub mod graph;
 #[allow(unsafe_code)]
 pub mod interop;
 pub mod lut;
+pub mod mask;
 pub mod nodes;
 pub mod profiler;
 pub mod readback;

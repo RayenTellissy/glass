@@ -74,7 +74,7 @@ Counts on `goal/phase-2` at `3c22cc1` (sub-tasks counted as tasks; needs-human p
 On `3c22cc1` (the About dialog merge): build, `cargo test --workspace --no-fail-fast` (652 passed, 0 failed, 4 ignored), clippy `-D warnings`, `smoke` and fmt pass, and `scripts/licences/third-party.py --check` reports the list current.
 
 - `engine`'s `frame_queue_alloc` test `queue_operations_do_not_allocate_after_warm_up` (`crates/engine/tests/frame_queue_alloc.rs`) is flaky: on `15f82db` it counted 1 cross-thread allocation, then passed 5 of 5 times run alone, and it passed in this check. The likely cause is that the counting window is still open while the producer thread exits. Fixing it is the first item in section 6.
-- `fifty_shapes_4k_gpu_time` (`crates/render/tests/shape.rs`) runs again since sparse strips (Decision 44) cut its accumulate fragments from 29.9 M to 0.4 M; it was ignored at 9.3 ms GPU median on the M2.
+- `fifty_shapes_4k_gpu_time` (`crates/render/tests/shape.rs`) runs again since sparse strips (Decision 45) cut its accumulate fragments from 29.9 M to 0.4 M; it was ignored at 9.3 ms GPU median on the M2.
 
 ## 2. Needs a person
 
