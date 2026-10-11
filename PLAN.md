@@ -273,7 +273,12 @@ Done when: the reference project can be recreated from raw fixtures using only t
 
 Done when: the v0.1 checklist passes on both platforms and a tagged build ships installers.
 
-- [ ] Encoder wrapper: H.264, HEVC, AV1, ProRes (native on macOS, software elsewhere behind a flag), VP9, PNG and TIFF sequences, GIF, WAV, AAC, MP3, FLAC
+- [~] Encoder wrapper: H.264, HEVC, AV1, ProRes (native on macOS, software elsewhere behind a flag), VP9, PNG and TIFF sequences, GIF, WAV, AAC, MP3, FLAC
+  - [~] Export session and muxer: settings structs (codec, CRF or bit rate, pixel format, BT.709/BT.2020 colour tags, frame rate, audio rate and channels), RGBA and YUV picture input through swscale, MP4, MOV and Matroska, H.264 (x264) and HEVC (x265)
+  - [~] ProRes: VideoToolbox on macOS, `prores_ks` behind `codec-prores-sw` elsewhere
+  - [~] PNG and TIFF sequences, GIF
+  - [~] Audio: WAV, AAC and FLAC, alone and in video containers
+  - [~] AV1, VP9 and MP3 encoders
 - [ ] Hardware encode: VideoToolbox, NVENC, QSV, AMF, with software fallback (x264 for H.264, x265 for HEVC)
 - [ ] Presets: YouTube, TikTok, Instagram, X, Vimeo, broadcast, archival
 - [ ] Custom preset editor: bitrate, CRF, two-pass, colour tags, audio settings
