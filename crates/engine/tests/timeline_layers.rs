@@ -10,6 +10,9 @@
 //!
 //! GPU checks skip without an adapter, media checks without the fixtures.
 
+// Dirty frames are lists of ranges, often of one.
+#![allow(clippy::single_range_in_vec_init)]
+
 mod common;
 
 use std::collections::BTreeSet;
@@ -226,8 +229,10 @@ fn srgb_encode(v: f64) -> u8 {
 fn mix_error(shown: &[u8], top: &[u8], bottom: &[u8], alpha: f64) -> u8 {
     let inside = |v: u8| (2..=253).contains(&v);
     shown
-        .chunks_exact(4)
-        .zip(top.chunks_exact(4).zip(bottom.chunks_exact(4)))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(top.as_chunks::<4>().0.iter().zip(bottom.as_chunks::<4>().0))
         .flat_map(|(s, (a, b))| (0..3).map(move |c| (s[c], a[c], b[c])))
         .filter(|&(_, a, b)| inside(a) && inside(b))
         .map(|(s, a, b)| {
