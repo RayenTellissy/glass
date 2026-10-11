@@ -515,6 +515,7 @@ pub struct Clip {
     /// [`crate::keyframe`]). While a property has a curve, its constant field above is
     /// ignored: read the values through [`Clip::param_at`], [`Clip::transform_at`] and the
     /// other `*_at` readers.
+    #[serde(serialize_with = "crate::keyframe::serialize_clip_curves")]
     pub keyframes: OrdMap<ClipParam, Arc<Curve>>,
     /// Markers on the clip in source time, so they stay on their frame when the clip is
     /// trimmed or moved; ordered by start then id (schema v3).
