@@ -35,6 +35,7 @@ use crate::id::{EffectId, ItemId};
 use crate::model::{Clip, Item, ItemKind, Project};
 use crate::params::{ParamSchema, ParamValue, ParamValues};
 use crate::time::{Rational, Time, TimeRange};
+use crate::transition::fit_track;
 
 /// The slowest speed a clip plays at, 1%.
 pub const MIN_SPEED: Rational = Rational::new(1, 100);
@@ -679,7 +680,9 @@ impl Project {
 
     /// Applies `change` to copies of the clip `item` and its timeline range (given the
     /// track's grid) and places the result on the track, checking the grid and the
-    /// neighbours. A change that leaves both equal returns this root.
+    /// neighbours. A change to the range, source start or speed fits the track's
+    /// transitions afterwards ([`crate::transition`]). A change that leaves both equal
+    /// returns this root.
     fn change_clip_range(
         &self,
         item: ItemId,
@@ -697,6 +700,9 @@ impl Project {
         if range == old.range && changed == *clip {
             return Ok(self.clone());
         }
+        let refit = range != old.range
+            || changed.source_start != clip.source_start
+            || changed.speed != clip.speed;
         let node = Arc::new(Item {
             id: item,
             range,
@@ -709,6 +715,9 @@ impl Project {
         } else {
             track.items.remove(ii);
             place(grid, track, node)?;
+        }
+        if refit {
+            fit_track(track, grid);
         }
         Ok(next)
     }

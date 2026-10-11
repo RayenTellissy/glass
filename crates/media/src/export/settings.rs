@@ -161,35 +161,52 @@ impl VideoCodec {
         }
     }
 
-    /// FFmpeg encoders for this codec on this platform and feature set, preferred first.
+    /// Software FFmpeg encoders for this codec in this feature set, preferred first.
     /// Empty for GIF, which the session encodes itself.
-    pub(crate) fn encoders(self) -> Vec<&'static str> {
+    pub(crate) fn software_encoders(self) -> Vec<&'static str> {
         match self {
             Self::H264 => vec!["libx264"],
             Self::Hevc => vec!["libx265"],
             Self::Av1 => vec!["libsvtav1", "libaom-av1", "librav1e"],
             Self::Vp9 => vec!["libvpx-vp9"],
-            Self::ProRes(_) => {
-                let mut v = Vec::new();
-                if cfg!(target_os = "macos") {
-                    v.push("prores_videotoolbox");
-                }
-                if cfg!(feature = "codec-prores-sw") {
-                    v.push("prores_ks");
-                }
-                v
-            }
+            Self::ProRes(_) if cfg!(feature = "codec-prores-sw") => vec!["prores_ks"],
+            Self::ProRes(_) => Vec::new(),
             Self::Png => vec!["png"],
             Self::Tiff => vec!["tiff"],
             Self::Gif => Vec::new(),
         }
     }
 
-    /// Encoders that take this codec's name in [`VideoSettings::encoder`] besides
-    /// [`encoders`](Self::encoders). The software ProRes encoder stays behind its
-    /// feature flag.
+    /// Hardware FFmpeg encoders for this codec on this platform, preferred first:
+    /// VideoToolbox on macOS; NVENC, Quick Sync and AMF on Windows and Linux. A build may
+    /// lack some of them, and a machine without the GPU fails to open them.
+    pub(crate) fn hardware_encoders(self) -> Vec<&'static str> {
+        let mac = cfg!(target_os = "macos");
+        let pc = cfg!(any(target_os = "windows", target_os = "linux"));
+        let list: &[(&'static str, bool)] = match self {
+            Self::H264 => &[
+                ("h264_videotoolbox", mac),
+                ("h264_nvenc", pc),
+                ("h264_qsv", pc),
+                ("h264_amf", pc),
+            ],
+            Self::Hevc => &[
+                ("hevc_videotoolbox", mac),
+                ("hevc_nvenc", pc),
+                ("hevc_qsv", pc),
+                ("hevc_amf", pc),
+            ],
+            Self::ProRes(_) => &[("prores_videotoolbox", mac)],
+            Self::Av1 | Self::Vp9 | Self::Png | Self::Tiff | Self::Gif => &[],
+        };
+        list.iter().filter(|(_, on)| *on).map(|(n, _)| *n).collect()
+    }
+
+    /// Encoders that take this codec's name in [`VideoSettings::encoder`] besides the
+    /// software and hardware lists. The software ProRes encoder stays behind its feature
+    /// flag.
     fn accepts_encoder(self, name: &str) -> bool {
-        if self.encoders().contains(&name) {
+        if self.software_encoders().contains(&name) || self.hardware_encoders().contains(&name) {
             return true;
         }
         match self {
@@ -204,6 +221,15 @@ impl VideoCodec {
         }
     }
 
+    /// The constant rate factor the software encoder uses by default, which the hardware
+    /// encoders' quality settings are mapped from.
+    fn default_crf(self) -> f32 {
+        match self {
+            Self::Hevc => 28.0,
+            _ => 23.0,
+        }
+    }
+
     /// Picture codecs written as RGB files (PNG, TIFF, GIF), not YUV video.
     pub fn is_rgb(self) -> bool {
         matches!(self, Self::Png | Self::Tiff | Self::Gif)
@@ -212,12 +238,13 @@ impl VideoCodec {
     /// The pixel format an encoder gets when the settings name none.
     fn default_pixel_format(self, encoder: &str, hdr: bool) -> &'static str {
         match self {
-            Self::H264 | Self::Hevc | Self::Av1 | Self::Vp9 if hdr => "yuv420p10le",
             Self::H264 | Self::Hevc | Self::Av1 | Self::Vp9 => {
-                if encoder.ends_with("_videotoolbox") {
-                    "nv12"
-                } else {
-                    "yuv420p"
+                match (is_hardware_encoder(encoder), hdr) {
+                    // The semi-planar layouts every hardware encoder takes.
+                    (true, false) => "nv12",
+                    (true, true) => "p010le",
+                    (false, false) => "yuv420p",
+                    (false, true) => "yuv420p10le",
                 }
             }
             Self::ProRes(p) => match (encoder == "prores_videotoolbox", p.is_444()) {
@@ -232,9 +259,63 @@ impl VideoCodec {
     }
 }
 
-/// The FFmpeg encoder [`VideoSettings::encoder`] or the codec's preference picks in this
-/// build, or why there is none.
-pub fn video_encoder_for(settings: &VideoSettings) -> Result<String> {
+/// Which kind of encoder an export uses for codecs that have hardware encoders (H.264,
+/// HEVC, ProRes on macOS); other codecs always use their software encoder.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum EncoderPreference {
+    /// The platform's hardware encoder when it opens and takes the first frame, else the
+    /// software one (x264, x265; `prores_ks` with `codec-prores-sw`).
+    #[default]
+    Auto,
+    /// Hardware encoders only: the export fails rather than fall back.
+    Hardware,
+    /// Software encoders only.
+    Software,
+}
+
+/// The hardware encoder family an FFmpeg encoder name belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HardwareFamily {
+    VideoToolbox,
+    Nvenc,
+    Qsv,
+    Amf,
+}
+
+impl HardwareFamily {
+    pub(crate) fn of(encoder: &str) -> Option<Self> {
+        if encoder.ends_with("_videotoolbox") {
+            Some(Self::VideoToolbox)
+        } else if encoder.ends_with("_nvenc") {
+            Some(Self::Nvenc)
+        } else if encoder.ends_with("_qsv") {
+            Some(Self::Qsv)
+        } else if encoder.ends_with("_amf") {
+            Some(Self::Amf)
+        } else {
+            None
+        }
+    }
+}
+
+/// Whether an FFmpeg encoder name is a hardware encoder (VideoToolbox, NVENC, Quick Sync,
+/// AMF).
+pub fn is_hardware_encoder(name: &str) -> bool {
+    HardwareFamily::of(name).is_some()
+}
+
+/// One encoder an export may open, with the pixel format it is fed.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct EncoderChoice {
+    pub(crate) name: String,
+    pub(crate) format: PixelFormat,
+}
+
+/// The encoders an export tries in order: [`VideoSettings::encoder`] alone when set,
+/// else the hardware encoders and then the software ones as the
+/// [`EncoderPreference`] allows, keeping those this build has and whose pixel format
+/// fits the settings.
+pub(crate) fn video_encoder_choices(settings: &VideoSettings) -> Result<Vec<EncoderChoice>> {
     let codec = settings.codec;
     if let Some(name) = &settings.encoder {
         if !codec.accepts_encoder(name) {
@@ -249,17 +330,73 @@ pub fn video_encoder_for(settings: &VideoSettings) -> Result<String> {
                 tried: vec![leak_free_name(name)],
             });
         }
-        return Ok(name.clone());
+        let format = settings.pixel_format_for(name)?;
+        return Ok(vec![EncoderChoice {
+            name: name.clone(),
+            format,
+        }]);
     }
-    let tried = codec.encoders();
-    tried
-        .iter()
-        .find(|n| encoder_available(n))
-        .map(|n| (*n).to_string())
-        .ok_or(ExportError::Unavailable {
+    let hardware = codec.hardware_encoders();
+    let (use_hardware, use_software) = match settings.encoder_preference {
+        EncoderPreference::Auto => (true, true),
+        // Codecs without hardware encoders ignore the preference.
+        EncoderPreference::Hardware => (true, hardware.is_empty()),
+        EncoderPreference::Software => (false, true),
+    };
+    let mut tried = Vec::new();
+    let mut choices = Vec::new();
+    let mut first_error = None;
+    let names = use_hardware
+        .then_some(hardware)
+        .into_iter()
+        .flatten()
+        .chain(
+            use_software
+                .then(|| codec.software_encoders())
+                .into_iter()
+                .flatten(),
+        );
+    for name in names {
+        tried.push(name);
+        if !encoder_available(name) {
+            continue;
+        }
+        match settings.pixel_format_for(name) {
+            Ok(format) => choices.push(EncoderChoice {
+                name: name.to_string(),
+                format,
+            }),
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    if choices.is_empty() {
+        return Err(first_error.unwrap_or(ExportError::Unavailable {
             codec: codec.name(),
             tried,
-        })
+        }));
+    }
+    Ok(choices)
+}
+
+/// The FFmpeg encoder an export tries first: [`VideoSettings::encoder`], or the first of
+/// the codec's encoders the [`EncoderPreference`] allows that this build has. Under
+/// [`EncoderPreference::Auto`] a hardware encoder that fails to open or to encode the
+/// first frame is replaced by the next; [`ExportSession::video_encoder`]
+/// (super::ExportSession::video_encoder) says which one runs.
+pub fn video_encoder_for(settings: &VideoSettings) -> Result<String> {
+    let mut choices = video_encoder_choices(settings)?;
+    Ok(choices.swap_remove(0).name)
+}
+
+/// FFmpeg's `FF_QP2LAMBDA`: `global_quality` is a quantiser in lambda units.
+const FF_QP2LAMBDA: u32 = 118;
+
+/// VideoToolbox's constant quality (1 to 100) for an x264-style CRF: CRF 23 lands near
+/// 60, which on the test pictures matches x264's CRF 23 in PSNR at a similar size.
+fn videotoolbox_quality(crf: f32) -> u32 {
+    (100.0 - 1.75 * crf).round().clamp(1.0, 100.0) as u32
 }
 
 /// A requested encoder name as a static string for [`ExportError::Unavailable`]; names
@@ -270,6 +407,12 @@ fn leak_free_name(name: &str) -> &'static str {
         "libx265",
         "h264_videotoolbox",
         "hevc_videotoolbox",
+        "h264_nvenc",
+        "hevc_nvenc",
+        "h264_qsv",
+        "hevc_qsv",
+        "h264_amf",
+        "hevc_amf",
         "prores_videotoolbox",
         "prores_ks",
         "libsvtav1",
@@ -287,11 +430,12 @@ fn leak_free_name(name: &str) -> &'static str {
 /// How the encoder spends bits.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum RateControl {
-    /// The encoder's own default (x264 CRF 23, x265 CRF 28; ProRes, PNG, TIFF and GIF
-    /// have no rate setting).
+    /// The encoder's own default (x264 CRF 23, x265 CRF 28, hardware encoders the
+    /// quality those map to; ProRes, PNG, TIFF and GIF have no rate setting).
     #[default]
     Default,
-    /// Constant quality (x264, x265, AV1 and VP9 encoders): lower is better.
+    /// Constant quality (x264, x265, AV1 and VP9 encoders): lower is better. Hardware
+    /// H.264 and HEVC encoders map it onto their own quality scale.
     Crf(f32),
     /// Average bit rate in bits per second, with an optional peak.
     Bitrate { average: u64, max: Option<u64> },
@@ -348,6 +492,61 @@ impl ColourTags {
     }
 }
 
+/// SMPTE ST 2086 mastering display colour volume, in the units HEVC's SEI message and
+/// x265 use: chromaticity coordinates in 1/50000, luminance in 1/10000 cd/m².
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MasteringDisplay {
+    pub red: (u16, u16),
+    pub green: (u16, u16),
+    pub blue: (u16, u16),
+    pub white: (u16, u16),
+    pub max_luminance: u32,
+    pub min_luminance: u32,
+}
+
+impl MasteringDisplay {
+    /// P3 primaries, D65 white, 1000 to 0.0001 cd/m²: the usual HDR10 grading display.
+    pub const P3_D65_1000: Self = Self {
+        red: (34_000, 16_000),
+        green: (13_250, 34_500),
+        blue: (7_500, 3_000),
+        white: (15_635, 16_450),
+        max_luminance: 10_000_000,
+        min_luminance: 1,
+    };
+
+    /// x265's `master-display` value.
+    fn x265_value(&self) -> String {
+        let Self {
+            red: (rx, ry),
+            green: (gx, gy),
+            blue: (bx, by),
+            white: (wx, wy),
+            max_luminance,
+            min_luminance,
+        } = *self;
+        format!(
+            "G({gx},{gy})B({bx},{by})R({rx},{ry})WP({wx},{wy})L({max_luminance},{min_luminance})"
+        )
+    }
+}
+
+/// CTA-861.3 content light levels in cd/m²: the brightest pixel (MaxCLL) and the
+/// brightest frame average (MaxFALL).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ContentLight {
+    pub max_cll: u16,
+    pub max_fall: u16,
+}
+
+/// Static HDR metadata for PQ exports: written into the container (MP4 and MOV `mdcv`
+/// and `clli` boxes, Matroska colour elements) and, by x265, into the HEVC stream's SEI.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct HdrMetadata {
+    pub mastering: Option<MasteringDisplay>,
+    pub content_light: Option<ContentLight>,
+}
+
 /// Settings of the video stream.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VideoSettings {
@@ -361,6 +560,8 @@ pub struct VideoSettings {
     pub pixel_format: Option<PixelFormat>,
     pub rate: RateControl,
     pub colour: ColourTags,
+    /// Mastering display and content light levels; HDR tags only.
+    pub hdr_metadata: Option<HdrMetadata>,
     /// Keyframe interval in frames; `None` keeps the encoder's.
     pub gop: Option<u32>,
     pub max_b_frames: Option<u32>,
@@ -368,10 +569,13 @@ pub struct VideoSettings {
     pub preset: Option<String>,
     /// Encoder threads; zero lets FFmpeg choose.
     pub threads: usize,
-    /// Another FFmpeg encoder for the codec (`h264_videotoolbox`); `None` picks the
-    /// codec's default software encoder (ProRes: VideoToolbox on macOS).
+    /// Hardware or software encoding when [`encoder`](Self::encoder) names none.
+    pub encoder_preference: EncoderPreference,
+    /// One FFmpeg encoder for the codec (`h264_videotoolbox`, `libx264`), used without
+    /// fallback; `None` picks by [`encoder_preference`](Self::encoder_preference).
     pub encoder: Option<String>,
-    /// Further encoder private options, as FFmpeg's command line would pass them.
+    /// Further encoder options, as FFmpeg's command line would pass them; they go to
+    /// whichever encoder opens, a fallback included.
     pub options: Vec<(String, String)>,
 }
 
@@ -390,18 +594,32 @@ impl VideoSettings {
             } else {
                 ColourTags::Bt709
             },
+            hdr_metadata: None,
             gop: None,
             max_b_frames: None,
             preset: None,
             threads: 0,
+            encoder_preference: EncoderPreference::Auto,
             encoder: None,
             options: Vec::new(),
         }
     }
 
-    /// The pixel format for `encoder`: the settings' or the codec's default.
+    /// The pixel format for `encoder`: the settings' or the codec's default. Hardware
+    /// encoders of 4:2:0 video get the semi-planar layout of the same depth (NV12, P010),
+    /// and hardware H.264 is 8-bit only.
     pub(crate) fn pixel_format_for(&self, encoder: &str) -> Result<PixelFormat> {
+        let hardware_video = is_hardware_encoder(encoder)
+            && matches!(self.codec, VideoCodec::H264 | VideoCodec::Hevc);
         let format = match self.pixel_format {
+            Some(f) if hardware_video => {
+                let semi_planar = match f.name() {
+                    "yuv420p" => Some("nv12"),
+                    "yuv420p10le" => Some("p010le"),
+                    _ => None,
+                };
+                semi_planar.and_then(PixelFormat::from_name).unwrap_or(f)
+            }
             Some(f) => f,
             None => {
                 let name = self
@@ -411,6 +629,11 @@ impl VideoSettings {
                     .ok_or_else(|| ExportError::Settings(format!("FFmpeg does not know {name}")))?
             }
         };
+        if hardware_video && self.codec == VideoCodec::H264 && format.bit_depth() > 8 {
+            return Err(ExportError::Settings(format!(
+                "{encoder} encodes 8-bit H.264 only, not {format}"
+            )));
+        }
         if self.codec != VideoCodec::Gif {
             let accepted = encoder_pixel_formats(encoder);
             if !accepted.is_empty() && !accepted.contains(&format) {
@@ -422,25 +645,73 @@ impl VideoSettings {
         Ok(format)
     }
 
-    /// Encoder private options for the codec's rate control, preset and profile.
+    /// Encoder options for the codec's rate control, preset and profile. Hardware H.264
+    /// and HEVC encoders get a constant quality mapped from the CRF (the software
+    /// encoder's default CRF for [`RateControl::Default`]); the preset is a software
+    /// encoder setting.
     pub(crate) fn encoder_options(&self, encoder: &str) -> Vec<(String, String)> {
         let mut options = Vec::new();
         let mut push = |k: &str, v: String| options.push((k.to_string(), v));
-        if let Some(preset) = &self.preset {
+        let hardware = match self.codec {
+            VideoCodec::H264 | VideoCodec::Hevc => HardwareFamily::of(encoder),
+            _ => None,
+        };
+        if let Some(preset) = &self.preset
+            && hardware.is_none()
+        {
             push("preset", preset.clone());
         }
-        match self.rate {
-            RateControl::Default => {}
-            RateControl::Crf(crf) => push("crf", format!("{crf}")),
-            RateControl::Bitrate { max, .. } => {
+        match (self.rate, hardware) {
+            (RateControl::Bitrate { max, .. }, _) => {
                 if let Some(max) = max {
                     push("maxrate", max.to_string());
                     push("bufsize", (max * 2).to_string());
                 }
             }
+            (RateControl::Default, None) => {}
+            (RateControl::Crf(crf), None) => push("crf", format!("{crf}")),
+            (RateControl::Default | RateControl::Crf(_), Some(family)) => {
+                let crf = match self.rate {
+                    RateControl::Crf(crf) => crf,
+                    _ => self.codec.default_crf(),
+                };
+                let qp = crf.round().clamp(0.0, 51.0) as u32;
+                match family {
+                    HardwareFamily::VideoToolbox => {
+                        // Constant quality (Apple silicon): 0 to 100, as FFmpeg's
+                        // `-q:v`, which arrives as `global_quality` in lambda units.
+                        push("flags", "+qscale".to_string());
+                        let quality = videotoolbox_quality(crf);
+                        push("global_quality", (quality * FF_QP2LAMBDA).to_string());
+                    }
+                    HardwareFamily::Nvenc => {
+                        push("rc", "vbr".to_string());
+                        push("cq", qp.to_string());
+                        push("b", "0".to_string());
+                    }
+                    HardwareFamily::Qsv => {
+                        // Intelligent constant quality.
+                        push("global_quality", qp.max(1).to_string());
+                    }
+                    HardwareFamily::Amf => {
+                        push("rc", "cqp".to_string());
+                        for frame in ["qp_i", "qp_p", "qp_b"] {
+                            push(frame, qp.to_string());
+                        }
+                    }
+                }
+            }
         }
         if encoder == "libx265" {
-            push("x265-params", "log-level=error".to_string());
+            let mut params = vec!["log-level=error".to_string()];
+            let hdr = self.hdr_metadata.unwrap_or_default();
+            if let Some(m) = hdr.mastering {
+                params.push(format!("master-display={}", m.x265_value()));
+            }
+            if let Some(c) = hdr.content_light {
+                params.push(format!("max-cll={},{}", c.max_cll, c.max_fall));
+            }
+            push("x265-params", params.join(":"));
         }
         if let VideoCodec::ProRes(profile) = self.codec {
             push("profile", profile.option(encoder).to_string());
@@ -590,6 +861,11 @@ impl ExportSettings {
                         "GIF frame rates are at most 50 fps".into(),
                     ));
                 }
+            }
+            if v.hdr_metadata.is_some() && !v.colour.is_hdr() {
+                return Err(ExportError::Settings(
+                    "HDR metadata needs PQ or HLG colour tags".into(),
+                ));
             }
             if v.codec.is_rgb() && v.colour != ColourTags::Srgb {
                 return Err(ExportError::Settings(format!(
