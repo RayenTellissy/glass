@@ -13,6 +13,7 @@ use crate::error::EditError;
 use crate::id::MediaId;
 use crate::model::{MediaRef, Project};
 use crate::time::Time;
+use crate::transition::needs;
 
 /// One reference to point at a new file.
 #[derive(Clone, Debug, PartialEq)]
@@ -28,18 +29,30 @@ pub struct Relink {
 }
 
 impl Project {
-    /// The end of the furthest source time any clip of `media` shows: the least length a
-    /// file must have to stand in for it. `None` when no clip uses it.
+    /// The end of the furthest source time any clip of `media` shows, the tail handles of
+    /// transitions out of its clips included: the least length a file must have to stand
+    /// in for it. `None` when no clip uses it.
     pub fn source_used_until(&self, media: MediaId) -> Result<Option<Time>, EditError> {
         let mut end: Option<Time> = None;
+        let mut extend = |e: Time| end = Some(end.map_or(e, |x: Time| x.max(e)));
         for sequence in &self.sequences {
             for track in &sequence.tracks {
                 for item in &track.items {
                     if let Some(clip) = item.clip()
                         && clip.media == media
                     {
-                        let e = clip.source_range(item.range)?.end()?;
-                        end = Some(end.map_or(e, |x| x.max(e)));
+                        extend(clip.source_range(item.range)?.end()?);
+                    }
+                }
+                if track.transitions.is_empty() {
+                    continue;
+                }
+                let grid = sequence.grid(track.kind)?;
+                for transition in &track.transitions {
+                    if let Some((_, m, e)) = needs(track, grid, transition)?.outgoing
+                        && m == media
+                    {
+                        extend(e);
                     }
                 }
             }

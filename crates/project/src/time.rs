@@ -215,6 +215,17 @@ impl Time {
             .ok_or(TimeError::Overflow)
     }
 
+    /// The number of whole `step`s at or before this time (rounded towards negative
+    /// infinity). `step` must be positive.
+    pub fn floor_to_multiple(self, step: Time) -> Result<i64, TimeError> {
+        if !step.is_positive() {
+            return Err(TimeError::ZeroDenominator);
+        }
+        let n = i128::from(self.num) * i128::from(step.den);
+        let d = i128::from(self.den) * i128::from(step.num);
+        i64::try_from(n.div_euclid(d)).map_err(|_| TimeError::Overflow)
+    }
+
     /// The number of whole `rate` frames at or before this time.
     pub fn frames_floor(self, rate: Rational) -> i64 {
         let n = i128::from(self.num) * i128::from(rate.num);
@@ -390,6 +401,13 @@ mod tests {
         );
         assert_eq!(
             t("1").round_to_multiple(t("-1")),
+            Err(TimeError::ZeroDenominator)
+        );
+        assert_eq!(t("49/1000").floor_to_multiple(frame), Ok(1));
+        assert_eq!(t("2/25").floor_to_multiple(frame), Ok(2));
+        assert_eq!(t("-1/1000").floor_to_multiple(frame), Ok(-1));
+        assert_eq!(
+            t("1").floor_to_multiple(Time::ZERO),
             Err(TimeError::ZeroDenominator)
         );
     }

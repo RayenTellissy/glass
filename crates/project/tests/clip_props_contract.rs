@@ -14,7 +14,7 @@ use project::clip::{
 use project::diff::{Diff, Node, flatten, rebuild};
 use project::params::builtin::BLEND_MODES;
 use project::params::{ParamDef, ParamSchema, ParamValue, Range, effects};
-use project::schema::{self, LoadError};
+use project::schema::{self, LoadError, SCHEMA_VERSION};
 use project::{
     BlendMode, Clip, ClipSpec, Crop, EditError, EditLabel, EffectId, History, Item, ItemId,
     MediaId, NodeId, Project, Rational, SpeedKeep, Time, TimeRange, TrackId, TrackKind, Transform,
@@ -1025,7 +1025,7 @@ fn loading_rebuilding_and_recovering_all_refuse_an_invalid_clip() {
     // Load.
     let mut bad = json.clone();
     shot_json(&mut bad)["speed"]["keys"][0]["speed"] = unreduced.clone();
-    match schema::load(&envelope(4, bad.clone())) {
+    match schema::load(&envelope(SCHEMA_VERSION, bad.clone())) {
         Err(LoadError::Invalid(error)) => assert_eq!(error, expected),
         other => panic!("{other:?}"),
     }
@@ -1070,7 +1070,7 @@ fn blend_modes_load_by_their_kebab_ids_in_the_compositing_order() {
     for (mode, id) in BlendMode::ALL.into_iter().zip(BLEND_MODES) {
         let mut file = json.clone();
         shot_json(&mut file)["blend"] = json!(id);
-        let loaded = schema::load(&envelope(4, file)).expect(id);
+        let loaded = schema::load(&envelope(SCHEMA_VERSION, file)).expect(id);
         let shot = &loaded.sequences()[0].tracks[0].items[0];
         assert_eq!(shot.clip().expect("clip").blend, mode, "{id}");
         assert_eq!(BlendMode::from_id(id), Some(mode));
@@ -1080,7 +1080,7 @@ fn blend_modes_load_by_their_kebab_ids_in_the_compositing_order() {
         shot_json(&mut file)["blend"] = json!(id);
         assert!(
             matches!(
-                schema::load(&envelope(4, file)),
+                schema::load(&envelope(SCHEMA_VERSION, file)),
                 Err(LoadError::Model { .. })
             ),
             "{id}"
@@ -1099,13 +1099,20 @@ const V4_CLIP_KEYS: [&str; 8] = [
     "effects",
 ];
 
-/// The fixture as a v3 `project` value: clips without their v4 properties.
+/// The fixture as a v3 `project` value: clips without their v4 properties, tracks without
+/// their v5 transitions.
 fn v3_json(f: &Fixture) -> Value {
     let mut json = serde_json::to_value(&f.project).expect("ser");
     for track in json["sequences"][0]["tracks"]
         .as_array_mut()
         .expect("tracks")
     {
+        let transitions = track
+            .as_object_mut()
+            .expect("track")
+            .remove("transitions")
+            .expect("a v5 track has transitions");
+        assert_eq!(transitions, json!([]), "the fixture has no transitions");
         for item in track["items"].as_array_mut().expect("items") {
             if item["type"] == "clip" {
                 for key in V4_CLIP_KEYS {
@@ -1146,15 +1153,14 @@ fn a_v3_clip_already_holding_a_v4_property_is_refused_by_the_migration() {
     let migrated = schema::migrate(3, file.clone()).expect("migrates");
     for t in [2, 3] {
         assert_eq!(
-            migrated["sequences"][0]["tracks"][t],
-            file["sequences"][0]["tracks"][t]
+            migrated["sequences"][0]["tracks"][t]["items"],
+            file["sequences"][0]["tracks"][t]["items"]
         );
     }
     assert_eq!(migrated["next_id"], v3["next_id"]);
 }
 
 #[test]
-#[ignore = "suspected bug: migrate_v3_to_v4 skips a track that is not an object instead of failing"]
 fn the_v3_migration_refuses_a_track_that_is_not_an_object() {
     for track in [json!(5), json!("V1"), json!([])] {
         let v3 = json!({ "sequences": [{ "tracks": [track] }] });
