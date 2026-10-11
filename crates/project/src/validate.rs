@@ -12,7 +12,7 @@ use crate::edit::check_item;
 use crate::error::EditError;
 use crate::id::{NodeId, TrackId};
 use crate::marker::{Marker, check_marker, is_sorted};
-use crate::model::{ItemKind, Project};
+use crate::model::{ClipSource, ItemKind, Project};
 use crate::time::Time;
 use crate::transition::check_track;
 
@@ -33,12 +33,13 @@ pub enum ValidationError {
 impl Project {
     /// Checks every invariant the edit operations maintain: unique allocated ids, valid
     /// project settings and sequence formats ([`crate::settings`]), items of a kind their track accepts, on its grid, sorted and not
-    /// overlapping, clips pointing at known media with their properties in range (a
+    /// overlapping, clips pointing at known media or sequences with their properties in range (a
     /// constant speed map, finite numbers within their limits, valid effect schema ids,
     /// keyframe curves sorted and finite with valid handles, [`crate::keyframe`]),
     /// markers sorted, not before zero and (on sequences) on the frame grid, and
     /// transitions ordered by id on cuts that resolve, fitting their clips and head
-    /// handles without overlapping ([`crate::transition`]).
+    /// handles without overlapping ([`crate::transition`]), and no sequence nesting
+    /// itself, directly or through others ([`crate::nest`]).
     pub fn validate(&self) -> Result<(), ValidationError> {
         let mut ids = HashSet::new();
         let mut claim = |id: NodeId| -> Result<(), ValidationError> {
@@ -90,8 +91,14 @@ impl Project {
                     }
                     match &item.kind {
                         ItemKind::Clip(clip) => {
-                            if self.media.get(clip.media).is_none() {
-                                return Err(in_track(EditError::UnknownMedia(clip.media)));
+                            match clip.source {
+                                ClipSource::Media(media) if self.media.get(media).is_none() => {
+                                    return Err(in_track(EditError::UnknownMedia(media)));
+                                }
+                                ClipSource::Sequence(s) if self.sequence(s).is_none() => {
+                                    return Err(in_track(EditError::UnknownSequence(s)));
+                                }
+                                _ => {}
                             }
                             check_clip(clip).map_err(in_track)?;
                             for effect in &clip.effects {
@@ -117,6 +124,7 @@ impl Project {
                 check_track(track, grid).map_err(in_track)?;
             }
         }
+        self.check_nesting()?;
         Ok(())
     }
 }
