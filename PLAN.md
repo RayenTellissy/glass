@@ -220,7 +220,7 @@ Done when: a 1000-clip project round-trips through save and load byte-identicall
 - [x] Autosave as diffs every 10 s to the cache folder, recovery prompt on next launch
 - [x] Versioned schema with a migration function per version, tested with fixtures from every prior version
 - [x] Sequences, tracks (video, audio, subtitle, adjustment), clips, gaps, markers
-- [ ] Clip properties: source range, timeline range, speed map, effect stack, transform, audio gain, enabled flag
+- [~] Clip properties: source range, timeline range, speed map, effect stack, transform, audio gain, enabled flag
 - [ ] Transitions as first-class items between two clips with alignment (centre, start, end)
 - [ ] Nested sequences and compound clips
 - [ ] Adjustment layers
