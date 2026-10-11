@@ -350,6 +350,9 @@ fn remaining(gpu: &Gpu, node: TransitionNode) -> Vec<f32> {
     run(gpu, &a, &b, node).iter().map(|p| p[3]).collect()
 }
 
+/// A transition as a function of linear progress.
+type NodeAt = Box<dyn Fn(f64) -> TransitionNode>;
+
 #[test]
 fn the_mask_transitions_never_take_back_what_b_covered() {
     let _serial = common::timing::serial();
@@ -357,7 +360,7 @@ fn the_mask_transitions_never_take_back_what_b_covered() {
         eprintln!("skipped: no GPU adapter");
         return;
     };
-    let mut cases: Vec<(String, Box<dyn Fn(f64) -> TransitionNode>)> = Vec::new();
+    let mut cases: Vec<(String, NodeAt)> = Vec::new();
     for seed in [1.0, 77.0, 4096.0] {
         cases.push((
             format!("film-burn seed {seed}"),
