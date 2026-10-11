@@ -10,12 +10,15 @@ pub mod edit;
 pub mod error;
 pub mod history;
 pub mod id;
+pub mod keyframe;
 pub mod marker;
 pub mod media_pool;
 pub mod model;
 pub mod params;
 pub mod relink;
 pub mod schema;
+pub mod settings;
+pub mod subtitle_export;
 pub mod time;
 pub mod transition;
 pub mod validate;
@@ -27,6 +30,7 @@ pub use history::{EditLabel, History, MemoryStats};
 pub use id::{
     BinId, EffectId, ItemId, MarkerId, MediaId, NodeId, SequenceId, TrackId, TransitionId,
 };
+pub use keyframe::{ClipParam, Curve, Handle, HandleSide, Interpolation, Key, KeyTarget};
 pub use marker::{Marker, MarkerOwner, MarkerSpec, TodoState};
 pub use media_pool::ColourLabel;
 pub use model::{
@@ -35,6 +39,10 @@ pub use model::{
 };
 pub use relink::Relink;
 pub use schema::LoadError;
+pub use settings::{
+    CacheFolder, ChannelLayout, ColourSpace, ProjectSettings, Resolution, SequenceFormat,
+    WorkingPrimaries,
+};
 pub use time::{Rational, Time, TimeError, TimeRange};
 pub use transition::{
     Alignment, CutSide, HandleNeeds, Segment, Transition, TransitionAt, TransitionSpec,

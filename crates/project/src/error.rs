@@ -1,7 +1,9 @@
 //! Typed errors for edit operations.
 
 use crate::id::{EffectId, ItemId, MarkerId, MediaId, SequenceId, TrackId, TransitionId};
+use crate::keyframe::HandleSide;
 use crate::model::TrackKind;
+use crate::settings::CacheFolder;
 use crate::time::{Rational, Time, TimeError};
 use crate::transition::CutSide;
 
@@ -41,10 +43,16 @@ pub enum EditError {
     NegativeDuration(Time),
     #[error("{time} s is not on the {grid} s frame grid of the sequence")]
     MarkerOffGrid { time: Time, grid: Time },
-    #[error("invalid frame rate {num}/{den}")]
+    #[error("invalid frame rate {num}/{den}: it must be from 1 to 240 frames per second")]
     InvalidFrameRate { num: i32, den: i32 },
-    #[error("invalid sample rate {0}")]
+    #[error("invalid sample rate {0}: it must be 44100, 48000 or 96000 Hz")]
     InvalidSampleRate(u32),
+    #[error("invalid resolution {width}x{height}: both sides must be even, from 16 to 8192")]
+    InvalidResolution { width: u32, height: u32 },
+    #[error("drop-frame timecode needs 29.97 or 59.94 fps, not {0}")]
+    DropFrameNotAllowed(Rational),
+    #[error("{0:?} is not a valid cache folder")]
+    InvalidCacheFolder(CacheFolder),
     #[error("track index {index} out of range (sequence has {len} tracks)")]
     TrackIndex { index: usize, len: usize },
     #[error("an item cannot move from a {from:?} track to a {to:?} track")]
@@ -80,6 +88,35 @@ pub enum EditError {
     UnknownParam { schema: String, param: String },
     #[error("effect index {index} out of range (the stack holds {len})")]
     EffectIndex { index: usize, len: usize },
+    #[error("{0} cannot be animated")]
+    NotAnimatable(String),
+    #[error("{0} is already animated")]
+    AlreadyAnimated(String),
+    #[error("{0} is not animated")]
+    NotAnimated(String),
+    #[error("a curve needs at least one key")]
+    EmptyCurve,
+    #[error("no key at {0} s")]
+    NoKeyAt(Time),
+    #[error("another key is already at {0} s")]
+    KeyTimeTaken(Time),
+    #[error("keys must be in time order without two at one time, but one is at {0} s")]
+    KeysOutOfOrder(Time),
+    #[error("keys cannot be before zero, got {0} s")]
+    KeyBeforeZero(Time),
+    #[error("a key value must be a {expected}, not a {found}")]
+    KeyValueKind {
+        expected: &'static str,
+        found: &'static str,
+    },
+    #[error("a handle needs {expected} speeds, one per value component, not {found}")]
+    HandleComponents { expected: usize, found: usize },
+    #[error("the {side:?} handle of the key at {time} s is not part of a bezier")]
+    NotBezier { time: Time, side: HandleSide },
+    #[error("key times scale by a positive factor, not {0}")]
+    TimeScale(Rational),
+    #[error("parameter id {0:?} is not lowercase ASCII, digits, '.', '_' or '-'")]
+    InvalidParamId(String),
     #[error("no transition {0}")]
     UnknownTransition(TransitionId),
     #[error("transition kind {0:?} is not lowercase ASCII letters, digits and '-'")]

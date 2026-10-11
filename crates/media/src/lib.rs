@@ -35,6 +35,7 @@ mod probe;
 mod reader;
 mod scan;
 pub mod source;
+pub mod subtitle;
 mod time;
 pub mod timemap;
 
@@ -65,6 +66,7 @@ pub use scan::PacketEntry;
 pub use source::{
     ImageKind, ImageSequence, SourceInfo, SourceKind, SourceOptions, Unsupported, VideoSource,
 };
+pub use subtitle::{SubtitleCue, read_subtitle_cues};
 pub use time::{Rational, Timestamp};
 pub use timemap::{SourceTimeline, TimelineCache, TimestampMap};
 

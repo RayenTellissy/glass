@@ -2,6 +2,7 @@
 
 use crate::encode::{PcmFormat, encoder_available, encoder_pixel_formats};
 use crate::format::{ColourInfo, ColourRange, PixelFormat};
+use crate::subtitle::SubtitleCodec;
 use crate::time::Rational;
 
 use super::{ExportError, Result};
@@ -94,6 +95,20 @@ impl Container {
             Self::M4a => codec == A::Aac,
             Self::Mp3 => codec == A::Mp3,
             Self::WebM | Self::ImageSequence | Self::Gif => false,
+        }
+    }
+
+    /// Whether the container can carry text subtitle streams (`mov_text` in MP4 and MOV,
+    /// WebVTT in Matroska and WebM).
+    pub fn accepts_subtitles(self) -> bool {
+        self.subtitle_codec().is_some()
+    }
+
+    pub(crate) fn subtitle_codec(self) -> Option<SubtitleCodec> {
+        match self {
+            Self::Mp4 | Self::Mov => Some(SubtitleCodec::MovText),
+            Self::Matroska | Self::WebM => Some(SubtitleCodec::WebVtt),
+            _ => None,
         }
     }
 
@@ -795,6 +810,9 @@ pub struct ExportSettings {
     pub container: Container,
     pub video: Option<VideoSettings>,
     pub audio: Option<AudioSettings>,
+    /// Text subtitle streams, in stream order; cues go to
+    /// [`ExportSession::push_subtitle`](super::ExportSession::push_subtitle).
+    pub subtitles: Vec<SubtitleSettings>,
     /// MP4, MOV and M4A: move the index to the front when finishing, so playback can
     /// start before the whole file has arrived (one more pass over the file).
     pub fast_start: bool,
@@ -808,6 +826,7 @@ impl ExportSettings {
             container,
             video: None,
             audio: None,
+            subtitles: Vec::new(),
             fast_start: true,
             first_number: 0,
         }
@@ -820,6 +839,12 @@ impl ExportSettings {
 
     pub fn with_audio(mut self, audio: AudioSettings) -> Self {
         self.audio = Some(audio);
+        self
+    }
+
+    /// Adds a text subtitle stream after the ones already added.
+    pub fn with_subtitles(mut self, subtitles: SubtitleSettings) -> Self {
+        self.subtitles.push(subtitles);
         self
     }
 
@@ -922,6 +947,44 @@ impl ExportSettings {
                 return Err(ExportError::Settings(format!("FLAC at {bits} bits")));
             }
         }
+        if !self.subtitles.is_empty() && !container.accepts_subtitles() {
+            return Err(ExportError::Incompatible {
+                container: container.name(),
+                codec: "text subtitles",
+            });
+        }
+        for subtitles in &self.subtitles {
+            let language = &subtitles.language;
+            if language.len() != 3 || !language.bytes().all(|b| b.is_ascii_lowercase()) {
+                return Err(ExportError::Settings(format!(
+                    "subtitle language {language:?} is not an ISO 639-2 code"
+                )));
+            }
+        }
         Ok(())
+    }
+}
+
+/// A text subtitle stream: `mov_text` (3GPP timed text) in MP4 and MOV, WebVTT in
+/// Matroska and WebM.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubtitleSettings {
+    /// ISO 639-2 code in lowercase (`eng`, `fra`, `deu`), `und` when unknown.
+    pub language: String,
+    /// The stream's name in players' subtitle menus.
+    pub title: Option<String>,
+}
+
+impl SubtitleSettings {
+    pub fn new(language: impl Into<String>) -> Self {
+        Self {
+            language: language.into(),
+            title: None,
+        }
+    }
+
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
     }
 }

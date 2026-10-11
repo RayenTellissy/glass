@@ -336,11 +336,12 @@ impl FrameReader {
         Ok(false)
     }
 
-    /// Drops the decoder's buffered frames after a seek. A hardware decoder that was
-    /// drained (end of stream sent) is reopened instead: FFmpeg's VideoToolbox HEVC path
-    /// returns the last drained frame once more after a flush.
+    /// Drops the decoder's buffered frames after a seek. A hardware decoder is reopened
+    /// instead: FFmpeg's VideoToolbox hwaccel has no flush, so after a flush an open GOP's
+    /// non-IDR keyframe decodes against reference pictures from before the seek, and a
+    /// drained HEVC decoder returns its last frame once more.
     fn reset_decoder(&mut self) -> Result<()> {
-        if self.draining && self.decoder.is_hardware() {
+        if self.decoder.is_hardware() {
             self.decoder = Decoder::open_with(&self.demuxer, self.stream.index, self.options)?;
         } else {
             self.decoder.flush();

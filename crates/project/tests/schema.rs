@@ -13,8 +13,10 @@ use std::path::{Path, PathBuf};
 use project::params::{ParamDef, ParamSchema, ParamValue, Range, effects};
 use project::schema::{self, LoadError, OLDEST_VERSION, SCHEMA_VERSION};
 use project::{
-    Alignment, BlendMode, Clip, ClipSpec, ColourLabel, Crop, MarkerOwner, MarkerSpec, MediaId,
-    Project, Rational, SpeedKeep, Time, TimeRange, TodoState, TrackKind, Transform, TransitionSpec,
+    Alignment, BlendMode, CacheFolder, ChannelLayout, Clip, ClipParam, ClipSpec, ColourLabel,
+    ColourSpace, Crop, Handle, HandleSide, Interpolation, KeyTarget, MarkerOwner, MarkerSpec,
+    MediaId, Project, ProjectSettings, Rational, Resolution, SequenceFormat, SpeedKeep, Time,
+    TimeRange, TodoState, TrackKind, Transform, TransitionSpec,
 };
 use serde_json::Value;
 
@@ -284,6 +286,179 @@ fn transitions() -> Project {
     p
 }
 
+/// The settings in the `*-settings.json` fixtures: every field away from its default.
+fn custom_settings() -> ProjectSettings {
+    ProjectSettings {
+        sequence: SequenceFormat {
+            resolution: Resolution::UHD,
+            frame_rate: Rational::new(30000, 1001),
+            drop_frame: true,
+            sample_rate: 96_000,
+            channel_layout: ChannelLayout::Surround51,
+        },
+        colour_space: ColourSpace::Rec2020Hlg,
+        cache_folder: CacheFolder::Relative("../caches/settings film".into()),
+    }
+}
+
+/// The project in every `*-settings.json` fixture (from v6): custom project settings, a
+/// sequence in the project's format with a clip, and a square mono sequence at 24 fps.
+fn settings() -> Project {
+    let p = Project::new("fixture-settings", "Settings film");
+    let p = p.set_project_settings(custom_settings()).expect("settings");
+    let (p, media) = p.add_media("0a1b2c", "/footage/street.mov").expect("media");
+    let format = p.settings().sequence;
+    let (p, main) = p.add_sequence_with("Main", format).expect("main");
+    let (p, v1) = p.add_track(main, TrackKind::Video, "V1", None).expect("v1");
+    let ntsc = Rational::new(30000, 1001);
+    let (p, _) = p
+        .insert_clip(
+            v1,
+            ClipSpec {
+                media,
+                range: TimeRange::new(Time::ZERO, Time::from_frames(60, ntsc).expect("frames")),
+                source_start: Time::ZERO,
+            },
+        )
+        .expect("clip");
+    let (p, square) = p
+        .add_sequence("Square", Rational::new(24, 1), 44_100)
+        .expect("square");
+    let square_format = SequenceFormat {
+        resolution: Resolution::SQUARE,
+        channel_layout: ChannelLayout::Mono,
+        ..p.sequence(square).expect("square").format()
+    };
+    p.set_sequence_format(square, square_format)
+        .expect("square format")
+}
+
+fn tint() -> ParamSchema {
+    ParamSchema::new(
+        "acme.tint",
+        "acme.tint",
+        vec![ParamDef::colour(
+            "colour",
+            "acme.tint.colour",
+            [1.0, 1.0, 1.0, 1.0],
+            true,
+        )],
+    )
+}
+
+/// The project in every `*-keyframes.json` fixture (from v7): clip properties and effect
+/// parameters animated with every interpolation, bezier handles, keys at fractional source
+/// times outside the visible range, and a curve on a slowed clip.
+fn keyframes() -> Project {
+    let p = Project::new("fixture-keyframes", "Lighthouse");
+    let (p, a) = p
+        .add_media("7e8f90", "/footage/lighthouse.mov")
+        .expect("media");
+    let (p, seq) = p.add_sequence("Night", FPS, 48_000).expect("sequence");
+    let (p, v1) = p.add_track(seq, TrackKind::Video, "V1", None).expect("v1");
+    let (p, a1) = p.add_track(seq, TrackKind::Audio, "A1", None).expect("a1");
+    let (p, beam) = p
+        .insert_clip(v1, clip(a, Time::ZERO, frames(100), Time::seconds(4)))
+        .expect("clip");
+    let (p, sea) = p
+        .insert_clip(a1, clip(a, Time::ZERO, Time::seconds(4), Time::seconds(4)))
+        .expect("clip");
+    let p = p
+        .set_clip_speed(beam, Rational::new(1, 2), SpeedKeep::Timeline)
+        .expect("speed");
+    let key = |n, d| Time::new(n, d).expect("time");
+    let target = |param| KeyTarget::Clip { item: beam, param };
+    let opacity = target(ClipParam::Opacity);
+    let p = p.animate_param(opacity, Time::seconds(4)).expect("opacity");
+    let p = p
+        .set_key(opacity, Time::seconds(4), ParamValue::Float(0.0))
+        .expect("key");
+    let p = p
+        .set_key(opacity, key(9, 2), ParamValue::Float(1.0))
+        .expect("key");
+    let p = p
+        .set_key(opacity, key(11, 2), ParamValue::Float(0.25))
+        .expect("key");
+    let p = p
+        .set_key_interpolation(opacity, key(9, 2), Interpolation::Hold)
+        .expect("hold");
+    let position = target(ClipParam::Position);
+    let p = p
+        .animate_param(position, Time::seconds(4))
+        .expect("position");
+    let p = p
+        .set_key(
+            position,
+            Time::seconds(6),
+            ParamValue::Point([-240.0, 96.5]),
+        )
+        .expect("key");
+    let p = p
+        .set_key_interpolation(position, Time::seconds(4), Interpolation::ease(2))
+        .expect("ease");
+    let p = p
+        .set_key_handle(
+            position,
+            Time::seconds(6),
+            HandleSide::In,
+            Handle::new(vec![-60.0, 12.0], 0.6),
+        )
+        .expect("handle");
+    let rotation = target(ClipParam::Rotation);
+    let p = p.animate_param(rotation, Time::ZERO).expect("rotation");
+    let p = p
+        .set_key(rotation, Time::seconds(8), ParamValue::Angle(720.0))
+        .expect("key");
+    let feather = target(ClipParam::CropFeather);
+    let p = p.animate_param(feather, key(13, 3)).expect("feather");
+    let gain = KeyTarget::Clip {
+        item: sea,
+        param: ClipParam::GainDb,
+    };
+    let p = p.set_clip_gain(sea, -12.0).expect("gain");
+    let p = p.animate_param(gain, Time::seconds(4)).expect("gain");
+    let p = p
+        .set_key(gain, Time::seconds(7), ParamValue::Float(0.0))
+        .expect("key");
+    let lut = effects::lut();
+    let (p, grade) = p.add_effect(beam, &lut, None).expect("lut");
+    let intensity = KeyTarget::Effect {
+        effect: grade,
+        schema: &lut,
+        param: "intensity",
+    };
+    let p = p
+        .animate_param(intensity, Time::seconds(4))
+        .expect("intensity");
+    let p = p
+        .set_key(intensity, Time::seconds(5), ParamValue::Float(0.3))
+        .expect("key");
+    let p = p
+        .set_key_interpolation(
+            intensity,
+            Time::seconds(4),
+            Interpolation::Bezier {
+                out: Handle::new(vec![-0.5], 0.75),
+                into: Handle::new(vec![0.0], 0.1),
+            },
+        )
+        .expect("bezier");
+    let tint = tint();
+    let (p, warm) = p.add_effect(beam, &tint, None).expect("tint");
+    let colour = KeyTarget::Effect {
+        effect: warm,
+        schema: &tint,
+        param: "colour",
+    };
+    let p = p.animate_param(colour, Time::seconds(4)).expect("colour");
+    p.set_key(
+        colour,
+        Time::seconds(6),
+        ParamValue::Colour([1.0, 0.5, 0.125, 0.5]),
+    )
+    .expect("key")
+}
+
 /// The project each fixture name was saved from.
 fn builder(name: &str) -> Project {
     match name {
@@ -291,6 +466,8 @@ fn builder(name: &str) -> Project {
         "tracks" => tracks(),
         "props" => props(),
         "transitions" => transitions(),
+        "settings" => settings(),
+        "keyframes" => keyframes(),
         other => panic!("no builder for {other} fixtures"),
     }
 }
@@ -347,7 +524,14 @@ fn every_version_has_fixtures_and_their_versions_match_the_names() {
 
 #[test]
 fn the_current_version_fixtures_are_what_save_writes() {
-    for name in ["basic", "tracks", "props", "transitions"] {
+    for name in [
+        "basic",
+        "tracks",
+        "props",
+        "transitions",
+        "settings",
+        "keyframes",
+    ] {
         let bytes = schema::save(&builder(name));
         let path = fixtures_dir().join(format!("v{SCHEMA_VERSION}-{name}.json"));
         if std::env::var_os("GLASS_UPDATE_FIXTURES").is_some() {
@@ -475,6 +659,138 @@ fn v4_tracks_gain_empty_transition_lists() {
         );
         assert!(loaded.content_eq(&builder(name)), "{name}");
     }
+}
+
+#[test]
+fn v5_projects_gain_default_settings_and_sequence_formats() {
+    for name in ["basic", "tracks", "props", "transitions"] {
+        let path = fixtures_dir().join(format!("v5-{name}.json"));
+        let v5: Value = serde_json::from_slice(&read(&path)).expect("JSON");
+        assert!(v5["project"].get("settings").is_none());
+        let migrated = schema::migrate(5, v5["project"].clone()).expect("migrates");
+        assert_eq!(
+            migrated["settings"]["cache_folder"],
+            serde_json::json!({ "relative": ".glass-cache" })
+        );
+        let loaded = schema::load(&read(&path)).expect("loads");
+        assert_eq!(*loaded.settings(), ProjectSettings::default(), "{name}");
+        assert_eq!(
+            loaded.next_id(),
+            v5["project"]["next_id"].as_u64().expect("next id")
+        );
+        for (seq, old) in loaded
+            .sequences()
+            .iter()
+            .zip(v5["project"]["sequences"].as_array().expect("sequences"))
+        {
+            assert_eq!(seq.resolution, Resolution::HD, "{name}");
+            assert!(!seq.drop_frame);
+            assert_eq!(seq.channel_layout, ChannelLayout::Stereo);
+            // The rates stay as the v5 file had them.
+            assert_eq!(Value::from(seq.sample_rate), old["sample_rate"], "{name}");
+            assert_eq!(
+                serde_json::to_value(seq.frame_rate).expect("JSON"),
+                old["frame_rate"]
+            );
+        }
+        assert!(loaded.content_eq(&builder(name)), "{name}");
+    }
+}
+
+#[test]
+fn v6_clips_and_effects_gain_empty_keyframes() {
+    for name in ["basic", "tracks", "props", "transitions", "settings"] {
+        let path = fixtures_dir().join(format!("v6-{name}.json"));
+        let v6: Value = serde_json::from_slice(&read(&path)).expect("JSON");
+        let loaded = schema::load(&read(&path)).expect("loads");
+        assert_eq!(
+            loaded.next_id(),
+            v6["project"]["next_id"].as_u64().expect("next id")
+        );
+        let mut clips = 0;
+        for seq in loaded.sequences() {
+            for track in &seq.tracks {
+                for item in &track.items {
+                    if let Some(clip) = item.clip() {
+                        assert!(clip.keyframes.is_empty(), "{name}: item {}", item.id);
+                        assert!(clip.effects.iter().all(|e| e.keyframes.is_empty()));
+                        clips += 1;
+                    }
+                }
+            }
+        }
+        assert!(clips >= 1, "{name}");
+        assert!(loaded.content_eq(&builder(name)), "{name}");
+    }
+}
+
+#[test]
+fn the_keyframes_fixture_round_trips_every_curve() {
+    let path = fixtures_dir().join(format!("v{SCHEMA_VERSION}-keyframes.json"));
+    let loaded = schema::load(&read(&path)).expect("loads");
+    assert!(loaded.content_eq(&keyframes()));
+    let clips: Vec<&Clip> = loaded.sequences()[0]
+        .tracks
+        .iter()
+        .flat_map(|t| t.items.iter().filter_map(|i| i.clip()))
+        .collect();
+    let beam = clips[0];
+    let animated: Vec<ClipParam> = beam.keyframes.keys().copied().collect();
+    assert_eq!(
+        animated,
+        [
+            ClipParam::Position,
+            ClipParam::Rotation,
+            ClipParam::CropFeather,
+            ClipParam::Opacity
+        ]
+    );
+    let opacity = beam.curve(ClipParam::Opacity).expect("opacity");
+    assert_eq!(opacity.keys.len(), 3);
+    assert_eq!(opacity.keys[1].interpolation, Interpolation::Hold);
+    let position = beam.curve(ClipParam::Position).expect("position");
+    assert!(matches!(
+        position.keys[0].interpolation,
+        Interpolation::Bezier { .. }
+    ));
+    assert_eq!(beam.effects.len(), 2);
+    assert!(beam.effects.iter().all(|e| e.keyframes.len() == 1));
+    assert!(clips[1].curve(ClipParam::GainDb).is_some());
+    // The same bytes again.
+    assert_eq!(schema::save(&loaded), read(&path));
+}
+
+#[test]
+fn the_settings_fixture_round_trips_every_setting() {
+    let p = settings();
+    let bytes = schema::save(&p);
+    let loaded = schema::load(&bytes).expect("loads");
+    assert!(loaded.content_eq(&p));
+    assert_eq!(schema::save(&loaded), bytes);
+    assert_eq!(*loaded.settings(), custom_settings());
+    let main = &loaded.sequences()[0];
+    assert_eq!(main.format(), custom_settings().sequence);
+    let square = &loaded.sequences()[1];
+    assert_eq!(square.resolution, Resolution::SQUARE);
+    assert_eq!(square.frame_rate, Rational::new(24, 1));
+    assert_eq!(square.sample_rate, 44_100);
+    assert_eq!(square.channel_layout, ChannelLayout::Mono);
+    let json: Value = serde_json::from_slice(&bytes).expect("JSON");
+    let s = &json["project"]["settings"];
+    assert_eq!(s["colour_space"], "rec2020_hlg");
+    assert_eq!(
+        s["cache_folder"],
+        serde_json::json!({ "relative": "../caches/settings film" })
+    );
+    assert_eq!(s["sequence"]["channel_layout"], "surround51");
+    assert_eq!(s["sequence"]["drop_frame"], true);
+    assert_eq!(
+        s["sequence"]["resolution"],
+        serde_json::json!({ "width": 3840, "height": 2160 })
+    );
+    let seq = &json["project"]["sequences"][1];
+    assert_eq!(seq["channel_layout"], "mono");
+    assert_eq!(seq["drop_frame"], false);
 }
 
 #[test]

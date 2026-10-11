@@ -7,7 +7,11 @@
 //! [`push_frame`](ExportSession::push_frame) a decoded [`VideoFrame`](crate::VideoFrame);
 //! [`push_audio`](ExportSession::push_audio) takes planar f32 at the settings' rate and
 //! channel count. Frames are numbered at the constant frame rate, samples at the sample
-//! rate. [`finish`](ExportSession::finish) drains the encoders and closes the file.
+//! rate. [`push_subtitle`](ExportSession::push_subtitle) takes a
+//! [`SubtitleCue`](crate::SubtitleCue) for one of the settings' [`SubtitleSettings`]
+//! streams, in time order and not overlapping the stream's previous cue; cues may come
+//! at any point before finishing. [`finish`](ExportSession::finish) drains the encoders
+//! and closes the file.
 //!
 //! RGB pictures become YUV with the matrix, range and chroma siting of the
 //! [`ColourTags`] (swscale), and the same tags are written to the stream; the values are
@@ -29,6 +33,7 @@
 //! | AAC | FFmpeg's `aac` | M4A, MP4, MOV, Matroska |
 //! | MP3 | `libmp3lame` when the FFmpeg build has it | MP3, MP4, Matroska |
 //! | FLAC | `flac` (16 or 24-bit) | FLAC, Matroska |
+//! | Text subtitles | `mov_text`; `webvtt` | MP4, MOV; Matroska, WebM |
 //!
 //! [`VideoSettings::encoder_preference`] chooses between them: [`EncoderPreference::Auto`]
 //! (the default) tries the hardware encoders in the table's order and falls back to the
@@ -42,13 +47,15 @@
 //! fallback.
 //!
 //! [`presets`] holds the built-in platform and deliverable presets, which resolve
-//! against a timeline's format into [`ExportSettings`].
+//! against a timeline's format into [`ExportSettings`]; [`verify`] reads a finished file
+//! back against its settings and preset and reveals it in the file manager.
 
 mod gif_writer;
 mod picture;
 pub mod presets;
 mod session;
 mod settings;
+pub mod verify;
 
 use std::path::PathBuf;
 
@@ -56,8 +63,8 @@ pub use picture::{Picture, PicturePlane};
 pub use session::{EncoderFallback, ExportSession, ExportSummary};
 pub use settings::{
     AudioCodec, AudioSettings, ColourTags, Container, ContentLight, EncoderPreference,
-    ExportSettings, HdrMetadata, MasteringDisplay, ProResProfile, RateControl, VideoCodec,
-    VideoSettings, is_hardware_encoder, video_encoder_for,
+    ExportSettings, HdrMetadata, MasteringDisplay, ProResProfile, RateControl, SubtitleSettings,
+    VideoCodec, VideoSettings, is_hardware_encoder, video_encoder_for,
 };
 
 use crate::error::MediaError;

@@ -1,0 +1,439 @@
+{
+  "format": "glass.project",
+  "schema_version": 6,
+  "project": {
+    "uid": "fixture-transitions",
+    "name": "Coastline",
+    "next_id": 17,
+    "settings": {
+      "sequence": {
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 30,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo"
+      },
+      "colour_space": "rec709",
+      "cache_folder": {
+        "relative": ".glass-cache"
+      }
+    },
+    "media": {
+      "refs": [
+        {
+          "id": 1,
+          "content_hash": "5e6f70",
+          "path": "/footage/coast.mov"
+        }
+      ]
+    },
+    "sequences": [
+      {
+        "id": 2,
+        "name": "Cut",
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 25,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo",
+        "markers": [],
+        "tracks": [
+          {
+            "id": 3,
+            "kind": "video",
+            "name": "V1",
+            "items": [
+              {
+                "id": 5,
+                "range": {
+                  "start": "0",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "2",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              },
+              {
+                "id": 6,
+                "range": {
+                  "start": "2",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "10",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              },
+              {
+                "id": 7,
+                "range": {
+                  "start": "4",
+                  "duration": "1"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "20",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              },
+              {
+                "id": 8,
+                "range": {
+                  "start": "6",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "30",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              }
+            ],
+            "transitions": [
+              {
+                "id": 11,
+                "outgoing": null,
+                "incoming": 5,
+                "kind": "cross-dissolve",
+                "duration": "2/5",
+                "alignment": "start",
+                "direction": null,
+                "easing": "linear",
+                "params": {}
+              },
+              {
+                "id": 12,
+                "outgoing": 5,
+                "incoming": 6,
+                "kind": "cross-dissolve",
+                "duration": "12/25",
+                "alignment": "centre",
+                "direction": null,
+                "easing": "linear",
+                "params": {}
+              },
+              {
+                "id": 13,
+                "outgoing": 6,
+                "incoming": 7,
+                "kind": "iris",
+                "duration": "8/25",
+                "alignment": "end",
+                "direction": "up_left",
+                "easing": "ease-in-out",
+                "params": {
+                  "softness": {
+                    "float": 0.65
+                  }
+                }
+              },
+              {
+                "id": 14,
+                "outgoing": 7,
+                "incoming": null,
+                "kind": "cross-dissolve",
+                "duration": "4/5",
+                "alignment": "start",
+                "direction": null,
+                "easing": "linear",
+                "params": {}
+              },
+              {
+                "id": 15,
+                "outgoing": null,
+                "incoming": 8,
+                "kind": "cross-dissolve",
+                "duration": "1/5",
+                "alignment": "centre",
+                "direction": null,
+                "easing": "linear",
+                "params": {}
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "kind": "audio",
+            "name": "A1",
+            "items": [
+              {
+                "id": 9,
+                "range": {
+                  "start": "0",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "2",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              },
+              {
+                "id": 10,
+                "range": {
+                  "start": "2",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "10",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              }
+            ],
+            "transitions": [
+              {
+                "id": 16,
+                "outgoing": 9,
+                "incoming": 10,
+                "kind": "cross-dissolve",
+                "duration": "1/2",
+                "alignment": "centre",
+                "direction": null,
+                "easing": "linear",
+                "params": {}
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

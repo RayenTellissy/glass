@@ -57,6 +57,7 @@ fn looped(clip: &Clip, loops: i64) -> SegmentList {
         source: SourceRef::new(SourceId(1), &clip.path),
         timeline: i * clip.frames..(i + 1) * clip.frames,
         source_start: Timestamp::new(0, time_base()),
+        speed: Rational::new(1, 1),
         layer: 0,
         hash: SegmentHash::from(i as u64),
     }))

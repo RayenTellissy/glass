@@ -16,8 +16,17 @@
 //! on macOS that means next to `Glass.app`, not inside `Contents/MacOS`. A candidate that
 //! cannot be created or written (a read-only stick, a locked folder) is skipped with a
 //! logged warning, so Glass still starts and keeps its files in the next one.
+//!
+//! A project's own cache folder (analysis, proxies, rendered frames and, once the project
+//! has a file, its autosave) comes from its settings (`project::settings::CacheFolder`:
+//! `.glass-cache/` beside the project file by default) in both modes, so a project on a
+//! stick carries its cache. [`Locations::project_cache`] probes it the same way and falls
+//! back to the per-user cache folder (`Glass Data/Cache/` in portable mode) when it cannot
+//! be written; a project without a file uses the per-user cache folder.
 
 use std::path::{Path, PathBuf};
+
+use engine::autosave::Project;
 
 /// Overrides the config folder (settings).
 pub const CONFIG_DIR_ENV: &str = "GLASS_CONFIG_DIR";
@@ -178,6 +187,41 @@ impl Locations {
     /// Where crash reports are written. Nothing reads them but the user.
     pub fn crashes(&self) -> PathBuf {
         self.data.join("crashes")
+    }
+
+    /// The cache folder of `project`, saved at `project_file` if it has a file: the folder
+    /// its settings name (resolved against the file's folder when relative), created and
+    /// probed; the per-user cache folder when it names none yet (a relative folder before
+    /// the first save) or when that folder cannot be written (logged as a warning).
+    // The window shell that opens and saves projects does not exist yet.
+    #[allow(dead_code)]
+    pub fn project_cache(&self, project: &Project, project_file: Option<&Path>) -> PathBuf {
+        let Some(dir) = project.settings().cache_folder.resolve(project_file) else {
+            return self.cache.clone();
+        };
+        match ensure_writable(&dir) {
+            Ok(()) => dir,
+            Err(error) => {
+                tracing::warn!(
+                    "project cache folder {} is not writable ({error}); using {}",
+                    dir.display(),
+                    self.cache.display()
+                );
+                self.cache.clone()
+            }
+        }
+    }
+
+    /// The autosave folder of `project`: in the per-user cache folder while it has no
+    /// file, then in its [`Locations::project_cache`]. Pass it to
+    /// `engine::autosave::Autosave::saved_as` after the first save and every Save As.
+    #[allow(dead_code)]
+    pub fn autosave_dir(&self, project: &Project, project_file: Option<&Path>) -> PathBuf {
+        let cache = match project_file {
+            Some(_) => self.project_cache(project, project_file),
+            None => self.cache.clone(),
+        };
+        engine::autosave::project_dir(&cache, project)
     }
 }
 
@@ -371,6 +415,65 @@ mod tests {
         let message = locations.fallbacks[0].message();
         assert!(message.starts_with("config folder "), "{message}");
         assert!(message.contains("not writable"), "{message}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn autosave_moves_into_the_project_cache_once_the_project_has_a_file() {
+        let root = fresh("project-cache");
+        let locations = Locations::resolve(&inputs(&root, root.join("bin/glass")));
+        let project = Project::new("uid-1", "Harbour");
+        // Unsaved: the per-user cache folder.
+        let unsaved = locations.autosave_dir(&project, None);
+        assert_eq!(unsaved, locations.cache.join("autosave").join("uid-1"));
+        // Saved: `.glass-cache/` beside the file, created.
+        let file = root.join("films/Harbour.glass");
+        std::fs::create_dir_all(file.parent().expect("folder")).expect("films");
+        let cache = locations.project_cache(&project, Some(&file));
+        assert_eq!(cache, root.join("films/.glass-cache"));
+        assert!(cache.is_dir());
+        assert_eq!(
+            locations.autosave_dir(&project, Some(&file)),
+            cache.join("autosave").join("uid-1")
+        );
+        // An absolute cache folder in the settings wins once there is a file.
+        let mut settings = project.settings().clone();
+        settings.cache_folder = engine::autosave::CacheFolder::Absolute(
+            root.join("fast/cache").to_string_lossy().into_owned(),
+        );
+        let moved = project.set_project_settings(settings).expect("settings");
+        assert_eq!(
+            locations.autosave_dir(&moved, Some(&file)),
+            root.join("fast/cache/autosave/uid-1")
+        );
+        assert_eq!(
+            locations.autosave_dir(&moved, None),
+            unsaved,
+            "unsaved projects keep the per-user cache"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_project_folder_keeps_the_cache_in_the_per_user_folder() {
+        let root = fresh("read-only-project");
+        let locations = Locations::resolve(&inputs(&root, root.join("bin/glass")));
+        let films = root.join("films");
+        std::fs::create_dir_all(&films).expect("films");
+        if !read_only(&films) {
+            writable(&films);
+            eprintln!("skipped: permissions are not enforced for this user");
+            return;
+        }
+        let project = Project::new("uid-2", "Card");
+        let file = films.join("Card.glass");
+        let cache = locations.project_cache(&project, Some(&file));
+        let autosave = locations.autosave_dir(&project, Some(&file));
+        writable(&films);
+        assert_eq!(cache, locations.cache);
+        assert_eq!(autosave, locations.cache.join("autosave/uid-2"));
+        assert!(!films.join(".glass-cache").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

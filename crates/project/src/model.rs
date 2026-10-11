@@ -18,7 +18,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::clip::{BlendMode, Crop, Effect, SpeedMap, Transform};
 use crate::error::EditError;
 use crate::id::{EffectId, ItemId, MarkerId, MediaId, SequenceId, TrackId};
+use crate::keyframe::{ClipParam, Curve};
 use crate::marker::Marker;
+use crate::settings::{ChannelLayout, ProjectSettings, Resolution, SequenceFormat};
 use crate::time::{Rational, Time, TimeError, TimeRange};
 use crate::transition::Transition;
 
@@ -30,6 +32,9 @@ pub struct Project {
     pub(crate) name: String,
     /// The next unused node id.
     pub(crate) next_id: u64,
+    /// Project settings (schema v6; see [`crate::settings`]). Shared, so cloning the root
+    /// stays O(1).
+    pub(crate) settings: Arc<ProjectSettings>,
     /// Source media the project refers to. The media pool (bins, metadata, relink state)
     /// will embed this set of references once it joins the tree.
     pub(crate) media: MediaRefs,
@@ -37,12 +42,14 @@ pub struct Project {
 }
 
 impl Project {
-    /// An empty project. `uid` should be unique per project (the app uses a random id).
+    /// An empty project with default settings ([`ProjectSettings::default`]). `uid`
+    /// should be unique per project (the app uses a random id).
     pub fn new(uid: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             uid: uid.into(),
             name: name.into(),
             next_id: 1,
+            settings: Arc::new(ProjectSettings::default()),
             media: MediaRefs::default(),
             sequences: Vector::new(),
         }
@@ -94,6 +101,7 @@ impl Project {
         self.next_id == other.next_id
             && self.uid == other.uid
             && self.name == other.name
+            && Arc::ptr_eq(&self.settings, &other.settings)
             && self.media.ptr_eq(&other.media)
             && self.sequences.ptr_eq(&other.sequences)
     }
@@ -105,6 +113,7 @@ impl Project {
             uid,
             name,
             next_id,
+            settings,
             media,
             sequences,
         } = self;
@@ -112,6 +121,7 @@ impl Project {
             || (*next_id == other.next_id
                 && *uid == other.uid
                 && *name == other.name
+                && (Arc::ptr_eq(settings, &other.settings) || *settings == other.settings)
                 && (media.ptr_eq(&other.media) || *media == other.media)
                 && all_eq(sequences, &other.sequences, |a, b| a.content_eq(b)))
     }
@@ -188,15 +198,23 @@ impl<'de> Deserialize<'de> for MediaRefs {
     }
 }
 
-/// A timeline: tracks at one frame rate and audio sample rate.
+/// A timeline: tracks on one canvas at one frame rate and audio sample rate. Its format
+/// fields ([`Sequence::format`]) change only through
+/// [`Project::set_sequence_format`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sequence {
     pub id: SequenceId,
     pub name: String,
+    /// The canvas size in pixels (schema v6).
+    pub resolution: Resolution,
     /// Frames per second; video, subtitle and adjustment items sit on its frame grid.
     pub frame_rate: Rational,
+    /// Timecode counts drop-frame (29.97 and 59.94 only; schema v6).
+    pub drop_frame: bool,
     /// Audio samples per second; audio items sit on its sample grid.
     pub sample_rate: u32,
+    /// The speaker layout the sequence mixes to (schema v6).
+    pub channel_layout: ChannelLayout,
     /// Markers on the sequence's ruler, in sequence time, ordered by start then id
     /// (schema v3).
     pub markers: Vector<Arc<Marker>>,
@@ -214,21 +232,53 @@ impl Sequence {
         let Sequence {
             id,
             name,
+            resolution,
             frame_rate,
+            drop_frame,
             sample_rate,
+            channel_layout,
             markers,
             tracks,
         } = self;
         *id == other.id
             && *name == other.name
+            && *resolution == other.resolution
             && *frame_rate == other.frame_rate
+            && *drop_frame == other.drop_frame
             && *sample_rate == other.sample_rate
+            && *channel_layout == other.channel_layout
             && all_eq(markers, &other.markers, |a, b| a == b)
             && all_eq(tracks, &other.tracks, |a, b| a.content_eq(b))
     }
 
     pub(crate) fn track_index(&self, id: TrackId) -> Option<usize> {
         self.tracks.iter().position(|t| t.id == id)
+    }
+
+    /// The sequence's format: canvas, frame rate, drop-frame, sample rate, channels.
+    pub fn format(&self) -> SequenceFormat {
+        SequenceFormat {
+            resolution: self.resolution,
+            frame_rate: self.frame_rate,
+            drop_frame: self.drop_frame,
+            sample_rate: self.sample_rate,
+            channel_layout: self.channel_layout,
+        }
+    }
+
+    pub(crate) fn set_format(&mut self, format: SequenceFormat) {
+        let SequenceFormat {
+            resolution,
+            frame_rate,
+            drop_frame,
+            sample_rate,
+            channel_layout,
+        } = format;
+        self.resolution = resolution;
+        self.frame_rate = frame_rate;
+        self.drop_frame = drop_frame;
+        self.sample_rate = sample_rate;
+        self.channel_layout = channel_layout;
     }
 
     /// The time grid items on a track of `kind` must sit on.
@@ -412,6 +462,11 @@ pub struct Clip {
     pub blend: BlendMode,
     /// The effect stack, applied first to last.
     pub effects: Vector<Arc<Effect>>,
+    /// Curves of the animated properties, by property (schema v7; see
+    /// [`crate::keyframe`]). While a property has a curve, its constant field above is
+    /// ignored: read the values through [`Clip::param_at`], [`Clip::transform_at`] and the
+    /// other `*_at` readers.
+    pub keyframes: OrdMap<ClipParam, Arc<Curve>>,
     /// Markers on the clip in source time, so they stay on their frame when the clip is
     /// trimmed or moved; ordered by start then id (schema v3).
     pub markers: Vector<Arc<Marker>>,
@@ -419,8 +474,8 @@ pub struct Clip {
 
 impl Clip {
     /// A clip of `media` from `source_start` with every property at its default: speed 1,
-    /// enabled, 0 dB, centred at 100%, uncropped, opaque, normal blend, no effects, no
-    /// markers.
+    /// enabled, 0 dB, centred at 100%, uncropped, opaque, normal blend, no effects, nothing
+    /// animated, no markers.
     pub fn new(media: MediaId, source_start: Time) -> Self {
         Self {
             media,
@@ -433,6 +488,7 @@ impl Clip {
             opacity: 1.0,
             blend: BlendMode::Normal,
             effects: Vector::new(),
+            keyframes: OrdMap::new(),
             markers: Vector::new(),
         }
     }

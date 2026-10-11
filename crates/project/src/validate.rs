@@ -32,9 +32,10 @@ pub enum ValidationError {
 
 impl Project {
     /// Checks every invariant the edit operations maintain: unique allocated ids, valid
-    /// rates, items of a kind their track accepts, on its grid, sorted and not
+    /// project settings and sequence formats ([`crate::settings`]), items of a kind their track accepts, on its grid, sorted and not
     /// overlapping, clips pointing at known media with their properties in range (a
-    /// constant speed map, finite numbers within their limits, valid effect schema ids),
+    /// constant speed map, finite numbers within their limits, valid effect schema ids,
+    /// keyframe curves sorted and finite with valid handles, [`crate::keyframe`]),
     /// markers sorted, not before zero and (on sequences) on the frame grid, and
     /// transitions ordered by id on cuts that resolve, fitting their clips and head
     /// handles without overlapping ([`crate::transition`]).
@@ -61,18 +62,10 @@ impl Project {
             }
             claim(media.id.node())?;
         }
+        self.settings.check()?;
         for seq in &self.sequences {
             claim(seq.id.node())?;
-            if !seq.frame_rate.is_positive_rate() {
-                return Err(EditError::InvalidFrameRate {
-                    num: seq.frame_rate.num,
-                    den: seq.frame_rate.den,
-                }
-                .into());
-            }
-            if seq.sample_rate == 0 {
-                return Err(EditError::InvalidSampleRate(seq.sample_rate).into());
-            }
+            seq.format().check()?;
             let frame = seq.frame_rate.frame_duration().map_err(EditError::from)?;
             check_markers(&seq.markers, Some(frame), &mut claim)?;
             for track in &seq.tracks {
