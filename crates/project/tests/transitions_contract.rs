@@ -13,9 +13,9 @@ use project::diff::{Diff, Node, ROOT_ID, flatten, rebuild};
 use project::params::{ParamDef, ParamSchema, ParamValue, Range};
 use project::schema::{self, LoadError};
 use project::{
-    Alignment, ClipSpec, CutSide, EditError, EditLabel, ItemId, MediaId, NodeId, Project, Rational,
-    Segment, SequenceId, SpeedKeep, Time, TimeRange, TrackId, TrackKind, TransitionId,
-    TransitionSpec, ValidationError,
+    Alignment, ClipSource, ClipSpec, CutSide, EditError, EditLabel, ItemId, MediaId, NodeId,
+    Project, Rational, Segment, SequenceId, SpeedKeep, Time, TimeRange, TrackId, TrackKind,
+    TransitionId, TransitionSpec, ValidationError,
 };
 use serde_json::Value;
 
@@ -186,8 +186,8 @@ fn start_needs_the_outgoing_tail_and_end_the_incoming_head_at_each_clips_speed()
         needs(6, Alignment::Start),
         (
             Some(at(20, 6)),
-            Some((fx.a, fx.m, secs(13, 10))),
-            Some((fx.b, fx.m2, Time::seconds(2))),
+            Some((fx.a, ClipSource::Media(fx.m), secs(13, 10))),
+            Some((fx.b, ClipSource::Media(fx.m2), Time::seconds(2))),
         )
     );
     // Ending at the cut: all of it lies before, showing B before its start.
@@ -195,8 +195,8 @@ fn start_needs_the_outgoing_tail_and_end_the_incoming_head_at_each_clips_speed()
         needs(6, Alignment::End),
         (
             Some(at(14, 6)),
-            Some((fx.a, fx.m, Time::seconds(1))),
-            Some((fx.b, fx.m2, secs(4, 5))),
+            Some((fx.a, ClipSource::Media(fx.m), Time::seconds(1))),
+            Some((fx.b, ClipSource::Media(fx.m2), secs(4, 5))),
         )
     );
     // Centred on an odd count: 2 frames before, 3 after.
@@ -204,8 +204,8 @@ fn start_needs_the_outgoing_tail_and_end_the_incoming_head_at_each_clips_speed()
         needs(5, Alignment::Centre),
         (
             Some(at(18, 5)),
-            Some((fx.a, fx.m, secs(23, 20))),
-            Some((fx.b, fx.m2, secs(8, 5))),
+            Some((fx.a, ClipSource::Media(fx.m), secs(23, 20))),
+            Some((fx.b, ClipSource::Media(fx.m2), secs(8, 5))),
         )
     );
     // Only the side before the cut is limited by B's head handle.
@@ -821,7 +821,7 @@ fn the_tail_handle_check_measures_the_outgoing_media_past_its_end_over_its_speed
     let (q, t) = add(&p, Some(fx.a), Some(fx.b), 10, Start).expect("start");
     assert_eq!(
         q.transition_needs(t).expect("needs").outgoing,
-        Some((fx.a, fx.m, Time::seconds(6)))
+        Some((fx.a, ClipSource::Media(fx.m), Time::seconds(6)))
     );
     q.check_transition_media(t, lengths(Some(Time::seconds(6)), Some(Time::ZERO)))
         .expect("exactly enough; B's media does not count");

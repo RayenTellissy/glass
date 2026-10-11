@@ -63,10 +63,15 @@ pub enum EditLabel {
     SequenceSettings,
     Recover,
     Relink,
+    Nest,
+    BreakApart,
+    ReplaceSource,
+    DuplicateCompound,
+    RemoveSequence,
 }
 
 impl EditLabel {
-    pub const ALL: [EditLabel; 41] = [
+    pub const ALL: [EditLabel; 46] = [
         EditLabel::AddMedia,
         EditLabel::AddSequence,
         EditLabel::AddTrack,
@@ -108,6 +113,11 @@ impl EditLabel {
         EditLabel::SequenceSettings,
         EditLabel::Recover,
         EditLabel::Relink,
+        EditLabel::Nest,
+        EditLabel::BreakApart,
+        EditLabel::ReplaceSource,
+        EditLabel::DuplicateCompound,
+        EditLabel::RemoveSequence,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -153,6 +163,11 @@ impl EditLabel {
             EditLabel::SequenceSettings => "edit.label.sequence_settings",
             EditLabel::Recover => "edit.label.recover",
             EditLabel::Relink => "edit.label.relink",
+            EditLabel::Nest => "edit.label.nest",
+            EditLabel::BreakApart => "edit.label.break_apart",
+            EditLabel::ReplaceSource => "edit.label.replace_source",
+            EditLabel::DuplicateCompound => "edit.label.duplicate_compound",
+            EditLabel::RemoveSequence => "edit.label.remove_sequence",
         }
     }
 }

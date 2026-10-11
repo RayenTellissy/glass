@@ -24,7 +24,8 @@
 //! [`AutosaveError::Format`] rather than as damaged JSON. Version 2 began with project
 //! schema v2 (`media` as `{"refs": [...]}`), whose snapshots version 1 builds cannot read
 //! and the other way round; version 3 began with schema v3, version 4 with schema v4,
-//! version 5 with schema v5, version 6 with schema v6.
+//! version 5 with schema v5, version 6 with schema v6, version 7 with schema v7, version 8
+//! with schema v8.
 //!
 //! A new generation starts every [`SNAPSHOT_EVERY`] records and whenever the project is
 //! saved; the previous generation is kept as a fallback, older ones are deleted.
@@ -55,8 +56,10 @@ pub const SNAPSHOT_EVERY: u64 = 30;
 /// travel inside their item's record). 5: project schema v5 (track transitions, as
 /// records of their own, `diff::Node::Transition`). 6: project schema v6 (project
 /// settings in the root record, sequence formats in the sequence records). 7: project
-/// schema v7 (keyframe curves, which travel inside their item's record).
-pub const FORMAT_VERSION: u32 = 7;
+/// schema v7 (keyframe curves, which travel inside their item's record). 8: project
+/// schema v8 (the `compound` flag in sequence records, clip sources that name a
+/// sequence in item records).
+pub const FORMAT_VERSION: u32 = 8;
 
 /// How long the autosave of a session that did not quit normally is kept (the recovery
 /// dialog promises seven days).
