@@ -1,6 +1,6 @@
 {
   "format": "glass.project",
-  "schema_version": 6,
+  "schema_version": 7,
   "project": {
     "uid": "glass-reference",
     "name": "Reference",
@@ -163,6 +163,7 @@
                 "opacity": 0.8,
                 "blend": "normal",
                 "effects": [],
+                "keyframes": {},
                 "markers": [
                   {
                     "id": 23,
@@ -223,6 +224,7 @@
                 "opacity": 0.6,
                 "blend": "normal",
                 "effects": [],
+                "keyframes": {},
                 "markers": []
               }
             ],
@@ -280,6 +282,7 @@
                 "opacity": 1.0,
                 "blend": "normal",
                 "effects": [],
+                "keyframes": {},
                 "markers": []
               },
               {
@@ -329,6 +332,7 @@
                 "opacity": 1.0,
                 "blend": "normal",
                 "effects": [],
+                "keyframes": {},
                 "markers": []
               },
               {
@@ -378,6 +382,7 @@
                 "opacity": 1.0,
                 "blend": "normal",
                 "effects": [],
+                "keyframes": {},
                 "markers": []
               },
               {
@@ -427,6 +432,7 @@
                 "opacity": 1.0,
                 "blend": "normal",
                 "effects": [],
+                "keyframes": {},
                 "markers": []
               }
             ],
@@ -507,6 +513,7 @@
                 "opacity": 1.0,
                 "blend": "normal",
                 "effects": [],
+                "keyframes": {},
                 "markers": []
               }
             ],
