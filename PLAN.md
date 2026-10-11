@@ -45,22 +45,49 @@ This file is the single source of truth for the goal. It lives at the repo root 
 
 **Decisions.** Phase 0 records the defaults. Use them. Change a default only when a benchmark in this repo proves it fails a budget, then record the change in the Decision Log. Never stop to ask about a decision that has a default here.
 
-**Stop and ask only when:** a task needs a paid account, a signing certificate, a licence purchase, or deletes user data. Tag such a task `(needs-human)`, skip it, and continue with the next task. Put a one-line note in the Progress Log.
+**Stop and ask only when:** a task would delete user data. Since Decision 82 nothing on the road to 1.0 needs a person except creating the GitHub repository (Phase 1). A task that would need a paid account, a certificate, a licence, hardware not on this Mac, or a download other than crates and the pinned FFmpeg sources is simplified or dropped (`[-]` with "dropped for 1.0: <reason>"), not tagged `(needs-human)`. Put a one-line note in the Progress Log.
 
 **Never do:** commit to `main` directly (work on `goal/<phase>` branches and merge when a phase's Done when passes), add telemetry, download models or assets into the repo (use on-demand download paths), hardcode UI strings or colours, or block the UI thread.
 
 **Quality gates that apply to every task:**
 
-- Builds and tests pass on macOS and Windows in CI
+- Builds and tests pass on this Mac through the local gate (`scripts/full-check.sh`, R1; until it exists, the full check in `CONTRIBUTING.md`), and on Windows in the CI Windows job once the GitHub repository exists (Decision 82)
 - No UI-thread stall over 8 ms in the frame-time monitor while the feature is used
-- Size check in CI still passes, or the budget was raised with a Decision Log entry
+- The size check (`scripts/size-check.sh`) still passes, or the budget was raised with a Decision Log entry
 - Every new user-facing string is in `assets/i18n/en.json`
-- UI matches its board in the Paper file and uses only its tokens, with exact values read from the board, not from screenshots. A moment with no board gets one, following `DESIGN_HANDOFF.md`, before it's built
+- UI uses only theme tokens and roles and keeps its snapshot goldens; the Paper boards are a reference, not a gate (Decision 82)
 - If data flow changed, `docs/ARCHITECTURE.md` is updated in the same commit
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped (say why in the Decision Log) · `(parallel)` may be done out of phase order · `(needs-human)` blocked on a person
 
-Milestones: **M0** decisions → **M1** engine → **M2** editable timeline → **M3** export (v0.1) → **M4** built-in library (v0.5) → **M5** easy mode → **M6** pro tools (v1.0) → **M7** ecosystem.
+Milestones: **M0** decisions → **M1** engine → **M2** editable timeline → **M3** export (v0.1) → **M4** built-in library (v0.5) → **M5** easy mode → **M6** pro tools (v1.0) → **M7** ecosystem. **Glass 1.0** (Road to 1.0 below) is the current finish line and cuts across M2 to M6.
+
+---
+
+## Road to 1.0
+
+**Glass 1.0** is the finish line (Decision 82): a stable, simple video editor for macOS on Apple silicon and Windows 10 and 11 (x64) that a beginner can use. It imports media; arranges, trims and splits clips on a timeline; has transitions, titles and text, basic colour and audio adjustments (volume, fades, crossfades), basic effects and keyframes; undoes anything; autosaves and recovers; exports H.264 and HEVC MP4, ProRes MOV, AAC, GIF and WAV with presets; and has the app shell and first-run basics. The vision at the top stays the long-term goal. Everything outside 1.0 is marked `[-]` with "dropped for 1.0" and its reason, and does not start before 1.0.
+
+**Rules for 1.0.**
+
+- Built and checked on this Mac with crates and the pinned FFmpeg only. The gate is the local `scripts/full-check.sh` (R1). Windows is checked by the CI Windows job (`windows-2022` in `.github/workflows/ci.yml`), which runs once the owner has created the GitHub repository: the only line that needs a person (Phase 1, R7). Linux keeps the software paths already in the code and gets no new work.
+- Windows takes the simplest path: FFmpeg software decode and encode (x264, x265, `prores_ks`), wgpu on DX12, `cpal` on WASAPI, pictures through the `image` crate. Hardware decode and encode there are optional later. Its MSI and zip are unsigned (a SmartScreen warning is accepted); the macOS DMG is ad-hoc signed with `codesign -s -` (Gatekeeper asks once). Shortcuts already map ⌘ to Ctrl off macOS (Decision 39). Windows test media comes from the pinned FFmpeg through `tests/fixtures/generate.sh`.
+- System fonts, no bundled fonts; English only (the `en.json` key check stays); theme tokens and the snapshot goldens are the design source, the Paper boards only a reference.
+- A choice that would need the owner is made from these rules, the Phase 0 defaults and the Decision Log, and recorded.
+- Every 1.0 line ends with its milestone tag, so `grep -n '(R3)' PLAN.md` lists R3. A line's Done when, checkable on this Mac (or in the CI Windows job for Windows-only lines), replaces its phase's Done when for 1.0; the phase Done when lines describe the longer goal.
+- Schema bumps go one at a time, in this order: mixer settings (R2), linked audio and video (R3), text and background clips (R4).
+
+**Milestones**, in order. R1 starts first; R2 to R6 run as parallel tracks once R1's gate exists (at most 7 tasks, one cargo lock; tracks: `app`/`ui` wiring, `ui` timeline, `project`, `render` and `assets`, `media`/`engine` export, `audio`/`engine::mix`); R7 closes.
+
+1. **R1 Gate and fixes** (8 lines): `scripts/full-check.sh`; a Windows compile check from this Mac if crates alone allow it; the strict 4K GPU budget set from this Mac's measurements; the `AudioReader` one-sample-early fix; media pool text clipping; the WebP still fixture (closing the software decode line); software encoding by default off macOS. Done when: `scripts/full-check.sh` passes on `goal/phase-2`, strict timing included.
+2. **R2 App wiring** (9 lines): clip thumbnails and waveforms in the app; scrubbing in the app; the audio device check (closing the master clock line); mixer settings in the project and the mixer panel; relinking from a folder; the clip inspector with keyframes. Done when: the reference project opened in the app shows thumbnails and waveforms, scrubs to exact frames, plays with sound on the device clock, and inspector and mixer changes save, undo and reload.
+3. **R3 Timeline editing** (14 lines): playhead, in and out, markers; loop playback; transport keys; snapping; selection; ripple by default; select and blade tools; the trim edge frame; dragging from the media pool; linked audio and video; copy and paste; speed; freeze frame; preview transform handles. Done when: each line's tests pass and a scripted session imports, places, moves, trims, splits and deletes clips with undo.
+4. **R4 Titles, transitions, effects and adjustments** (21 lines): text clips, title presets and animations, background clips, system fonts; the transition browser, default transition and easing presets; built-in looks, the colour adjustment, the LUT picker, HDR to SDR, vignette and grain, blur, sharpen and mosaic, the effects browser; volume, fades and pan, the volume line, loudness normalisation; clip animations, Ken Burns. Done when: each line's visual regression cases and tests pass and every browser shows its items in a snapshot.
+5. **R5 Export** (4 lines): the export dialog and queue; export settings over a preset; ranges and Export Frame; audio-only presets. Done when: every built-in preset exports the reference project from the dialog and verifies clean.
+6. **R6 First run and help** (10 lines): the new project sheet, welcome sheet, empty states, tooltips, shortcuts cheat sheet, the rest of the keyboard sheet, accessibility basics, `README.md` and `CHANGELOG.md`. Done when: a first launch with no settings goes from the new project sheet to an export without a dead end, in snapshots and a ui test.
+7. **R7 Release** (12 lines): the scripted integration test, local benchmarks, the stress project and the macOS DMG; the owner's GitHub repository, then the CI matrix, the Windows FFmpeg build, the tagged release and the Windows MSI and zip; the Glass 1.0 checklist. Done when: the Glass 1.0 checklist line is done.
+
+After 1.0, the dropped lines are the backlog; docs/HANDOFF.md lists the ones that need a person (hardware, accounts, certificates, licences).
 
 ---
 
@@ -92,9 +119,9 @@ Size target: installers around 30 MB, not counting asset packs and models, which
 - [x] Prototype `proto-ui`: 200 fake clips on 10 tracks in `egui`, measure frame time at 120 Hz. Done when: median under 4 ms, p99 under 8 ms, or switch default
 - Prototype `proto-gpu`: two 4K textures, one dissolve WGSL shader, one text overlay via `wgpu`. Done when: under 2 ms GPU time on Apple M1 and a GTX 1660 class GPU (split; resolved by its sub-tasks)
   - [x] `proto-gpu` on Apple silicon
-  - [ ] `proto-gpu` on a GTX 1660 class GPU (needs-human: no NVIDIA hardware available locally)
+  - [-] `proto-gpu` on a GTX 1660 class GPU (dropped for 1.0: needs NVIDIA hardware; Apple silicon decides the GPU defaults; optional later)
 - [x] Prototype `proto-decode`: FFmpeg hardware decode of 4K H.264 to a `wgpu` texture on macOS. Done when: 60 fps sustained with under 5% CPU per stream
-- [ ] Same prototype on Windows via D3D11VA. Done when: same budget (needs-human: no Windows PC available locally; port proto-decode to D3D11VA on one)
+- [-] Same prototype on Windows via D3D11VA. Done when: same budget (dropped for 1.0: Windows 1.0 decodes in software (Decision 82); D3D11VA is optional later and needs a Windows PC)
 - [x] Write `docs/ARCHITECTURE.md`: threading model, data flow diagram, crate layout, cache design, the defaults table above
 - [x] Write `docs/DECISIONS.md` (Decision Log) with the entries created so far
 - [x] Delete the prototypes or move them to `experiments/`
@@ -108,29 +135,32 @@ Done when: a tagged push produces signed-or-unsigned installers for both platfor
 - [x] Cargo workspace with crates: `app`, `ui`, `engine`, `media`, `render`, `project`, `audio`, `plugins`, `assets`, `smoke`
 - [x] Feature flags: `codec-av1`, `codec-prores-sw`, `ai-whisper`, `ai-segmentation`, off by default, all on in release builds
 - [x] `smoke` binary: opens `tests/fixtures/reference.proj`, plays 2 s headless, exports 1 s, exits 0. Starts as a stub that exits 0 and grows with each phase
-- [x] Reference media in `tests/fixtures/` generated by a script (FFmpeg synthetic sources), not committed binaries: H.264, HEVC, ProRes, VP9, AV1, VFR, 10-bit, stills, WAV (needs-human: the VP9 and AV1 recipes need libvpx, libopus and SVT-AV1, which the pinned FFmpeg build lacks; see the Phase 2 fixtures sub-task)
-- [ ] GitHub Actions matrix: macOS arm64, macOS x86_64, Windows x86_64, Linux x86_64, running build, test, clippy, fmt (needs-human: no GitHub remote yet; push the repo and confirm the workflow runs green)
+- [x] Reference media in `tests/fixtures/` generated by a script (FFmpeg synthetic sources), not committed binaries: H.264, HEVC, ProRes, VP9, AV1, VFR, 10-bit, stills, WAV (the VP9 and AV1 recipes are dropped for 1.0: the pinned FFmpeg has no libvpx, libopus or SVT-AV1; see the Phase 2 fixtures sub-task)
+- [ ] Owner setup, one yes from the owner: create a public GitHub repository named `glass` under the owner's account and upload the code (public because Glass is free and open source, Decision 2, and public repositories get GitHub's build machines free without a monthly limit). This Mac's `gh` tool is already signed in to the owner's account, so after that yes the person running the plan runs the three commands in docs/HANDOFF.md section 2 and the owner does nothing else; the owner may also run them in Terminal. It is the only step on the road to 1.0 that needs a person (Decision 82). It unlocks GitHub's free Windows machines, which build Glass for Windows, run its tests and its smoke run there, and make the Windows installer and zip; it also checks every change on a clean Mac (R7) (needs-human: creating a repository and publishing the code under the owner's account needs the owner's yes)
+- [ ] GitHub Actions matrix cut to macOS arm64 and Windows x86_64 for 1.0 (the macOS x86_64 and Linux rows optional later): build, test, clippy, fmt; on Windows also the reference media from the pinned FFmpeg (`ci.yml` skips `tests/fixtures/generate.sh` there today, so Windows `smoke` has no media) and macOS-only tests gated by `cfg`. Waits on the owner setup line above. Done when: both rows are green on a push (R7)
 - [x] `cargo-deny` for licences and advisories, allowing only licences compatible with GPLv3
-- [ ] FFmpeg build script: pinned FFmpeg 9.0.x with x264 and x265, built as shared libraries for every target and cached in CI. Every release bundles the licence texts and attaches the exact source archives used (needs-human: blocked only on the CI sub-task below)
+- [ ] FFmpeg build script: pinned FFmpeg 9.0.x with x264 and x265, built as shared libraries for macOS arm64 (here) and Windows x86_64 (in CI), cached in CI; every release bundles the licence texts and attaches the exact source archives used (other targets optional later; open until the CI sub-task below is done) (R7)
   - [x] `scripts/ffmpeg/build.sh` and pinned `scripts/ffmpeg/versions.env`: download and checksum the source archives, build pkgconf (and nasm on x86) as host tools, then x264, x265 and FFmpeg as shared libraries into `.glass-cache/ffmpeg/<target>/` with `lib/`, `include/`, `LICENSES/` and `SOURCES.txt`
   - [x] Build locally for `aarch64-apple-darwin`, check the workspace and `experiments/proto-decode` against it, and make `scripts/dev-env.sh` prefer it over Homebrew
   - [x] `scripts/ffmpeg/package-sources.sh` gathering the exact source archives and licence texts for a release, plus GPL compliance notes in `CONTRIBUTING.md`
-  - [ ] CI job building FFmpeg per target, cached on the `versions.env` hash, and release attachment of the sources (needs-human: no GitHub remote yet, and the Windows and Linux builds can only run in CI; push, confirm all four targets build and a `v*` tag attaches the sources)
-- [ ] `cargo-dist` config producing DMG, MSI or MSIX, and AppImage on tags (needs-human: blocked only on the sub-task below)
+  - [ ] CI job building FFmpeg for `x86_64-pc-windows-msvc` and `aarch64-apple-darwin`, cached on the `versions.env` hash, with the sources attached to a `v*` release (the job is already in `ci.yml`). Waits on the owner setup line. Done when: the Windows FFmpeg build succeeds in CI and a tag attaches the sources (R7)
+- [ ] `cargo-dist` config producing the macOS DMG and the Windows MSI and portable zip on tags (MSIX and AppImage optional later; open until the sub-task below is done) (R7)
   - [x] `dist-workspace.toml` and the generated `release.yml` (cargo-dist 0.32: archives and a WiX MSI with the FFmpeg DLLs for the `glass` binary with `release-full`, four targets), plus `scripts/package/` for DMG, MSIX and AppImage, run by `package.yml` as a dist local-artifacts job
   - [x] Build `Glass.app` and the DMG locally on `aarch64-apple-darwin` and check linkage, signature and launch from the mounted image
-  - [ ] Tagged release in CI producing the DMGs, MSI, MSIX and AppImage (needs-human: no GitHub remote yet; Windows MSI/MSIX and Linux AppImage can only be built in CI. Set `repository` in `Cargo.toml`, run `dist generate`, push a `v*` tag and check every installer; MSIX and notarised DMG also need signing certificates)
+  - [ ] Tagged release in CI producing the macOS DMG (ad-hoc signed) and the unsigned Windows MSI and portable zip: set `repository` in `Cargo.toml`, run `dist generate`, push a `v*` tag. Waits on the owner setup line. Done when: the release page has the DMG, MSI, zip and FFmpeg sources, and the Windows job installs the MSI silently and `glass --version` from it exits 0 (R7)
 - [x] App icons exported from the Brand page: macOS icon with the graphite, light, and clear appearances, Windows `.ico` and Linux PNGs using the bare mark, with the small-size variants the page defines (glow drops out at 64 px, a slice at 32 px)
 - [x] Size check in CI: fails when an installer grows past the stored budget (starting at 30 MB). Raising the budget is allowed with a Decision Log entry
-- [ ] Benchmark harness with `criterion` and a `bench` CI job that posts results as a PR comment (needs-human: blocked only on the sub-task below)
+- [x] Benchmark harness with `criterion` and a `bench` CI job that posts results as a PR comment (the CI job is dropped for 1.0, sub-task below)
   - [x] `criterion` harness: workspace dev-dependency, `benches/` targets, `cargo bench --workspace --bench "*"` with short settings and baselines documented in `CONTRIBUTING.md`, and `scripts/bench-report.py` formatting a baseline comparison as Markdown
-  - [ ] `bench` job in `ci.yml`: saves a `main` baseline on pushes to main, compares pull requests against it and posts the report as a PR comment (needs-human: no GitHub remote yet; push, merge once to main to seed the baseline, then open a PR and confirm the comment appears)
+  - [-] `bench` job in `ci.yml`: saves a `main` baseline on pushes to main, compares pull requests against it and posts the report as a PR comment (dropped for 1.0: benchmarks run locally against a saved baseline (Phase 3 benchmarks line); optional later once the repository exists)
 - [x] Logging with `tracing`, per-crate filters, in-memory ring buffer exposed to the UI later
 - [x] Frame-time monitor: records UI frame durations, exposes p50 and p99, fails tests that exceed budget
 - [x] i18n: `assets/i18n/en.json`, a `t!()` macro, and a CI check that every key used exists and no literal strings appear in UI code
 - [x] Theme: tokens in `assets/theme/` (colour, type, spacing, radius, for the default, opposite, and high-contrast themes) loaded into the egui style, and a CI check that no literal colours appear in UI code. Values come from the `00 Foundations` page of the Paper file
 - [x] Opt-in crash minidumps written locally, never uploaded automatically
 - [x] `CONTRIBUTING.md` with the session loop from this file
+- [ ] `scripts/full-check.sh`: the local gate for 1.0, replacing CI as the required check (Decision 82). One cargo-serial lock hold runs build, `test --workspace`, clippy `--all-targets -D warnings`, smoke and strict timing (`GLASS_STRICT_TIMING=1`), then `cargo fmt --all -- --check`, `python3 assets/theme/check.py`, `tests/fixtures/generate.sh --verify`, `cargo deny check` and `scripts/licences/third-party.py --check`, printing `== ok` or `== FAILED` per step; `CONTRIBUTING.md` "The full check" points at it. Done when: it passes on `goal/phase-2` and fails when a test is broken on purpose (R1)
+- [ ] Windows compile check from this Mac, only if crates and rustup alone allow it: `rustup target add x86_64-pc-windows-msvc` (a rustup component), then `cargo check --workspace --target x86_64-pc-windows-msvc` with `FFMPEG_DIR` at the macOS build's headers. If a build script needs the MSVC SDK, a Windows FFmpeg build or any other download, stop there and leave Windows to the CI job. Done when: either the check passes and is a step in `scripts/full-check.sh`, or the Progress Log says what it needed (R1)
 
 ## Phase 2 — Media engine (M1)
 
@@ -139,21 +169,22 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 ### Decode
 - [x] Safe wrapper over `ffmpeg-next`: `Demuxer`, `Decoder`, `Frame`, `Packet`, with error types and no `unsafe` outside `media::ffi`
 - [x] Probe: streams, codecs, duration, frame rate, colour metadata, rotation, timecode
-- [ ] Software decode path for video and audio, tested against every fixture (needs-human: blocked only on the fixtures sub-task below)
+- [ ] Software decode path for video and audio, tested against every fixture (open until the WebP sub-task below is done) (R1)
   - [x] Software decode of video and audio, tested against every fixture the pinned FFmpeg build can generate
-  - [ ] Generate and decode `vp9_720p30.webm`, `sync_vp9_opus.webm`, `av1_1080p30.mp4`, `audio_44k1_mono.mp3`, `anim_vfr_160x120.webp` and `still_marked_640x360.webp` (needs-human: the pinned FFmpeg build has the decoders but not the encoders libvpx, libopus, SVT-AV1 and LAME, and this Mac has no `cwebp` or `img2webp`; `tests/fixtures/generate.sh` skips them with a note and their tests skip here. Getting them needs new source downloads or an FFmpeg with those encoders (`FFMPEG_DIR=<prefix> tests/fixtures/generate.sh`) and libwebp's tools, then a test run)
+  - [ ] Still WebP fixture without libwebp: a test helper writes `still_marked_640x360.webp` with the `image` crate's lossless WebP encoder and decodes it through `VideoSource`. `vp9_720p30.webm`, `sync_vp9_opus.webm`, `av1_1080p30.mp4`, `audio_44k1_mono.mp3` and `anim_vfr_160x120.webp` are dropped for 1.0: the pinned FFmpeg has no encoder for them, and their decoders stay in the build, untested here (Decision 82). Done when: the WebP still test runs here instead of skipping, and `generate.sh`'s note calls the five files dropped for 1.0 (R1)
 - [x] Hardware decode: VideoToolbox. Done when: zero-copy `IOSurface` → Metal texture
-- [ ] Hardware decode: D3D11VA. Done when: shared handle → DX12 texture without CPU copy (needs-human: needs a Windows PC with a D3D11 GPU to implement and verify)
-- [ ] Hardware decode: NVDEC and VAAPI (parallel) (needs-human: needs NVIDIA and Intel or AMD Linux hardware to implement and verify)
+- [-] Hardware decode: D3D11VA. Done when: shared handle → DX12 texture without CPU copy (dropped for 1.0: Windows decodes in software, which falls back automatically; optional later, needs a Windows PC)
+- [-] Hardware decode: NVDEC and VAAPI (parallel) (dropped for 1.0: Linux is out of 1.0 and Windows decodes in software; optional later, needs that hardware)
 - [x] Automatic fallback to software per file with a reason string surfaced in the UI
 - [x] Colour space plumbing: BT.709, BT.2020, sRGB, limited and full range, 8/10/12-bit, PQ and HLG flags carried on every frame
 - [x] VFR normalisation to the sequence frame rate with a per-clip timestamp map
 - [x] Accurate seek: nearest keyframe then decode forward, GOP index cached per file on disk
   - [x] Seek within the current frame: `seek_exact` to a time inside the frame it just returned (after its pts, before the next frame's) returns that frame, not the next one
-- [ ] Still images, image sequences, GIF, WebP, HEIC via `image` and platform decoders (needs-human: blocked only on the Windows sub-task below)
+- [x] Still images, image sequences, GIF, WebP, HEIC via `image` and platform decoders (the Windows WIC sub-task is dropped for 1.0)
   - [x] `media::source::VideoSource` for video files, stills (PNG, JPEG, TIFF, BMP, WebP, GIF with `image`; HEIC, HEIF and AVIF with ImageIO on macOS), animated GIF and WebP (variable-rate timelines from frame delays) and numbered sequences (caller's rate, gaps reported); colour from `cICP` and ICC with Display P3 flagged; EXIF orientation applied; fixtures and tests
-  - [ ] HEIC, HEIF and AVIF stills on Windows through WIC with the HEIF and AV1 Video Extensions, replacing the `media.unsupported.heif`/`avif` error there (needs-human: needs a Windows PC to implement and verify)
+  - [-] HEIC, HEIF and AVIF stills on Windows through WIC with the HEIF and AV1 Video Extensions, replacing the `media.unsupported.heif`/`avif` error there (dropped for 1.0: Windows uses the `image` crate formats every platform has, and HEIC, HEIF and AVIF keep the `media.unsupported.heif`/`avif` message there; optional later, needs a Windows PC)
 - [x] Audio decode to f32 planar at the project rate using a high-quality resampler (`rubato`)
+- [ ] Fix `media::AudioReader` at 48 to 24 kHz delivering audio one output sample early, from the start and after a seek (output `n` holds time `(n + 1) / 24000`; Decision 81): trim the resampler's delay exactly. Done when: an index-coded test at 2:1, 3:2 and 44.1:48 kHz reads output `n` at time `n / rate` from the start and after seeks, and `mix_crossfades` still passes (R1)
 
 ### Analysis (background, cancellable, results cached under the project's cache folder)
 - [x] Analysis job system: priority queue, cancellation, progress, disk cache keyed by content hash
@@ -173,6 +204,8 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [x] Relinking: fuzzy match by name, duration, and content hash, batch relink dialog
 - [x] Offline media placeholder that keeps edits intact and renders a labelled slate
 - [x] Metadata panel: camera, lens, timecode, GPS, created date
+- [ ] Media pool text clipping: centred text near `crates/ui/src/panels/media_pool.rs` line 1490 is clipped the way the inspector's was before its fix; fix it the same way. Done when: a snapshot case with long names shows them cut with an ellipsis inside their cells, goldens reviewed (R1)
+- [ ] Relinking in the app: the relink dialog's folder picker (`rfd`) searches the chosen folder off the UI thread and shows progress (the update pill is dropped with the auto-updater). Done when: an `app_state` test moves a fixture, relinks it from its folder and the clip plays again (R2)
 
 ## Phase 3 — Playback engine (M1)
 
@@ -180,22 +213,23 @@ Done when: the stress project (Phase 16) plays at full rate on both platforms, s
 
 - [x] Thread layout implemented: UI, scheduler, decode pool, render, audio callback, analysis pool, all named, all visible in the debug panel
 - [x] Lock-free frame queues between decode, render, and present (`crossbeam` or `rtrb`)
-- [ ] Master clock from the audio device callback, video slaved to it, drift correction (needs-human: blocked only on the sub-task below)
+- [ ] Master clock from the audio device callback, video slaved to it, drift correction (open until the device check sub-task below is done) (R2)
   - [x] Audio output through `cpal` with an `rtrb` feed ring and an offline backend for tests and export; the callback allocates and locks nothing (counting-allocator test)
   - [x] Master clock: callback frame counter plus output latency, drift-corrected by a delay-locked loop, with a monotonic stand-in when no device is open
   - [x] Video slaved to the clock: one frame per display refresh with hysteresis, drift corrected by a single repeated or skipped frame
-  - [ ] Listening check on real hardware: run `GLASS_AUDIO_DEVICE_TEST=1 cargo test -p audio --test device` on built-in speakers, USB and Bluetooth outputs, and confirm lip sync by eye and ear once the engine plays through the clock (needs-human: judging audible sync and other output devices needs a person at the machine)
+  - [ ] Device check without a listener: `GLASS_AUDIO_DEVICE_TEST=1 cargo test -p audio --test device` on this Mac's default output (skips when none opens), plus an app test playing the reference project on the device clock that measures the audio-to-video offset from the clock and the presented frame times. USB and Bluetooth outputs and judging lip sync by ear are dropped for 1.0. Done when: the device test passes here, the clock stays within 0.1% of wall time over 10 s with no underruns, and the measured offset stays under one frame (R2)
 - [x] Look-ahead decode across cuts and transitions, configurable depth
 - [x] Rendered-frame cache keyed by (segment hash, frame index), LRU in VRAM with RAM spill and a configurable ceiling
 - [x] Dirty-range invalidation: any edit invalidates only affected segments, verified by a test that counts re-renders
 - [x] Animated and nested rendering: keyframed clip and effect parameters evaluated per frame (cache keys by evaluated values), nested sequences composited as layers with their media in the same look-ahead
 - [x] Adaptive quality: drop preview resolution before dropping frames, restore when idle
 - [x] Scrub mode: nearest cached frame immediately, exact frame when the pointer pauses for 40 ms
-- [ ] JKL shuttle, reverse playback, audio scrubbing
-- [ ] Loop range, in and out points, play-around with configurable pre-roll
-- [ ] Background render of idle regions when CPU and GPU are quiet, pauses on user input
-- [ ] Clean feed to a second display, full screen
-- [ ] Benchmarks: scrub latency, playback frame drops, cache hit rate, added to the bench job
+- [ ] Scrubbing in the app: the shell starts a `Scrubber` beside the preview, ruler and viewer drags go through it, `finish` hands back to playback, and edits restart it with the new plan (Decision 53). Done when: an `app_state` test drags across the reference project and the last frame shown equals the exact render of the frame under the pointer, within the frame budget (R2)
+- [ ] Transport keys: Space plays and pauses, K pauses, L plays forward at 1x, then 2x and 4x, the arrow keys step one frame, Home and End jump to the start and end; reverse playback (J) and audio scrubbing are dropped for 1.0. Done when: command tests for each key, and at 2x and 4x the frame shown at clock time t is the sequence frame at 2t or 4t within one frame (R3)
+- [ ] In and out points on the sequence (I and O, cleared with Alt+X) and loop playback between them (a toggle); play-around pre-roll dropped for 1.0. Done when: an engine test loops the in-out range three times with no late frames and the in frame follows the out frame at the seam (R3)
+- [-] Background render of idle regions when CPU and GPU are quiet, pauses on user input (dropped for 1.0: the frame cache and adaptive quality keep playback smooth; optional later)
+- [-] Clean feed to a second display, full screen (dropped for 1.0: a pro feature, and there is no second display to check it on)
+- [ ] Benchmarks run locally against a saved criterion baseline (`CONTRIBUTING.md`, Benchmarks), no CI bench job: project open, scrub latency, playback frame drops, cache hit rate and export speed on the reference project. Done when: `cargo bench -p engine` reports all five, a baseline is saved and the numbers are in the Progress Log (R7)
 
 ## Phase 4 — GPU compositor (M1)
 
@@ -227,10 +261,10 @@ Done when: a 1000-clip project round-trips through save and load byte-identicall
 - [x] Clip properties: source range, timeline range, speed map, effect stack, transform, audio gain, enabled flag
 - [x] Transitions as first-class items between two clips with alignment (centre, start, end)
 - [x] Nested sequences and compound clips
-- [ ] Adjustment layers
+- [-] Adjustment layers (dropped for 1.0: a pro tool that needs a schema bump and item-relative key times; effects on clips cover the beginner path)
 - [x] Keyframe curves per parameter: linear, bezier, hold, with time and value scaling
 - [x] Project settings: resolution, frame rate, colour space, audio rate, cache folder
-- [ ] Copy and paste of clips, attributes, and effects, across projects via the clipboard
+- [ ] Copy, cut and paste within the app: clips with their effects, keyframes and the transitions between them paste at the playhead, and Paste Attributes copies effects, colour and volume onto the selected clips; the system clipboard across projects is dropped for 1.0 (the in-app clipboard survives opening another project). Done when: project edit tests for copy, cut, paste and paste attributes, each one undo step (R3)
 - [x] Pretty JSON project file with stable key order for clean git diffs
 - [x] `tests/fixtures/reference.proj` filled with a real reference sequence used by `smoke`
 
@@ -240,66 +274,70 @@ Done when: every tool below works with keyboard and mouse, the 200-clip benchmar
 
 - [x] Track headers: name, mute, solo, lock, visibility, height presets
 - [x] Clip rendering: thumbnails, waveforms, names, effect badges, speed indicator, all from the analysis cache
+- [ ] Clip thumbnails and waveforms in the app: the shell pumps `AnalysisFeed` every frame, atlas loads carry their `CacheEntry` so `ThumbnailStrips::load_atlas` runs on a worker thread, and results reach `ClipMedia` (Decision 78). Done when: an app test opens the reference project and every visible clip shows thumbnails and waveforms, not placeholders, within 5 s, and the 200-clip frame budget holds (R2)
 - [x] Zoom and scroll with snapping, minimap, zoom to fit, zoom to selection
-- [ ] Playhead, in and out, markers with colours and notes
-- [ ] Snapping to clip edges, playhead, markers, beats, toggle with a key
-- [ ] Selection: click, shift, marquee, track targeting
-- [ ] Magnetic mode (ripple by default) and free mode
-- [ ] Tools: select, razor, ripple, roll, slip, slide, rate stretch, hand, zoom
-- [ ] Trim with numeric entry and a trim monitor showing both sides of the cut
-- [ ] Drag from bin: insert vs overwrite, three-point edit
-- [ ] Linked audio and video with unlink and relink
-- [ ] Storyboard view: cards, drag to reorder, one transition per gap
-- [ ] Remappable shortcuts with presets for Premiere, Final Cut, and DaVinci
+- [ ] Playhead, in and out, markers: a click or drag on the ruler moves the playhead, the in-out range draws on the ruler, M adds a marker at the playhead in a label colour with a note edited in a small popover. Done when: ui tests for seeking, the range and marker edits (each marker edit one undo step), snapshot cases for markers and the range (R3)
+- [ ] Snapping to clip edges, the playhead, markers and the in and out points, N toggles it (beats dropped for 1.0). Done when: drag and trim tests land on each target from within 8 points, and not with snapping off (R3)
+- [ ] Selection: click, Shift-click and marquee selection of clips, Cmd+A selects all, Escape clears (track targeting dropped for 1.0: edits go to the clip's own track or the track under the pointer). Done when: ui tests for each gesture (R3)
+- [ ] Ripple by default: deleting a clip or dragging its edge closes or opens the gap on its track (linked audio follows); a toolbar toggle switches to free mode, which leaves gaps; Shift+Delete ripple-deletes in either mode. Done when: project edit tests for delete and trim in both modes, transitions kept or removed as Decision 54 says (R3)
+- [ ] Tools: select (drag moves, an edge drag trims) and blade (B; a click splits, Cmd+B splits at the playhead); ripple, roll, slip, slide, rate stretch, hand and zoom tools dropped for 1.0 (trims follow the ripple setting, and the view already zooms and scrolls). Done when: ui tests split, move and trim clips of the reference project, each one undo step, and a split clip plays the same frames as before (R3)
+- [ ] While an edge is dragged the viewer shows the frame at the new edge with the timecode change beside the pointer; numeric trim entry and the two-up trim monitor dropped for 1.0. Done when: a ui test shows the edge frame during a trim drag (R3)
+- [ ] Dragging from the media pool onto a track inserts at the drop point (later clips move right), with Alt held it overwrites; items with sound put it on an audio track (linked once the line below is done); three-point editing dropped for 1.0. Done when: ui tests drop video, audio and still items in both modes (R3)
+- [ ] Linked audio and video (a schema bump, after the mixer settings one): an item dropped with its sound makes a linked pair that moves, trims, splits and deletes together; Unlink and Link commands. Done when: project tests for each edit on a linked pair, migration and fixtures for the new schema (R3)
+- [-] Storyboard view: cards, drag to reorder, one transition per gap (dropped for 1.0: a second way to arrange clips; the timeline covers it)
+- [ ] Remappable shortcuts with presets for Premiere, Final Cut, and DaVinci (R6)
   - [x] Command registry, keymap model (preset plus overrides, clash checks, JSON load and save from a path), Glass, Premiere Pro, Final Cut Pro and DaVinci Resolve presets, dispatch of egui key events (pulled forward: needs no timeline model)
   - [x] Keyboard editor window from `Sheet / Keyboard`: keyboard map with modifier layers, key detail, your changes, system keys, command list searchable by name or key with filters, recording, clash Swap / Take it, Start from preset menu, undo
-  - [ ] `Sheet / Keyboard` rest: Switch preset dialog (keep my changes or start clean), saved sets, import and export from the preset menu, preset comparison table, toasts with Undo; the Settings › Shortcuts pane from `Dialog / Settings — Shortcuts`
+  - [ ] Keyboard sheet rest, simplified: Switch preset asks whether to keep your changes or start clean, and changes show a toast with Undo; saved sets, import and export, and the preset comparison table dropped for 1.0 (Settings › Shortcuts opens the existing keyboard editor). Done when: ui tests and snapshot cases for the dialog and the toast (R6)
     - [x] The app loads and saves `keymap.json` in the config folder and dispatches through it
-- [ ] Command palette: effects, clips, commands, fuzzy search
-- [ ] Right-to-left layout and full i18n
+- [-] Command palette: effects, clips, commands, fuzzy search (dropped for 1.0: menus and shortcuts cover the commands; optional later)
+- [-] Right-to-left layout and full i18n (dropped for 1.0: English only, translations need people; the `en.json` key check and the right-to-left mirroring already built stay)
 - [x] Dockable panels, saveable workspaces, presets for Edit, Colour, Audio, Effects
-- [ ] Debug panel: thread activity, cache stats, frame-time graph, log ring buffer
+- [-] Debug panel: thread activity, cache stats, frame-time graph, log ring buffer (dropped for 1.0: a developer tool; the log ring buffer and thread registry stay available to tests)
 
 ## Phase 7 — Core editing features (M2)
 
 Done when: the reference project can be recreated from raw fixtures using only the UI, recorded as an integration test script.
 
-- [ ] Speed change and speed ramps with keyframes, frame blending, optical flow behind a feature flag
-- [ ] Freeze frame and reverse
-- [ ] Preview transform handles: position, scale, rotation, crop
-- [ ] Text tool directly in the preview with basic titles
-- [ ] Clip audio gain, fades, pan
-- [ ] Marker export to CSV and YouTube chapter format
-- [ ] Batch rename and colour labels
-- [ ] Find and replace media, consolidate project, trim unused media
-- [ ] Integration test: scripted UI run that rebuilds the reference project
+- [ ] Inspector for the selected clip: transform, opacity, crop, speed, volume, pan and the effect stack through the parameter auto-UI, each change one project edit with undo, and the keyframe lane wired (add or remove a key at the playhead, previous and next key, linear or eased keys); the graph editor is dropped for 1.0. Done when: ui tests change each property and add, move and remove keys, the preview shows the change at the playhead, snapshot cases for a video and an audio clip (R2)
+- [ ] Constant speed from 10% to 400% in the inspector, picture and sound together (pitch follows) and the clip's length following; speed ramps, frame blending and optical flow dropped for 1.0. Done when: project and engine tests: a 2x clip shows every second frame and its audio equals the 2x reader's output (R3)
+- [ ] Freeze frame: a command inserts a still (2 s by default) of the frame under the playhead into the clip at that point; reversing clips dropped for 1.0. Done when: a render test shows the same frame bit for bit over the frozen span (R3)
+- [ ] Preview transform handles: drag to move, corner handles scale, a rotation handle, one undo step per drag; crop stays in the inspector for 1.0. Done when: ui tests for each handle and a snapshot case (R3)
+- [ ] Text clips (a schema bump, after linked clips): Add Title puts a 5 s text clip on a video track at the playhead, drawn with `cosmic-text` (font, size, colour, alignment, outline, shadow, position) and edited in the inspector; typing directly in the viewer dropped for 1.0. Done when: project tests and the migration, a visual regression case of a title over video, and the title in an export (R4)
+- [ ] Clip volume, fades and pan: fade handles at a clip's top corners (audio fades, picture fades through opacity), volume and pan in the inspector. Done when: mix tests match the fade shape and volume within 1e-6, a ui test drags each fade handle (R4)
+- [-] Marker export to CSV and YouTube chapter format (dropped for 1.0: not on the beginner path; optional later)
+- [-] Batch rename and colour labels (dropped for 1.0: colour labels already exist in the media pool, batch rename is a pro task)
+- [-] Find and replace media, consolidate project, trim unused media (dropped for 1.0: relinking covers moved media)
+- [ ] Integration test: a headless scripted run through `AppState` commands builds a short project from fixtures (import, drag to the timeline, split, trim, move, transition, title, volume, fade, keyframe, undo and redo) and exports it with a preset; it replaces rebuilding the reference project through the UI. Done when: the test passes in the local gate and its export verifies clean (R7)
 
 ## Phase 8 — Export (M3, v0.1)
 
 Done when: the v0.1 checklist passes on both platforms and a tagged build ships installers.
 
-- [ ] Encoder wrapper: H.264, HEVC, AV1, ProRes (native on macOS, software elsewhere behind a flag), VP9, PNG and TIFF sequences, GIF, WAV, AAC, MP3, FLAC (needs-human: blocked only on the AV1, VP9 and MP3 sub-task below)
+- [x] Encoder wrapper: H.264, HEVC, ProRes (native on macOS, software elsewhere behind a flag), PNG and TIFF sequences, GIF, WAV, AAC, FLAC (AV1, VP9 and MP3 dropped for 1.0, sub-task below)
   - [x] Export session and muxer: settings structs (codec, CRF or bit rate, pixel format, BT.709/BT.2020 colour tags, frame rate, audio rate and channels), RGBA and YUV picture input through swscale, MP4, MOV and Matroska, H.264 (x264) and HEVC (x265)
   - [x] ProRes: VideoToolbox on macOS, `prores_ks` behind `codec-prores-sw` elsewhere
   - [x] PNG and TIFF sequences, GIF
   - [x] Audio: WAV, AAC and FLAC, alone and in video containers
-  - [ ] AV1, VP9 and MP3 encoders: in the API, reported unavailable by this build (needs-human: the pinned FFmpeg 9.0.2 build has no AV1, VP9 or MP3 encoder; adding SVT-AV1 or libaom, libvpx and LAME needs new source downloads in `scripts/ffmpeg/versions.env` and a rebuild, Decision 47)
-- [ ] Hardware encode: VideoToolbox, NVENC, QSV, AMF, with software fallback (x264 for H.264, x265 for HEVC) (needs-human: blocked only on the NVENC, QSV and AMF sub-task below)
+  - [-] AV1, VP9 and MP3 encoders: in the API, reported unavailable by this build (dropped for 1.0: the pinned FFmpeg has no encoder for them and adding one needs new source downloads; the API keeps reporting them unavailable (Decision 82))
+- [x] Hardware encode: VideoToolbox, with software fallback (x264 for H.264, x265 for HEVC) (NVENC, QSV and AMF dropped for 1.0, sub-task below)
   - [x] Encoder preference (Auto, Hardware, Software) with fallback to x264 or x265 when the hardware encoder fails to open or on the first frames; the summary names the encoder that ran
   - [x] VideoToolbox H.264 and HEVC on macOS (HEVC Main 10 for 10-bit settings), colour tags as the software path, constant quality mapped from the CRF
   - [x] VideoToolbox B-frame export fix: H.264 and HEVC with B-frames (every web preset) write valid timestamps on Auto and Hardware
-  - [ ] NVENC, QSV and AMF: encoder names, selection order, pixel formats and rate options wired behind `cfg!` for Windows and Linux, compile-checked only (needs-human: no NVIDIA, Intel or AMD GPU and no Windows or Linux machine here; verify encode, fallback, colour tags and the quality mapping on each)
+  - [-] NVENC, QSV and AMF: encoder names, selection order, pixel formats and rate options wired behind `cfg!` for Windows and Linux, compile-checked only (dropped for 1.0: the code is wired and compile-checked, but nothing can verify it without those GPUs; Windows 1.0 encodes in software (line below); optional later, needs that hardware)
+- [ ] Software encoding by default off macOS: `EncoderPreference::Auto` resolves to x264 or x265 on Windows and Linux, and NVENC, QSV and AMF run only when `Hardware` is chosen. Done when: a unit test of the selection order per platform (`cfg`), and the CI Windows job's export tests name x264 as the encoder that ran (R1)
 - [x] Presets: YouTube, TikTok, Instagram, X, Vimeo, broadcast, archival
-- [ ] Custom preset editor: bitrate, CRF, two-pass, colour tags, audio settings
+- [ ] Export settings over a preset in the export dialog: resolution, frame rate, quality (CRF slider or bit rate), audio bit rate; two-pass, colour tags and saved custom presets dropped for 1.0. Done when: ui tests change each setting and the job's `ExportSettings` match, and an export verifies clean (R5)
 - [x] Background export queue with progress, pause, cancel, notifications
-- [ ] Smart export: reuse cached rendered segments, stream-copy untouched ranges when the codec matches
-- [ ] Export in and out range, selected clips, stills
+- [ ] Export dialog and queue in the app: File › Export opens a dialog with the built-in presets (H.264 and HEVC MP4, ProRes MOV, GIF, WAV), file name and folder, and submits an `ExportJob`; a queue panel shows progress with pause, cancel and reveal in Finder or Explorer; a finished or failed job shows an in-app toast (OS notifications dropped for 1.0). Done when: an `app_state` test exports the reference project's first second through the dialog and its verify report is clean, snapshot cases for the dialog and queue, and the frame budget holds while exporting (R5)
+- [-] Smart export: reuse cached rendered segments, stream-copy untouched ranges when the codec matches (dropped for 1.0: an optimisation; full renders are correct and fast enough)
+- [ ] Export the in-out range or the whole sequence, and Export Frame saves the frame under the playhead as PNG; selected clips dropped for 1.0. Done when: export tests for both ranges (exact frame counts) and a PNG equal to the rendered frame (R5)
 - [x] Subtitle export: burned in, sidecar SRT and VTT, embedded
   - [x] Sidecar SRT and WebVTT from a subtitle track: millisecond timestamps, line breaks, escaping, numbering, export range offset and clipping
   - [x] Embedded: `mov_text` in MP4 and MOV, WebVTT in Matroska and WebM, language tag, through the export session; re-probed and decoded back
   - [x] Burned in: render helper that lays out and draws the cue at a time onto a frame (size from frame height, white with outline and shadow, bottom-centred in the title-safe area); wiring into the export pipeline waits for the export queue
 - [x] Output verification: duration, frame count, loudness, then reveal in Finder or Explorer
-- [ ] **v0.1 checklist:** import, play, cut, trim, 10 transitions, basic titles, export, both platforms, installers on tag
+- [-] **v0.1 checklist:** import, play, cut, trim, 10 transitions, basic titles, export, both platforms, installers on tag (dropped for 1.0: replaced by the Glass 1.0 checklist in Phase 14)
 
 ## Phase 9 — Built-in library (M4, v0.5)
 
@@ -312,43 +350,43 @@ Done when: the transition browser has 150+ items, the title browser 60+, the LUT
 - [x] Motion: push, slide, whip pan with blur, zoom in and out, spin, swirl, roll
 - [x] Multi-pass transitions: a transition may declare extra passes at reduced scales; whip pan and zoom blur at reduced resolution within 3 ms at 4K, zoom out minified through a pyramid
 - [x] Stylised: glitch, RGB split, pixelate, VHS, light leak, film burn, ink bleed, paper tear, liquid
-- [ ] Shape and mask: circle, heart, star, custom SVG, text-shaped
-- [ ] 3D: cube, flip, page turn, door
-- [ ] Morph cut for jump cuts in talking-head footage (feature flag, optical flow)
-- [ ] Transition browser with live hover preview, favourites, search
-- [ ] Default transition and duration, apply to all selected cuts
-- [ ] Easing curves editor shared by transitions and keyframes
+- [-] Shape and mask: circle, heart, star, custom SVG, text-shaped (dropped for 1.0: about 30 transitions are built; fewer, finished features)
+- [-] 3D: cube, flip, page turn, door (dropped for 1.0: about 30 transitions are built; fewer, finished features)
+- [-] Morph cut for jump cuts in talking-head footage (feature flag, optical flow) (dropped for 1.0: a pro feature that needs optical flow)
+- [ ] Transition browser: categories, search and thumbnails of every built-in transition (the audio `crossfade` under Audio), drag onto a cut or double-click to apply to the selected cuts, duration and parameters in the inspector; live hover preview and favourites dropped for 1.0. Done when: ui tests apply a video and an audio transition, snapshot cases, and the frame budget with every thumbnail shown (R4)
+- [ ] Default transition (cross dissolve, 1 s; crossfade on audio tracks) applied with Cmd+T to the selected cuts or the cut nearest the playhead. Done when: a project test applies it to three cuts in one undo step and refuses cuts without handles with a message (R4)
+- [ ] Easing presets for transitions and keyframes: linear, ease in, ease out and ease in-out from a dropdown; the curve editor dropped for 1.0. Done when: a ui test sets each preset and the project stores the matching easing (R4)
 
 ### Titles and graphics
-- [ ] Template framework: a title is a small sequence with exposed fields, discovered from `assets/titles/`
-- [ ] 60+ title templates: lower thirds, centred, kinetic, cinematic, social, minimal, bold
-- [ ] Text animator: per-character and per-word reveal, typewriter, bounce, blur in, tracking
-- [ ] Shapes, arrows, callouts, progress bars, counters, timers
-- [ ] Sticker and emoji browser
-- [ ] Animated backgrounds and gradients
-- [ ] Bundled open-licence fonts plus system font access
-- [ ] Save any graphic as a reusable template with editable fields
+- [ ] Title presets: a preset is a JSON file in `assets/titles/` setting a text clip's style, layout and animation (no title sequences with exposed fields). Done when: a discovery test loads every preset and reports a broken file without failing (R4)
+- [ ] 12 title presets: three lower thirds, three centred, bold, minimal, social caption, chapter, quote and end card, in a titles browser with drag onto the timeline. Done when: a visual regression golden per preset and a snapshot case of the browser (R4)
+- [ ] Title in and out animations: fade, slide up, scale pop and typewriter (characters appear over a set time); per-word and other per-character animations dropped for 1.0. Done when: visual regression cases at the start, middle and end of each animation (R4)
+- [-] Shapes, arrows, callouts, progress bars, counters, timers (dropped for 1.0: more graphics than a beginner editor needs; titles and background clips cover the basics)
+- [-] Sticker and emoji browser (dropped for 1.0: needs sticker and emoji assets)
+- [ ] Colour and gradient background clips (in the text clips schema bump): a solid colour or a two-colour linear or radial gradient, placed like titles; animated backgrounds dropped for 1.0. Done when: visual regression cases and an inspector snapshot (R4)
+- [ ] System fonts for titles: a font picker listing the installed families (as `cosmic-text` already loads them) with a preview; no bundled fonts (Decision 82). Done when: a ui test picks a family and the title renders in it, and a missing font falls back with a warning badge (R4)
+- [-] Save any graphic as a reusable template with editable fields (dropped for 1.0: templates beyond the built-in presets are a pro workflow)
 
 ### Looks and effects
 - [x] LUT framework: `.cube` loader, GPU 3D LUT node, intensity slider
-- [ ] 50+ LUTs grouped by mood, thumbnails rendered from the current frame
-- [ ] Film grain, halation, bloom, vignette, chromatic aberration, lens distortion
-- [ ] Blur (gaussian, directional, radial, zoom), sharpen, glow, mosaic, posterise
-- [ ] Mirror, kaleidoscope, tile, RGB shift, VHS, old film
-- [ ] Effect browser with categories, search, drag to clip, hover preview
+- [ ] 10 built-in looks as `.cube` files written by a committed script from formulas (warm, cool, black and white, faded, teal and orange, vintage, high contrast, matte, cinematic, punchy), no downloaded LUTs, with thumbnails rendered from the current frame in the effects browser. Done when: the script regenerates the files byte for byte and each look has a visual regression case (R4)
+- [ ] Vignette and film grain effects (halation, bloom, chromatic aberration and lens distortion dropped for 1.0). Done when: visual regression cases and parameter schemas in the auto-UI (R4)
+- [ ] Gaussian blur, sharpen and mosaic effects (directional, radial and zoom blur, glow and posterise dropped for 1.0). Done when: visual regression cases and a 4K GPU median under 3 ms each (R4)
+- [-] Mirror, kaleidoscope, tile, RGB shift, VHS, old film (dropped for 1.0: novelty effects; fewer, finished features)
+- [ ] Effects browser: categories (looks, colour, blur and sharpen, stylise) and search, drag onto a clip or double-click to add to the selected clips; hover preview dropped for 1.0. Done when: ui tests add each built-in effect, snapshot cases and the frame budget (R4)
 
 ### Sound
-- [ ] Asset pack system: packs downloaded on demand into the user data folder, versioned, licence file included
-- [ ] Music pack: mood, tempo, duration filters, stems where available (needs-human: licence the catalogue)
-- [ ] SFX pack: whooshes, impacts, clicks, ambience, foley (needs-human: licence the catalogue)
-- [ ] Auto-add a matching whoosh when a transition is applied, toggle
-- [ ] Auto-duck music under speech
+- [-] Asset pack system: packs downloaded on demand into the user data folder, versioned, licence file included (dropped for 1.0: no downloadable packs, nothing to host or licence)
+- [-] Music pack: mood, tempo, duration filters, stems where available (dropped for 1.0: needs a licensed catalogue; people import their own music)
+- [-] SFX pack: whooshes, impacts, clicks, ambience, foley (dropped for 1.0: needs a licensed catalogue; people import their own sounds)
+- [-] Auto-add a matching whoosh when a transition is applied, toggle (dropped for 1.0: there is no SFX pack)
+- [-] Auto-duck music under speech (dropped for 1.0: needs speech detection; volume keyframes duck by hand)
 
 ### Motion presets
-- [ ] Clip animations: fade, slide, zoom, shake, bounce, pop, rotate
-- [ ] Speed ramp presets: slow-mo hit, speed up, time freeze
-- [ ] Ken Burns presets for stills
-- [ ] **v0.5 checklist:** all browsers populated, hover previews under 100 ms, installers on tag
+- [ ] Clip animations: fade, slide, zoom and pop, in and out, applied from the inspector as ordinary keyframes on opacity, position and scale (shake, bounce and rotate dropped for 1.0). Done when: project tests that each preset writes the expected keys, editable afterwards (R4)
+- [-] Speed ramp presets: slow-mo hit, speed up, time freeze (dropped for 1.0: speed ramps are out of 1.0)
+- [ ] Ken Burns for stills: one command adds a slow zoom and pan over the still's length as keyframes. Done when: a project test of the keys and a render test of the first and last frames (R4)
+- [-] **v0.5 checklist:** all browsers populated, hover previews under 100 ms, installers on tag (dropped for 1.0: replaced by the Glass 1.0 checklist in Phase 14)
 
 ## Phase 10 — Easy mode and AI assist (M5)
 
@@ -356,127 +394,128 @@ Done when: the guided first-run flow takes raw clips to an exported vertical vid
 
 All on-device. Models download on demand so the installer stays small.
 
-- [ ] Model manager: download, verify, cache, delete models in the user data folder
-- [ ] Speech-to-text captions with `whisper-rs`, word timing, speaker labels
-- [ ] Caption styles: 30+ animated presets, karaoke highlight, emoji injection, in-place editing
-- [ ] Auto-cut silences and filler words with sensitivity slider and a review list
-- [ ] Auto-reframe 16:9 to 9:16 and 1:1 with subject tracking
-- [ ] Scene detection into clips on import
-- [ ] Beat markers from music and snap-to-beat
-- [ ] Smart colour match between selected clips
-- [ ] One-click stabilisation
-- [ ] One-click audio cleanup: noise, reverb, hum, plosives
-- [ ] Background removal without green screen via a segmentation model
-- [ ] Auto-highlight suggestions from long recordings
-- [ ] Text-based editing: edit the transcript, the timeline follows
-- [ ] Guided first-run flow: pick format, drop clips, pick a look, add music, export
-- [ ] Templates gallery: intro, vlog, product demo, tutorial, recap, slideshow
+- [-] Model manager: download, verify, cache, delete models in the user data folder (dropped for 1.0: no downloaded models)
+- [-] Speech-to-text captions with `whisper-rs`, word timing, speaker labels (dropped for 1.0: needs a downloaded speech model)
+- [-] Caption styles: 30+ animated presets, karaoke highlight, emoji injection, in-place editing (dropped for 1.0: depends on speech-to-text; subtitle tracks and their export stay)
+- [-] Auto-cut silences and filler words with sensitivity slider and a review list (dropped for 1.0: beyond the beginner basics; silence detection stays in the engine)
+- [-] Auto-reframe 16:9 to 9:16 and 1:1 with subject tracking (dropped for 1.0: needs subject tracking)
+- [-] Scene detection into clips on import (dropped for 1.0: scene detection stays in the engine, without UI)
+- [-] Beat markers from music and snap-to-beat (dropped for 1.0: beat detection stays in the engine, without UI)
+- [-] Smart colour match between selected clips (dropped for 1.0: a pro colour tool)
+- [-] One-click stabilisation (dropped for 1.0: needs motion tracking)
+- [-] One-click audio cleanup: noise, reverb, hum, plosives (dropped for 1.0: needs audio models or pro signal processing)
+- [-] Background removal without green screen via a segmentation model (dropped for 1.0: needs a downloaded segmentation model)
+- [-] Auto-highlight suggestions from long recordings (dropped for 1.0: needs analysis models)
+- [-] Text-based editing: edit the transcript, the timeline follows (dropped for 1.0: needs speech-to-text)
+- [ ] New project sheet on first launch and File › New: pick a format (16:9 1080p, 16:9 4K, 9:16 vertical 1080 x 1920, 1:1 square 1080) and a frame rate (24, 25, 30, 60), then import or drop clips; the look and music steps dropped for 1.0. Done when: ui tests create each format, a snapshot case, and the sheet shows by itself only on the first launch (R6)
+- [-] Templates gallery: intro, vlog, product demo, tutorial, recap, slideshow (dropped for 1.0: needs template content; the title presets cover the basics)
 
 ## Phase 11 — Colour page (M6)
 
 Done when: a graded reference shot matches a golden render within tolerance and all scopes update at playback rate.
 
-- [ ] Node-based colour graph per clip and per sequence
-- [ ] Primary wheels: lift, gamma, gain, offset, temperature, tint
-- [ ] Curves: RGB, hue vs hue, hue vs sat, hue vs lum, lum vs sat, sat vs sat
-- [ ] HSL qualifier with softness and mask overlay
-- [ ] Power windows with tracking
-- [ ] GPU scopes: waveform, RGB parade, vectorscope, histogram, false colour
-- [ ] LUT import (`.cube`, `.3dl`) and export
-- [ ] Colour management: per-clip input transform, ACES and BT.2020 pipelines, HDR grading, tone mapping to SDR
-- [ ] Shot matching, stills gallery, wipe compare
-- [ ] Grade copy, paste, and groups
+- [-] Node-based colour graph per clip and per sequence (dropped for 1.0: pro colour; one colour adjustment effect per clip instead)
+- [ ] Colour adjustment effect: exposure, contrast, highlights, shadows, saturation, temperature and tint as sliders in one GPU node (no wheels, no node graph). Done when: visual regression cases per slider, neutral settings bit-identical to the input, and a 4K GPU median under 2 ms (R4)
+- [-] Curves: RGB, hue vs hue, hue vs sat, hue vs lum, lum vs sat, sat vs sat (dropped for 1.0: pro colour; the colour adjustment and looks cover the basics)
+- [-] HSL qualifier with softness and mask overlay (dropped for 1.0: pro colour)
+- [-] Power windows with tracking (dropped for 1.0: pro colour, needs tracking)
+- [-] GPU scopes: waveform, RGB parade, vectorscope, histogram, false colour (dropped for 1.0: pro scopes)
+- [ ] LUT file picker: the inspector picks a `.cube` file for the LUT effect (import only) with the input space choice from Decision 36; `.3dl` and LUT export dropped for 1.0. Done when: a ui test picks a generated `.cube` fixture and the frame changes as its visual case says (R4)
+- [ ] HDR sources in SDR projects: PQ and HLG clips in a Rec.709 project are tone-mapped to SDR with one fixed operator (BT.2390 EETF on luminance) in the source path, so phone HLG footage and SDR exports look right; HDR grading, ACES and per-clip input transforms dropped for 1.0 (HDR projects keep working as built). Done when: visual regression cases for PQ and HLG fixtures made by the pinned FFmpeg, mid-grey within 2% of its SDR value and no clipped mid-tones (R4)
+- [-] Shot matching, stills gallery, wipe compare (dropped for 1.0: pro colour)
+- [-] Grade copy, paste, and groups (dropped for 1.0: Paste Attributes covers copying a look (Phase 5))
 
 ## Phase 12 — Audio (M6)
 
 Done when: a 16-track mix with effects and automation plays without dropouts at a 256-sample buffer on both platforms.
 
-- [ ] Mixer: buses, sends, faders, meters, automation lanes
+- [ ] Mixer: buses, sends, faders, meters, automation lanes (R2)
   - [x] Core mixer and meters: one mixer graph in the audio callback and offline (track faders, constant-power pan, mute and solo, master fader, clip guard), peak, RMS and hold meters published lock-free, graphs built off the audio thread and swapped through a ring, clips decoded and resampled ahead on `glass-audio-decode`; 16 tracks at a 256-frame buffer without dropouts (headless)
   - [x] Buses and sends: user buses, pre- and post-fader sends, routing that cannot loop
   - [x] Automation lanes: track and bus fader and pan, master fader, from project curves; clip gain curves through the clip's keyframes
   - [x] Offline render: `engine::mix::mix_range` and `OfflineMix`, the same graph as playback; `smoke` exports the mixed audio and checks the mix's level
   - [x] Export queue: `engine::export` pushes the mix (`OfflineMix::render_planar`) instead of silence and checks its loudness when audio plays in the range
-  - [ ] Store track mixer settings, buses and automation in the project (a schema version) and feed track header mute and solo into `MixSettings`
-  - [ ] Mixer panel: faders, pan, meters, sends and automation lanes in the UI (08 Audio board)
-- [ ] Effects: EQ, compressor, limiter, gate, de-esser, reverb, delay, pitch shift
-- [ ] Spectral noise removal and de-hum
-- [ ] Loudness normalisation to platform targets
-- [ ] VST3 and AU hosting in a sandboxed helper process
-- [ ] Audio clip effects and keyframes on the timeline
+  - [ ] Store track mixer settings (fader, pan, buses, sends, automation) in the project, 1.0's first schema bump, so they save, undo and reach nested sequences (mute and solo are stored since v9). Done when: save, load and undo tests, the migration and fixtures, and a nested sequence plays with its own fader and pan (R2)
+  - [ ] Mixer panel: per-track fader, pan, mute, solo and meters, master fader and meter; sends, buses and automation lanes keep working in the engine without UI for 1.0. Done when: ui tests move each control as an undoable edit, snapshot cases, and the frame budget with 16 tracks metering (R2)
+- [-] Effects: EQ, compressor, limiter, gate, de-esser, reverb, delay, pitch shift (dropped for 1.0: volume, pan, fades and crossfades cover the beginner path; loudness normalisation below)
+- [-] Spectral noise removal and de-hum (dropped for 1.0: pro audio)
+- [ ] Normalise loudness: a command sets the selected clips' gain so each reaches -14 LUFS integrated (from the loudness analysis), at most +12 dB. Done when: a test normalises a quiet and a loud fixture to within 0.5 LU (R4)
+- [-] VST3 and AU hosting in a sandboxed helper process (dropped for 1.0: plugin hosting is pro and needs sandboxing work)
+- [ ] Volume line on audio clips: dragging the line sets the clip gain with a dB readout; with the gain keyframed it shows the curve and Alt-click adds a key. Done when: ui tests drag the line and add a key, and the mix follows the gain within 1e-6 (R4)
 - [x] Sample-accurate editing and crossfades
-- [ ] Voice-over recording to the timeline with punch and roll
-- [ ] Stereo and surround panning, downmix rules
-- [ ] Audio-only and stem export
+- [-] Voice-over recording to the timeline with punch and roll (dropped for 1.0: needs a microphone and a person to check it)
+- [-] Stereo and surround panning, downmix rules (dropped for 1.0: stereo pan exists; surround is pro)
+- [ ] Audio-only export presets: WAV and AAC (`.m4a`) of the sequence mix from the export dialog; stems dropped for 1.0. Done when: export tests read back equal to `mix_range` (WAV within 1e-6) and verify clean (R5)
 
 ## Phase 13 — Advanced compositing (M6)
 
 Done when: a tracked, keyed, masked composite renders correctly in the visual regression suite.
 
-- [ ] Graph editor for keyframes: bezier handles, ease presets, copy curves
-- [ ] Expressions for parameter linking, small embedded language with a test suite
-- [ ] Masks: pen tool, feather, expansion, tracking, roto brush with AI edge refinement
-- [ ] Planar and point tracking, attach layers to tracks
-- [ ] Chroma key: spill suppression, edge refine, light wrap, garbage mattes
-- [ ] Luma key and difference key
-- [ ] Motion blur for animated layers
-- [ ] 3D layer transforms with camera and depth of field
-- [ ] Time remapping with optical flow
-- [ ] Stabilisation with crop, warp, and rolling shutter fix
+- [-] Graph editor for keyframes: bezier handles, ease presets, copy curves (dropped for 1.0: the inspector's keyframe lane and easing presets cover keyframes)
+- [-] Expressions for parameter linking, small embedded language with a test suite (dropped for 1.0: pro compositing)
+- [-] Masks: pen tool, feather, expansion, tracking, roto brush with AI edge refinement (dropped for 1.0: masks stay in the compositor; drawing them is pro)
+- [-] Planar and point tracking, attach layers to tracks (dropped for 1.0: pro compositing, needs tracking)
+- [-] Chroma key: spill suppression, edge refine, light wrap, garbage mattes (dropped for 1.0: pro compositing)
+- [-] Luma key and difference key (dropped for 1.0: pro compositing)
+- [-] Motion blur for animated layers (dropped for 1.0: pro compositing)
+- [-] 3D layer transforms with camera and depth of field (dropped for 1.0: pro compositing)
+- [-] Time remapping with optical flow (dropped for 1.0: needs optical flow)
+- [-] Stabilisation with crop, warp, and rolling shutter fix (dropped for 1.0: needs motion tracking)
 
 ## Phase 14 — Multicam, collaboration and workflow (M6, v1.0)
 
 Done when: the v1.0 checklist passes.
 
-- [ ] Multicam sync by waveform, timecode, or markers
-- [ ] Real-time angle switching with cut recording
-- [ ] Nested sequences and compound clips with editable inner timelines
-- [ ] Proxy and full-res toggle, per clip and global
-- [ ] Project archive: collect media, trim unused, zip
-- [ ] Interchange: FCPXML, OTIO, EDL, Premiere XML import and export, best effort with a compatibility matrix in docs
-- [ ] Project locking and change history for shared drives
-- [ ] Review export with burnt-in timecode and watermark
-- [ ] **v1.0 checklist:** Phases 9 to 14 complete, stress project passes, both platforms signed (needs-human: certificates)
+- [-] Multicam sync by waveform, timecode, or markers (dropped for 1.0: multicam is pro)
+- [-] Real-time angle switching with cut recording (dropped for 1.0: multicam is pro)
+- [-] Nested sequences and compound clips with editable inner timelines (dropped for 1.0: compound clips stay in the model and render; editing inside them is pro)
+- [-] Proxy and full-res toggle, per clip and global (dropped for 1.0: proxy generation stays in the engine; Apple silicon plays the media directly, and Windows software decode lowers preview resolution under load)
+- [-] Project archive: collect media, trim unused, zip (dropped for 1.0: optional later)
+- [-] Interchange: FCPXML, OTIO, EDL, Premiere XML import and export, best effort with a compatibility matrix in docs (dropped for 1.0: pro interchange)
+- [-] Project locking and change history for shared drives (dropped for 1.0: collaboration is out of scope)
+- [-] Review export with burnt-in timecode and watermark (dropped for 1.0: review workflows are pro)
+- [ ] **Glass 1.0 checklist:** on this Mac the local gate, smoke and the scripted integration test pass, the stress project plays at full rate in a release build, and the ad-hoc signed DMG installs and opens; on Windows the CI job is green and the unsigned MSI and zip are on a tagged release; milestones R1 to R6 are done. Done when: each item has a Progress Log line citing its run (R7)
 
 ## Phase 15 — Plugins and scripting (M7)
 
 Done when: a third-party effect, transition, and title each load from a plugin bundle and run inside the sandbox.
 
-- [ ] WASM effect ABI: params, textures, time, project info, via the Component Model
-- [ ] Plugin manager: install, update, enable, disable, resource limits
-- [ ] Transition and title plugins on the same ABI
-- [ ] Lua scripting API for batch operations and automation
-- [ ] Optional Python bridge (feature flag)
-- [ ] Plugin SDK: template repo, docs, hot reload
-- [ ] Community asset packs installable as bundles
+- [-] WASM effect ABI: params, textures, time, project info, via the Component Model (dropped for 1.0: plugins and scripting are after 1.0)
+- [-] Plugin manager: install, update, enable, disable, resource limits (dropped for 1.0: plugins and scripting are after 1.0)
+- [-] Transition and title plugins on the same ABI (dropped for 1.0: plugins and scripting are after 1.0)
+- [-] Lua scripting API for batch operations and automation (dropped for 1.0: plugins and scripting are after 1.0)
+- [-] Optional Python bridge (feature flag) (dropped for 1.0: plugins and scripting are after 1.0)
+- [-] Plugin SDK: template repo, docs, hot reload (dropped for 1.0: plugins and scripting are after 1.0)
+- [-] Community asset packs installable as bundles (dropped for 1.0: no asset packs)
 
 ## Phase 16 — Performance and quality (parallel, ongoing from Phase 3)
 
 Done when: every benchmark and budget is enforced in CI and the stress project passes.
 
-- [ ] Stress project generator: 1000 clips, 20 tracks, 4K 10-bit, transitions on every cut. Clips reuse about 20 generated source files with different in and out points, so the media stays under 5 GB (parallel)
-- [ ] Benchmarks on every PR: open, scrub, playback, export on reference projects (parallel)
-- [ ] Memory ceiling: configurable cache size, never swaps (parallel)
-- [ ] Battery mode: lower preview resolution, pause background analysis (parallel)
-- [ ] Fuzzing of parsers: project files, LUTs, subtitles, with `cargo-fuzz`, run in CI only (parallel)
+- [ ] Stress project generator sized for 1.0: 300 clips on 6 tracks from about 10 generated 1080p and 4K 8-bit sources (pinned FFmpeg), a transition on every fourth cut, titles and a colour effect on some. Done when: a release build plays it at full rate on this Mac with no dropped frames, numbers in the Progress Log (R7) (parallel)
+- [-] Benchmarks on every PR: open, scrub, playback, export on reference projects (parallel) (dropped for 1.0: no CI bench job; the local benchmarks line in Phase 3 covers open, scrub, playback and export)
+- [-] Memory ceiling: configurable cache size, never swaps (parallel) (dropped for 1.0: cache ceilings already follow the machine (Decision 35))
+- [-] Battery mode: lower preview resolution, pause background analysis (parallel) (dropped for 1.0: adaptive quality already lowers preview resolution under load)
+- [-] Fuzzing of parsers: project files, LUTs, subtitles, with `cargo-fuzz`, run in CI only (parallel) (dropped for 1.0: CI-only; the parsers keep their unit tests; optional later)
 - [x] UI snapshot tests for every panel in light and dark (parallel)
 - [x] Timing tests robust under load: frame, GPU and latency budgets that pass on a busy machine and still catch regressions (parallel)
-- [ ] Accessibility: keyboard for everything, screen reader labels, high contrast, scalable UI (parallel)
-- [ ] Full UI localisation and dictionary check in CI (parallel)
+- [ ] Strict 4K GPU budget set from this Mac: the cross dissolve, film dissolve and linear wipe 4K medians take about 2.5 ms on the M5 against the 2.0 ms strict budget. Measure them alone on a quiet machine (10 runs each), set the strict budget to 3.0 ms if every median is under it (else the worst median plus 20%), and record the measurements and reason in a Decision. Done when: `GLASS_STRICT_TIMING=1` passes the render timing tests three times in a row on a quiet machine (R1) (parallel)
+- [ ] Accessibility basics: every menu command and tool reachable from the keyboard, Tab focus through dialogs, a high-contrast theme choice in Settings (the tokens exist) and a UI scale setting (90% to 150%); screen reader labels dropped for 1.0. Done when: ui tests of keyboard focus per dialog, snapshot cases at high contrast and at 150% (R6) (parallel)
+- [-] Full UI localisation and dictionary check in CI (parallel) (dropped for 1.0: English only)
 
 ## Phase 17 — Distribution
 
 Done when: a tagged build installs cleanly on a fresh macOS and Windows machine without warnings.
 
-- [ ] macOS: Universal binary, hardened runtime, DMG
-- [ ] macOS: notarisation (needs-human: Apple Developer account and certificate)
-- [ ] Windows: MSIX and portable EXE (the portable zip ships an empty `Glass Data` folder beside `glass.exe` so it starts in portable mode; CONTRIBUTING.md, Portable mode)
-- [ ] Windows: code signing (needs-human: certificate)
-- [ ] Linux: AppImage and Flatpak
-- [ ] Auto-updater with delta updates and rollback
-- [ ] Asset packs downloaded on demand so the installer stays small
+- [ ] macOS: an arm64 DMG of `Glass.app`, ad-hoc signed with `codesign -s -` by `scripts/package/`; universal binary and hardened runtime dropped for 1.0 (other Macs show a Gatekeeper prompt once, opened with right-click › Open). Done when: the DMG builds within the size budget, `codesign --verify` passes and the app launches from the mounted image here (R7)
+- [-] macOS: notarisation (dropped for 1.0: needs a paid Apple Developer account; the ad-hoc signed DMG opens with right-click › Open; optional later, needs a person)
+- [ ] Windows: an unsigned MSI (cargo-dist's WiX config, already in `release.yml`) and a portable zip with an empty `Glass Data` folder beside `glass.exe` (portable mode; CONTRIBUTING.md, Portable mode), both carrying the FFmpeg DLLs and licence texts, built by CI; MSIX dropped for 1.0. People see a SmartScreen warning (More info › Run anyway), accepted for 1.0 (Decision 82). Waits on the owner setup line in Phase 1. Done when: a `v*` tag's CI run attaches both, and the Windows job runs `glass.exe --version` from the unpacked zip with exit 0 (R7)
+- [-] Windows: code signing (dropped for 1.0: needs a paid certificate; the SmartScreen warning is accepted; optional later, needs a person)
+- [-] Linux: AppImage and Flatpak (dropped for 1.0: Linux is out of 1.0; its existing software paths stay)
+- [-] Auto-updater with delta updates and rollback (dropped for 1.0: needs an update server and signing; new versions come from the release page)
+- [-] Asset packs downloaded on demand so the installer stays small (dropped for 1.0: no asset packs)
 - [x] Portable mode with settings next to the executable
-- [ ] Safe mode: disable plugins and GPU features on repeated crash
+- [-] Safe mode: disable plugins and GPU features on repeated crash (dropped for 1.0: no plugins, and the compositor needs the GPU; autosave recovery covers crashes)
 - [-] Licensing and activation (dropped: free and open source, see Decision Log)
 - [x] About dialog: version, MIT and GPLv3 notices, third-party licences, link to the release's source archives, matching the About window on the Brand page
 
@@ -484,12 +523,12 @@ Done when: a tagged build installs cleanly on a fresh macOS and Windows machine 
 
 Done when: a new user can complete the first-run flow without external help and a contributor can build from the docs alone.
 
-- [ ] In-app interactive tutorial on first launch
-- [ ] Tooltips with short video loops for every tool
-- [ ] Searchable help and shortcut cheat sheet
-- [ ] Bundled sample project so the app is never empty
-- [ ] Public roadmap and changelog generated from this file and git tags
-- [ ] Developer docs: architecture, plugin SDK, contributing guide
+- [ ] Welcome sheet on first launch: three short steps (import media, drag it to the timeline, export) with Don't show again, reopened from Help; the interactive tutorial dropped for 1.0. Done when: a snapshot case and a ui test that it shows once (R6)
+- [ ] Tooltips with a short text and the shortcut for every toolbar button and tool (i18n keys); video loops dropped for 1.0. Done when: a source rule in the `ui_source` test fails on a toolbar button without a tooltip key (R6)
+- [ ] Keyboard shortcuts cheat sheet from Help, generated from the active keymap and grouped by area, with ⌘, ⇧ and ⌥ drawn in a system font that has them (the snapshot mono font, Courier New, shows `?`); searchable help dropped for 1.0. Done when: a snapshot case in the Glass preset and a test that it follows a remapped key (R6)
+- [ ] Empty states instead of a sample project: an empty media pool shows how to import (a button and a drop target), an empty timeline says to drag clips in, the viewer shows the project format; a bundled sample project dropped for 1.0 (no media to license). Done when: snapshot cases of each empty state (R6)
+- [ ] `CHANGELOG.md` for 1.0, written from the Progress Log in plain words for users; the public roadmap and generation from git tags dropped for 1.0. Done when: the file lists 1.0's features and known limits (R6)
+- [ ] Developer docs: a root `README.md` with build steps from a fresh clone on macOS (pinned FFmpeg, build, run, package) and pointers to `docs/ARCHITECTURE.md` and `CONTRIBUTING.md`; the plugin SDK dropped for 1.0. Done when: the steps run as written in a new worktree (R6)
 
 ---
 
@@ -502,7 +541,7 @@ Done when: a new user can complete the first-run flow without external help and 
 | Shipping a GPL build without meeting its terms | Every release attaches the FFmpeg, x264, and x265 source it was built from, and `cargo-deny` blocks dependencies incompatible with GPLv3 |
 | AI models bloat the binary | On-demand download, feature flags, quantised models |
 | Stale frames from cache invalidation bugs | Deterministic segment hashing, re-render counting test, visual regression suite |
-| Scope creep before v0.1 | Nothing from Phase 9 onward starts until the v0.1 checklist is green |
+| Scope creep before 1.0 | Only lines tagged R1 to R7 (Road to 1.0) start before 1.0; dropped lines stay `[-]` until then (Decision 82) |
 | Too many parallel tasks overload the machine | Hard cap of 7 parallel tasks, one build at a time, 8 compiler jobs, serial benchmarks, drop to one task when the machine slows |
 | Long-running work drifts from the plan | Session loop above, one task at a time, every session starts by reading this file |
 
@@ -590,6 +629,7 @@ Append one line per decision: date, decision, reason. Add the same entry to `doc
 - 2026-10-11 — App shell and workspace (Decision 79): one UI-thread `AppState` (history, plan, preview) rebuilds the plan on every edit, undo and redo and hands it to `TimelinePlayback::set_plan`; panels dock with `egui_dock` (themed, no floating windows), layouts and named workspaces in `workspaces.json` with Edit, Colour, Audio and Effects presets; `keymap.json` in the config folder (a bad file means the Glass preset, never overwritten); media inside the project folder saved relative and resolved on open; recovery scans recent projects' caches and holds the project's autosave until answered; playback on the audio clock, or silent on the system clock without a device. Reason: one owner on the UI thread keeps edits and plan swaps lock-free and testable headless; workspaces are user configuration.
 - 2026-10-11 — Stylised transitions (Decision 80): glitch, RGB split, pixelate, VHS, light leak, film burn, ink bleed, paper tear and liquid are procedural, no image assets: noise from integer hashing of a `seed` parameter in shared prelude helpers (`hash_u32`, `seed_key`, `hash_cell`, `value_noise`, `fbm`), so a seed renders the same pixels every time; effects peak half way (an envelope of sin(pi t)) where the cut or dissolve hides; mask-based ones threshold a field bounded to 0..1 with a sweep that starts and ends past it plus its decoration bands, anti-aliased by `field_edge` (the wipes' `edge` over the field's screen slope), and decorate without adding coverage, so B's coverage only grows; the light leak adds light with an exponential knee under the additive dissolve's cap (Decision 50); pixelate's blocks are whole pixels on a grid from the centre, read from a 4-level pyramid; liquid's flow field is a quarter-resolution pass. Reason: reproducible renders and exports, no asset downloads, every one within 3 ms at 4K.
 - 2026-10-11 — Audio crossfades and sample-accurate edges (Decision 81): every transition on an audio track crossfades on the clip side of the mix (outgoing clip into its tail handle fading out, incoming from its head handle fading in, a one-sided transition fading from or to nothing); the built-in kind `crossfade` has a `curve` parameter (`equal-power` default, `linear`, `s-curve`), other kinds play equal power, easing bends the progress; gains per sample at its centre; times round to the nearest mix sample, halves later, so a cut at sample N plays N − 1 from the outgoing clip and N from the incoming; read positions round the source start at the reader rate, so cuts at any speed are seamless; declick ramps (1 ms, hard edges only) are opt-in through `MixSettings::declick`; nested sequence clips play their sequence's clip mix (its audible tracks, other settings at their defaults), recursively. Reason: the clip side already owns readers, handles and gain, so the callback stays unchanged and allocation-free, no schema change is needed, and sample accuracy is kept unless declick is asked for.
+- 2026-10-11 — Scope cut for 1.0: macOS and Windows, no owner-supplied resources except the GitHub repository (Decision 82). Glass 1.0 is a simple, stable editor for macOS on Apple silicon and Windows 10 and 11 x64, reached through milestones R1 to R7 (Road to 1.0). Windows uses FFmpeg software decode and encode, wgpu on DX12 and `cpal` on WASAPI, with an unsigned MSI and zip built by CI (SmartScreen warning accepted); macOS ships an ad-hoc signed arm64 DMG. Dropped for 1.0 (`[-]`, each with its reason): Linux work, Windows and Linux hardware decode and encode, AV1, VP9, MP3, Opus and WebP encoding and the fixtures needing them, bundled fonts, developer-ID signing, notarisation and code signing, auto-updates, asset packs, music and SFX libraries, downloaded models, collaboration, plugins and scripting, and the pro tools of Phases 10, 11, 13 and 14; most other open lines are cut to a smaller version with a Done when checkable on this Mac. The gate is a local `scripts/full-check.sh`, with the CI Windows job as Windows' gate; Paper boards are no longer a gate; the strict 4K GPU budget is set from this Mac's measurements. The only needs-human line is creating the GitHub repository. Reason: the owner asked for a smaller product that finishes sooner without their decisions or resources, and for it to work on Windows.
 
 ## Progress Log
 
@@ -735,3 +775,4 @@ Append one line per completed task: date, phase, task, commit hash. Newest last.
 - 2026-10-11 — Phase 5 — schema v9 media pool embedding and track switches — 5aedf81 — `project` (Decision 77): `Project::media` is the `MediaPool` (bins, items, label names saved; search index and availability derived), 13 pool edits with undo labels (removal of media in use refused with `MediaInUse`); tracks persist mute, solo, visibility, lock and height through 5 edits with 10 labels, one lock guard after every edit (`TrackLocked`); `migrate_v8_to_v9`, autosave format 9, `v9-*.json` fixtures, reference.proj and canonical golden regenerated; `engine::timeline` plan skips hidden video tracks, dirty ranges per switch; `engine::mix` reads mute and solo from the project; `track_header` reads and edits project tracks; load refuses a clip naming media and a sequence, compounds store reduced rates; tests: project track_switches 12, media_pool_edits 12, schema 23, nested_contract 24 (2 unignored), engine track_switches 5, mix_offline 3, ui track_headers 6; finish check -p project -p engine -p plugins -p ui -p app -p smoke ok (clippy rerun after a test lint fix; smoke ok: 60 shown, 0 late, 0 dropped)
 - 2026-10-11 — Phase 12 — sample-accurate editing and crossfades — a1f01bb, a69236c, 621ae63 — Decision 81: transitions on audio tracks crossfade on the clip side of `engine::mix` (`mix::edges`, `audio::mixer::fade`): built-in kind `crossfade` with `curve` equal-power (default, also for any other kind), linear or S-curve (`project::audio_transition`, no schema change), easing applied, fades from and to nothing next to gaps; clip edges and spans on exact mix samples (nearest, halves later), cuts play every sample once; opt-in 1 ms declick at hard cuts only (`MixSettings::declick`); nested sequence clips play their sequence's mix (audible tracks, recursive, 16 levels); `crates/engine/tests/mix_crossfades.rs` (7 tests): equal power on uncorrelated noise within ±0.5 dB per 100 ms window and 1e-6 of the formula, linear dips 3 dB there, linear and S-curve exact (1e-6) on one recording cut in two, index-coded cuts at odd samples with no repeat or gap and an impulse on its cut sample (48 kHz, and a 44.1 kHz mix), fades to nothing, a 2x clip cut in two equal to the uncut one (1e-6) and to its reader (0 error) and the tone (8.5e-5), declick, nested and doubly nested equal to the flat mix (1e-6); `mix_realtime` with four 0.1 s crossfades and two fades: 0 underruns, 0 callback allocations, callback CPU mean 0.243 ms (4.6% of 5.33 ms), p99 0.28 ms (debug, M5 shared with other builds); found: `media::AudioReader` at 24 kHz from 48 kHz runs one output sample early
 - 2026-10-11 — Phase 9 — stylised transitions — ab30f1a — `assets/transitions/`: glitch, RGB split (8 directions), pixelate, VHS, light leak (4 directions), film burn, ink bleed, paper tear (8 directions), liquid, category `stylised`, all procedural from a seed (integer-hash value noise and fbm in the prelude, `field_edge` for anti-aliased thresholded fields; Decision 80); exactly A at 0 and B at 1 over 76 variants (linear and eased); same seed bit-equal on two devices, other seeds change over 5% of pixels; film burn, ink bleed, paper tear never uncover over 33 steps (half way 0.45 to 0.75 of A left); light leak finite and within the additive cap (noise, white, a 4.0 highlight, intensity up to 8); pixelate blocks flat on whole pixels; visual cases glitch to liquid (27 goldens, 1.4 MB); 4K GPU median over the transition (quiet, cross dissolve 1.27 ms): glitch 0.85, RGB split 1.48, pixelate 2.25, VHS 1.20, light leak 2.00, film burn 1.95, ink bleed 2.63, paper tear 2.17, liquid 1.47 ms (M5 standing in for the M1, debug build, machine shared with other builds); finish check: build, scoped tests 837 passed, smoke ok, clippy ok after a type-alias fix
+- 2026-10-11 — Plan — scope cut for 1.0 — 65b1c83 — Decision 82: Road to 1.0 with milestones R1 to R7 (open lines R1 8, R2 9, R3 14, R4 21, R5 4, R6 10, R7 12), macOS arm64 and Windows x64; done 128 → 132, open 140 → 77, needs-human 26 → 1 (the owner's GitHub repository), dropped 1 → 97; 12 new lines from docs/HANDOFF.md follow-ups and the scope cut; docs/HANDOFF.md sections 1, 2, 4 to 6 refreshed
