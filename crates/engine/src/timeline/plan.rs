@@ -169,9 +169,9 @@ struct Draft {
 }
 
 impl TimelinePlan {
-    /// Compiles the video tracks of `sequence`. Clips that are disabled, whose media the
-    /// project does not list, that nest a sequence, or that sit on other kinds of tracks
-    /// are left out; effects
+    /// Compiles the visible video tracks of `sequence`. Clips that are disabled, whose
+    /// media the project does not list, that nest a sequence, or that sit on hidden tracks
+    /// or other kinds of tracks are left out; effects
     /// without a renderer (unknown schemas) are skipped and counted.
     pub fn build(project: &Project, sequence: SequenceId) -> Result<Self, PlanError> {
         let seq = project
@@ -188,10 +188,11 @@ impl TimelinePlan {
         let mut nested_clips = 0;
         let mut skipped_effects = 0;
 
+        // Hidden tracks (schema v9) composite nothing.
         let video: Vec<_> = seq
             .tracks
             .iter()
-            .filter(|t| t.kind == TrackKind::Video)
+            .filter(|t| t.kind == TrackKind::Video && t.visible)
             .collect();
         for (rank, track) in video.iter().rev().enumerate() {
             let mut items = Vec::new();
