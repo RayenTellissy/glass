@@ -12,6 +12,7 @@
 
 mod common;
 
+use common::timing::Samples;
 use render::blend::BlendMode;
 use render::crop::Crop;
 use render::graph::{Graph, Node, TexturePool};
@@ -345,9 +346,9 @@ fn resample_cap() {
 }
 
 /// GPU time of one composite pass of five 4K noise layers (normal, multiply, screen,
-/// overlay, soft light) with `layers`' settings, over 60 frames after a warm-up: median
-/// and p99 in milliseconds, or `None` without a GPU or timestamp queries.
-fn time_five_4k_layers(layers: &[Layer], max_resample: Resample) -> Option<(f64, f64)> {
+/// overlay, soft light) with `layers`' settings, over 60 frames after a warm-up, or `None`
+/// without a GPU or timestamp queries.
+fn time_five_4k_layers(layers: &[Layer], max_resample: Resample) -> Option<Samples> {
     let (device, queue) = common::device()?;
     let mut profiler = GpuProfiler::new(&device, &queue, 4);
     if !profiler.enabled() {
@@ -384,10 +385,7 @@ fn time_five_4k_layers(layers: &[Layer], max_resample: Resample) -> Option<(f64,
             times.push(timings.total_ms.expect("total"));
         }
     }
-    times.sort_by(f64::total_cmp);
-    let median = times[times.len() / 2];
-    let p99 = times[(times.len() * 99).div_ceil(100) - 1];
-    Some((median, p99))
+    Some(Samples::new(times))
 }
 
 const MODES: [BlendMode; 5] = [
@@ -432,17 +430,18 @@ fn transformed_4k_layers(cropped: bool) -> Vec<Layer> {
 /// Five 4K layers untransformed, then transformed, then transformed and cropped with
 /// feather and opacity, each with bilinear (the playback cap) and bicubic, timed in one
 /// run so the machine's load is the same for all. The Phase 4 budget (8 ms for the whole
-/// frame) is held for untransformed and bilinear; bicubic is for paused frames and export
-/// and is only reported.
+/// frame) is held for untransformed and bilinear by the shared timing rules
+/// (`common::timing`); bicubic is for paused frames and export and is only reported.
 #[test]
 fn five_transformed_4k_layers_gpu_time() {
+    let _serial = common::timing::serial();
     let plain: Vec<Layer> = MODES.into_iter().map(Layer::blended).collect();
-    let Some((median, p99)) = time_five_4k_layers(&plain, Resample::Bicubic) else {
+    let Some(times) = time_five_4k_layers(&plain, Resample::Bicubic) else {
         eprintln!("skipped: no GPU adapter or timestamp queries");
         return;
     };
-    println!("5 layers at 4K, one pass, GPU median / p99: untransformed {median:.3} / {p99:.3} ms");
-    assert!(median < 8.0, "untransformed median {median} ms");
+    println!("5 layers at 4K, one pass, GPU, untransformed: {times}");
+    let mut held = vec![("untransformed".to_string(), times)];
     for cropped in [false, true] {
         let layers = transformed_4k_layers(cropped);
         let what = if cropped {
@@ -451,14 +450,17 @@ fn five_transformed_4k_layers_gpu_time() {
             "transformed"
         };
         for resample in [Resample::Bilinear, Resample::Bicubic] {
-            let (median, p99) = time_five_4k_layers(&layers, resample).expect("timed");
+            let times = time_five_4k_layers(&layers, resample).expect("timed");
             println!(
-                "5 layers at 4K, one pass, GPU median / p99: {what} {} {median:.3} / {p99:.3} ms",
+                "5 layers at 4K, one pass, GPU, {what} {}: {times}",
                 resample.id()
             );
             if resample == Resample::Bilinear {
-                assert!(median < 8.0, "{what} bilinear median {median} ms");
+                held.push((format!("{what} bilinear"), times));
             }
         }
+    }
+    for (what, times) in &held {
+        common::timing::assert_gpu_within(&format!("5 layers at 4K, {what}"), times, 8.0);
     }
 }

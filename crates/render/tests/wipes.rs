@@ -609,9 +609,11 @@ fn the_wipes_reveal_b_where_intended() {
 }
 
 /// GPU time of one 4K pass of each wipe over noise with a soft edge and a border, median
-/// of 30 frames from the pass timestamps; the slowest is checked against the budget.
+/// of 30 frames from the pass timestamps; each is held to the budget by the shared timing
+/// rules (`common::timing`).
 #[test]
 fn wipes_at_4k_gpu_time() {
+    let _serial = common::timing::serial();
     let Some(gpu) = gpu() else {
         eprintln!("skipped: no GPU adapter");
         return;
@@ -630,7 +632,7 @@ fn wipes_at_4k_gpu_time() {
     let target = common::blank(&gpu.device, wgpu::TextureFormat::Rgba16Float, (3840, 2160));
     let target_view = target.create_view(&Default::default());
     let mut pool = TexturePool::new();
-    let mut slowest = (0.0f64, "");
+    let mut measured = Vec::new();
     for id in IDS {
         let mut times = Vec::new();
         for frame in 0..32u32 {
@@ -651,15 +653,12 @@ fn wipes_at_4k_gpu_time() {
                 times.extend(timings.passes[0].gpu_ms);
             }
         }
-        times.sort_by(f64::total_cmp);
-        let median = times[times.len() / 2];
-        let max = times[times.len() - 1];
-        println!("4K {id}: median {median:.3} ms, max {max:.3} ms GPU");
-        if median > slowest.0 {
-            slowest = (median, id);
-        }
+        let times = common::timing::Samples::new(times);
+        println!("4K {id} GPU: {times}");
+        measured.push((id, times));
     }
-    println!("slowest: {} at {:.3} ms", slowest.1, slowest.0);
-    // A quarter of the 8 ms compositor budget, loose for a shared GPU.
-    assert!(slowest.0 < 2.0, "{} {} ms", slowest.1, slowest.0);
+    for (id, times) in &measured {
+        // A quarter of the 8 ms compositor budget.
+        common::timing::assert_gpu_within(&format!("4K {id}"), times, 2.0);
+    }
 }

@@ -3,6 +3,9 @@
 
 #![allow(dead_code)]
 
+#[path = "../../../render/tests/common/timing.rs"]
+pub mod timing;
+
 use std::path::PathBuf;
 
 use media::{DecoderOptions, FrameReader, HwPreference, StreamSelect, VideoFrame};

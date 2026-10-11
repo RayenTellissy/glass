@@ -445,12 +445,15 @@ fn percentile(values: &mut [f64], p: f64) -> f64 {
     values[((values.len() - 1) as f64 * p).round() as usize]
 }
 
+/// Record and submit are timed on the wall clock and the thread's CPU clock and held to
+/// the frame budget by the shared timing rules (`common::timing`).
 #[test]
 fn submit_never_waits_for_the_gpu() {
     let Some((device, queue)) = common::device() else {
         eprintln!("skipped: no GPU adapter");
         return;
     };
+    let _serial = common::timing::serial();
     let format = wgpu::TextureFormat::Rgba16Float;
     let texture = common::blank(&device, format, UHD);
     let mut ring = ReadbackRing::new(ReadbackConfig::EXPORT);
@@ -468,15 +471,17 @@ fn submit_never_waits_for_the_gpu() {
     }
 
     // Submits against a consumer that never keeps up: accepted or refused, never waiting.
-    let mut submits = Vec::new();
+    let mut submits = common::timing::Laps::default();
     let mut refused = 0;
     for i in 0..40 {
         let mut encoder = device.create_command_encoder(&Default::default());
         render_into(&mut encoder, &texture, i);
-        let start = Instant::now();
-        let result = ring.record(&device, &mut encoder, &texture, i);
-        queue.submit([encoder.finish()]);
-        submits.push(start.elapsed().as_secs_f64() * 1e3);
+        let (result, lap) = common::timing::time(|| {
+            let result = ring.record(&device, &mut encoder, &texture, i);
+            queue.submit([encoder.finish()]);
+            result
+        });
+        submits.push(lap);
         match result {
             Ok(_) => {}
             Err(SubmitError::Full) => refused += 1,
@@ -488,14 +493,15 @@ fn submit_never_waits_for_the_gpu() {
         }
     }
     let blocking_median = percentile(&mut blocking, 0.5);
-    let worst = percentile(&mut submits, 1.0);
-    let median = percentile(&mut submits, 0.5);
+    let median = submits.wall().median();
     println!(
-        "4K Rgba16Float: record + submit median {median:.3} ms, max {worst:.3} ms \
-         ({refused} of 40 refused); blocking readback median {blocking_median:.2} ms"
+        "4K Rgba16Float: record + submit ({refused} of 40 refused) wall {}, CPU {}; blocking \
+         readback median {blocking_median:.2} ms",
+        submits.wall(),
+        submits.cpu()
     );
     assert!(refused > 0);
-    assert!(worst < 8.0, "a submit took {worst:.2} ms");
+    submits.assert_within("record + submit", common::timing::Stat::Max, 8.0);
     assert!(
         median < blocking_median / 2.0,
         "submit median {median:.2} ms vs blocking {blocking_median:.2} ms"
@@ -508,6 +514,7 @@ fn readback_4k_throughput_and_latency() {
         eprintln!("skipped: no GPU adapter");
         return;
     };
+    let _serial = common::timing::serial();
     for format in [
         wgpu::TextureFormat::Rgba16Float,
         wgpu::TextureFormat::Rgba8Unorm,

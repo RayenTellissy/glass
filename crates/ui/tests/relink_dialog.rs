@@ -2,17 +2,19 @@
 //! search results turned into rows, its layout against the board, and every state
 //! within the frame budget.
 
+mod support;
+
 use std::path::PathBuf;
 
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2};
 use engine::media_mgmt::relink::{Candidate, Check, Confidence, RelinkTarget, TargetMatches};
 use project::MediaId;
 use project::media_pool::Facts;
+use support::FrameBudget;
 use ui::dialogs::relink::{
     CandidateRow, ClipState, ClipView, Control, RelinkAction, RelinkDialog, RelinkView, Relinking,
     WIDTH, place_name,
 };
-use ui::frame_time::FrameTimeMonitor;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::theme::{self, ThemeKind};
 
@@ -351,44 +353,41 @@ fn every_state_within_the_frame_budget() {
     for kind in ThemeKind::ALL {
         theme::set(headless.context(), kind);
         let mut dialog = RelinkDialog::new();
-        let mut monitor = FrameTimeMonitor::default();
-        headless
-            .run(80, 240, &mut monitor, |ui, frame| {
-                let mut v = RelinkView {
-                    clips: clips.clone(),
-                    ..view()
-                };
-                // Every state shows during the warm-up, so its glyphs are in the atlas.
-                match (frame / 20) % 4 {
-                    0 => {}
-                    1 => {
-                        v.clips[0].state = ClipState::Searching {
-                            place: "Studio SSD".into(),
-                            files_done: frame * 10,
-                            files_total: 3960,
-                            folder: "/Volumes/Studio SSD/Harbour/Card B".into(),
-                        }
-                    }
-                    2 => {
-                        v.clips[1].state = ClipState::NoMatch {
-                            place: "Studio SSD".into(),
-                        }
-                    }
-                    _ => {
-                        v.relinking = Some(Relinking {
-                            done: frame % 12,
-                            total: 12,
-                            name: "A014_C011".into(),
-                        })
+        let stats = FrameBudget::run(&mut headless, 80, 240, |ui, frame| {
+            let mut v = RelinkView {
+                clips: clips.clone(),
+                ..view()
+            };
+            // Every state shows during the warm-up, so its glyphs are in the atlas.
+            match (frame / 20) % 4 {
+                0 => {}
+                1 => {
+                    v.clips[0].state = ClipState::Searching {
+                        place: "Studio SSD".into(),
+                        files_done: frame * 10,
+                        files_total: 3960,
+                        folder: "/Volumes/Studio SSD/Harbour/Card B".into(),
                     }
                 }
-                egui::CentralPanel::default().show(ui, |_| {});
-                dialog.show(ui.ctx(), &mut v);
-            })
-            .expect("headless frames");
+                2 => {
+                    v.clips[1].state = ClipState::NoMatch {
+                        place: "Studio SSD".into(),
+                    }
+                }
+                _ => {
+                    v.relinking = Some(Relinking {
+                        done: frame % 12,
+                        total: 12,
+                        name: "A014_C011".into(),
+                    })
+                }
+            }
+            egui::CentralPanel::default().show(ui, |_| {});
+            dialog.show(ui.ctx(), &mut v);
+        })
+        .expect("headless frames");
         assert!(dialog.control_rect(Control::Close).is_some(), "{kind:?}");
-        let stats = monitor.stats();
         eprintln!("relink dialog {kind:?} ({}): {stats}", headless.adapter());
-        headless.assert_p99_within_budget("relink dialog", &stats);
+        stats.assert_within_budget(&headless, "relink dialog");
     }
 }
