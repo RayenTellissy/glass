@@ -28,6 +28,10 @@ use super::{ExportError, Result};
 /// working; until then they are kept to replay into a fallback encoder.
 const TRIAL_FRAMES: usize = 8;
 
+/// Packets of a hardware encoder held before the first is written, to measure how far
+/// its decode times run ahead of the presentation times (see [`DecodeTimes`]).
+const REORDER_WINDOW: usize = 16;
+
 /// What a finished export wrote.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExportSummary {
@@ -114,6 +118,90 @@ struct VideoOut {
     hdr_metadata: Option<HdrMetadata>,
     /// Set while a hardware encoder has not produced a packet yet.
     trial: Option<Trial>,
+    /// Decode times of a hardware encoder's packets, made valid for the muxer.
+    decode_times: DecodeTimes,
+}
+
+/// Makes a hardware encoder's decode times valid for the muxer.
+///
+/// With B-frames, VideoToolbox through FFmpeg shifts its decode times back by one frame
+/// for H.264 (two for HEVC) whatever the frame reordering really is, while its B-pyramid
+/// reorders deeper (H.264 with two B-frames decodes pts 0, 4, 2, 1, 3 as dts -1, 0, 1,
+/// 2, 3), so a packet's dts passes its pts and the muxer refuses it. The first packets
+/// are held, every decode time is moved back by the largest excess of dts over pts among
+/// them (keeping the encoder's decode order and spacing), and packets without a duration
+/// get one frame.
+#[derive(Default)]
+struct DecodeTimes {
+    held: Vec<Packet>,
+    /// Ticks every dts moves back by, once the held packets are measured.
+    shift: Option<i64>,
+    last: Option<i64>,
+}
+
+impl DecodeTimes {
+    /// Takes the next packet in decode order and moves the packets ready to write to
+    /// `out`. `frame` is one frame in the packets' time base, when it is a whole number
+    /// of ticks.
+    fn push(
+        &mut self,
+        packet: Packet,
+        frame: Option<i64>,
+        out: &mut Vec<Packet>,
+    ) -> Result<(), MediaError> {
+        if self.shift.is_some() {
+            out.push(self.fix(packet, frame)?);
+            return Ok(());
+        }
+        self.held.push(packet);
+        if self.held.len() >= REORDER_WINDOW {
+            self.release(frame, out)?;
+        }
+        Ok(())
+    }
+
+    /// The end of the stream: the packets still held are ready.
+    fn finish(&mut self, frame: Option<i64>, out: &mut Vec<Packet>) -> Result<(), MediaError> {
+        if self.shift.is_none() {
+            self.release(frame, out)?;
+        }
+        Ok(())
+    }
+
+    fn release(&mut self, frame: Option<i64>, out: &mut Vec<Packet>) -> Result<(), MediaError> {
+        let excess = self.held.iter().filter_map(|p| {
+            let raw = p.raw();
+            Some(raw.dts()? - raw.pts()?)
+        });
+        self.shift = Some(excess.max().unwrap_or(0).max(0));
+        for packet in std::mem::take(&mut self.held) {
+            out.push(self.fix(packet, frame)?);
+        }
+        Ok(())
+    }
+
+    fn fix(&mut self, mut packet: Packet, frame: Option<i64>) -> Result<Packet, MediaError> {
+        let shift = self.shift.unwrap_or(0);
+        let raw = packet.raw_mut();
+        if let (Some(pts), Some(dts)) = (raw.pts(), raw.dts()) {
+            let dts = (dts - shift).min(pts);
+            if self.last.is_some_and(|last| dts <= last) {
+                return Err(MediaError::Encode {
+                    encoder: "hardware video encoder".into(),
+                    action: "reordering frames deeper than its first packets",
+                    source: ffmpeg::Error::InvalidData.into(),
+                });
+            }
+            raw.set_dts(Some(dts));
+            self.last = Some(dts);
+        }
+        if let Some(frame) = frame
+            && raw.duration() <= 0
+        {
+            raw.set_duration(frame);
+        }
+        Ok(packet)
+    }
 }
 
 /// What replacing a hardware encoder on trial takes.
@@ -300,7 +388,7 @@ impl ExportSession {
             VideoKind::Encoder { .. } => video.send(frame, &mut self.fallbacks)?,
         };
         video.next_pts += 1;
-        self.write_video(packets)
+        self.write_video(packets, false)
     }
 
     /// Encodes the next frame from a decoded CPU frame (its own timing is ignored).
@@ -361,7 +449,7 @@ impl ExportSession {
                 VideoKind::Encoder { .. } => video.drain_at_end(&mut self.fallbacks)?,
                 VideoKind::Gif(_) => Vec::new(),
             };
-            self.write_video(packets)?;
+            self.write_video(packets, true)?;
         }
         self.commit()?;
         let video_encoder = self.video_encoder().map(str::to_string);
@@ -487,8 +575,9 @@ impl ExportSession {
         Ok(())
     }
 
-    /// Writes video packets, adding the streams first once no encoder is on trial.
-    fn write_video(&mut self, packets: Vec<Packet>) -> Result<()> {
+    /// Writes video packets, adding the streams first once no encoder is on trial; `end`
+    /// after the encoder's last packets.
+    fn write_video(&mut self, packets: Vec<Packet>, end: bool) -> Result<()> {
         let Some(video) = &self.video else {
             return Ok(());
         };
@@ -500,15 +589,21 @@ impl ExportSession {
             return Ok(());
         };
         self.commit()?;
-        let Some(VideoOut {
-            kind: VideoKind::Encoder { stream, .. },
-            ..
-        }) = &self.video
+        let Some(
+            video @ VideoOut {
+                kind: VideoKind::Encoder { .. },
+                ..
+            },
+        ) = &mut self.video
         else {
             return Ok(());
         };
+        let packets = video.ready_to_write(packets, end)?;
+        let VideoKind::Encoder { stream, .. } = video.kind else {
+            return Ok(());
+        };
         for packet in packets {
-            write_packet(&mut self.sink, *stream, packet)?;
+            write_packet(&mut self.sink, stream, packet)?;
         }
         Ok(())
     }
@@ -537,6 +632,7 @@ fn open_video(
                 hvc1,
                 hdr_metadata: v.hdr_metadata,
                 trial: None,
+                decode_times: DecodeTimes::default(),
             });
         }
         VideoPlan::Encoders(choices) => choices,
@@ -562,6 +658,7 @@ fn open_video(
                     hvc1,
                     hdr_metadata: v.hdr_metadata,
                     trial,
+                    decode_times: DecodeTimes::default(),
                 });
             }
             Err(error) if !choices.is_empty() && is_hardware_encoder(&choice.name) => {
@@ -634,6 +731,26 @@ fn open_audio(a: &AudioSettings, global_header: bool) -> Result<AudioOut> {
 }
 
 impl VideoOut {
+    /// The encoder's packets ready for the muxer: a hardware encoder's go through
+    /// [`DecodeTimes`] (held until enough are seen, or `end`), others as they are.
+    fn ready_to_write(&mut self, packets: Vec<Packet>, end: bool) -> Result<Vec<Packet>> {
+        let VideoKind::Encoder { encoder, .. } = &self.kind else {
+            return Ok(packets);
+        };
+        if !is_hardware_encoder(encoder.name()) {
+            return Ok(packets);
+        }
+        let frame = (encoder.time_base() == self.time_base).then_some(1);
+        let mut ready = Vec::with_capacity(packets.len());
+        for packet in packets {
+            self.decode_times.push(packet, frame, &mut ready)?;
+        }
+        if end {
+            self.decode_times.finish(frame, &mut ready)?;
+        }
+        Ok(ready)
+    }
+
     fn encoder(&mut self) -> &mut Encoder {
         match &mut self.kind {
             VideoKind::Encoder { encoder, .. } => encoder,
@@ -995,7 +1112,7 @@ mod tests {
         video
             .fall_back(error, None, false, &mut packets, &mut session.fallbacks)
             .expect("fallback opens");
-        session.write_video(packets).expect("write");
+        session.write_video(packets, false).expect("write");
         assert_eq!(session.video_encoder(), Some("libx265"));
         assert_eq!(
             session.pixel_format().map(|f| f.name()),
@@ -1022,5 +1139,81 @@ mod tests {
         }
         assert_eq!(decoded, 5);
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod decode_time_tests {
+    use super::*;
+
+    fn packets(timing: &[(i64, i64)]) -> Vec<Packet> {
+        timing
+            .iter()
+            .map(|&(pts, dts)| {
+                let mut raw = ffmpeg::Packet::empty();
+                raw.set_pts(Some(pts));
+                raw.set_dts(Some(dts));
+                Packet::from_encoder(raw, Rational::new(1, 30))
+            })
+            .collect()
+    }
+
+    fn run(timing: &[(i64, i64)]) -> Vec<(i64, i64, i64)> {
+        let mut times = DecodeTimes::default();
+        let mut out = Vec::new();
+        for packet in packets(timing) {
+            times.push(packet, Some(1), &mut out).expect("push");
+        }
+        times.finish(Some(1), &mut out).expect("finish");
+        out.iter()
+            .map(|p| {
+                let raw = p.raw();
+                (raw.pts().unwrap(), raw.dts().unwrap(), raw.duration())
+            })
+            .collect()
+    }
+
+    /// VideoToolbox H.264 with two B-frames, as logged: its B-pyramid decodes pts 1
+    /// after pts 2 and 4, but FFmpeg shifts dts back by one frame only, so pts 1 has
+    /// dts 2. Every dts moves back one more frame and the order is kept.
+    #[test]
+    fn decode_times_behind_a_deeper_reordering_move_back() {
+        let mut timing = vec![(0, -1), (4, 0), (2, 1), (1, 2), (3, 3)];
+        timing.extend((5..30).map(|n| (n, n - 1)));
+        let out = run(&timing);
+        assert_eq!(out.len(), timing.len());
+        for (i, (&(pts, dts), &(out_pts, out_dts, duration))) in timing.iter().zip(&out).enumerate()
+        {
+            assert_eq!(out_pts, pts, "packet {i}");
+            assert_eq!(out_dts, dts - 1, "packet {i}");
+            assert!(out_dts <= out_pts, "packet {i}");
+            assert_eq!(duration, 1, "packet {i}");
+        }
+    }
+
+    /// Decode times already valid (no reordering, or shifted far enough) are kept.
+    #[test]
+    fn valid_decode_times_are_kept() {
+        let timing: Vec<(i64, i64)> = [(0, -2), (3, -1), (1, 0), (2, 1)]
+            .into_iter()
+            .chain((4..20).map(|n| (n, n - 2)))
+            .collect();
+        let out = run(&timing);
+        let dts: Vec<i64> = out.iter().map(|t| t.1).collect();
+        let expected: Vec<i64> = timing.iter().map(|t| t.1).collect();
+        assert_eq!(dts, expected);
+    }
+
+    /// Packets are held until the window is full, then written as they come.
+    #[test]
+    fn the_first_packets_wait_for_the_window() {
+        let mut times = DecodeTimes::default();
+        let mut out = Vec::new();
+        let timing: Vec<(i64, i64)> = (0..REORDER_WINDOW as i64 + 2).map(|n| (n, n)).collect();
+        for (i, packet) in packets(&timing).into_iter().enumerate() {
+            times.push(packet, None, &mut out).expect("push");
+            let ready = if i + 1 < REORDER_WINDOW { 0 } else { i + 1 };
+            assert_eq!(out.len(), ready, "after packet {i}");
+        }
     }
 }
