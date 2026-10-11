@@ -138,18 +138,22 @@ NOISE="anoisesrc=color=pink:amplitude=0.1:sample_rate=48000"
 STEREO_AUDIO=(-f lavfi -i "$TONE" -f lavfi -i "$NOISE"
     -filter_complex "[1:a][2:a]amerge=inputs=2[a]")
 
+# Every libx264 encode pins threads=16: x264 picks its thread count from the core count
+# and the bitstream depends on it, so without the pin each machine writes different
+# bytes (the open-GOP clip below only exposes stale hardware references with some).
+
 echo "Generating reference media in $OUT"
 
 make h264_1080p30.mp4 \
     -f lavfi -i "testsrc2=size=1920x1080:rate=30:duration=3" "${STEREO_AUDIO[@]}" \
     -map 0:v -map "[a]" -t 3 \
-    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 30 \
+    -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p -g 30 \
     -c:a aac -b:a 128k -ar 48000 -movflags +faststart
 add_entry h264_1080p30.mp4 video h264 1920 1080 30/1 3 yuv420p false null aac 48000 2
 
 make h264_4k30.mp4 \
     -f lavfi -i "testsrc2=size=3840x2160:rate=30:duration=2" \
-    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 30 -movflags +faststart
+    -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p -g 30 -movflags +faststart
 add_entry h264_4k30.mp4 video h264 3840 2160 30/1 2 yuv420p false null null null null
 
 # 60 fps with B-frames (b-pyramid), a 2 s open GOP and no scene cuts, so seeking has to
@@ -157,13 +161,13 @@ add_entry h264_4k30.mp4 video h264 3840 2160 30/1 2 yuv420p false null null null
 make h264_bframes_gop120_720p60.mp4 \
     -f lavfi -i "testsrc2=size=1280x720:rate=60:duration=3" \
     -c:v libx264 -preset veryfast -pix_fmt yuv420p \
-    -x264-params "keyint=120:min-keyint=120:scenecut=0:bframes=3:b-pyramid=normal:open-gop=1" \
+    -x264-params "threads=16:keyint=120:min-keyint=120:scenecut=0:bframes=3:b-pyramid=normal:open-gop=1" \
     -movflags +faststart
 add_entry h264_bframes_gop120_720p60.mp4 video h264 1280 720 60/1 3 yuv420p false null null null null
 
 make h264_10bit_720p30.mp4 \
     -f lavfi -i "testsrc2=size=1280x720:rate=30:duration=2" \
-    -c:v libx264 -preset veryfast -pix_fmt yuv420p10le -g 30 -movflags +faststart
+    -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p10le -g 30 -movflags +faststart
 add_entry h264_10bit_720p30.mp4 video h264 1280 720 30/1 2 yuv420p10le false null null null null
 
 make hevc_10bit_1080p25.mp4 \
@@ -205,7 +209,7 @@ fi
 make vfr_h264_720p.mp4 \
     -f lavfi -i "testsrc2=size=1280x720:rate=30:duration=3" \
     -vf "select='not(between(mod(n\,10)\,3\,5))'" -fps_mode vfr \
-    -c:v libx264 -preset veryfast -pix_fmt yuv420p -video_track_timescale 30000 \
+    -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p -video_track_timescale 30000 \
     -movflags +faststart
 add_entry vfr_h264_720p.mp4 video h264 1280 720 30/1 3 yuv420p true null null null null
 
@@ -241,7 +245,7 @@ make h264_fullrange_640x360.mp4 \
     -f lavfi -i "color=black:size=640x360:rate=25:duration=1,format=yuv420p,geq=$BARS8,setparams=range=pc:color_primaries=bt709:color_trc=bt709:colorspace=bt709" \
     -c:v libx264 -preset veryfast -qp 2 -pix_fmt yuv420p -g 25 \
     -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range pc \
-    -x264-params "colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=on" \
+    -x264-params "threads=16:colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=on" \
     -movflags +faststart
 add_entry h264_fullrange_640x360.mp4 video h264 640 360 25/1 1 yuvj420p false null null null null 0 null bt709,bt709,bt709,pc
 
@@ -250,7 +254,7 @@ add_entry h264_fullrange_640x360.mp4 video h264 640 360 25/1 1 yuvj420p false nu
 make vfr_h264_nob_640x360.mp4 \
     -f lavfi -i "testsrc2=size=640x360:rate=30:duration=2" \
     -vf "select='not(between(mod(n\,10)\,3\,5))'" -fps_mode vfr \
-    -c:v libx264 -preset veryfast -bf 0 -pix_fmt yuv420p -video_track_timescale 30000 \
+    -c:v libx264 -x264-params threads=16 -preset veryfast -bf 0 -pix_fmt yuv420p -video_track_timescale 30000 \
     -movflags +faststart
 add_entry vfr_h264_nob_640x360.mp4 video h264 640 360 30/1 2 yuv420p true null null null null
 
@@ -273,7 +277,7 @@ else
     ROT_TMP="$OUT/.partial-unrotated-$ROT_FILE"
     "$FFMPEG" -hide_banner -loglevel error -nostdin -y \
         -f lavfi -i "testsrc2=size=640x360:rate=25:duration=1" \
-        -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 25 -f mov "$ROT_TMP"
+        -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p -g 25 -f mov "$ROT_TMP"
     "$FFMPEG" -hide_banner -loglevel error -nostdin -y \
         -display_rotation 90 -i "$ROT_TMP" -c copy -timecode 01:02:03:04 \
         -movflags +faststart -f mov "$OUT/.partial-$ROT_FILE"
@@ -351,7 +355,7 @@ add_entry still_marked_640x360.bmp still bmp 640 360 null null bgr24 false 1 nul
 rotated_marked() {
     local out=$1 plain="$1.plain.mov"
     ffmpeg_to "$plain" -f lavfi -i "$MARKED,format=yuv420p" -r 25 -t 1 -c:v libx264 \
-        -preset veryfast -g 25 -f mov
+        -x264-params threads=16 -preset veryfast -g 25 -f mov
     ffmpeg_to "$out" -display_rotation 90 -i "$plain" -c copy -f mov
     rm -f "$plain"
 }
@@ -471,13 +475,13 @@ SYNC_EXTRA='"sync_marker_s": 1.0'
 
 make sync_h264_aac_48k.mp4 \
     -f lavfi -i "$SYNC_VIDEO" -f lavfi -i "$(sync_audio 48000)" \
-    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 30 \
+    -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p -g 30 \
     -c:a aac -b:a 192k -movflags +faststart
 add_entry sync_h264_aac_48k.mp4 video h264 320 240 30/1 3 yuv420p false null aac 48000 2 0 null null "$SYNC_EXTRA"
 
 make sync_h264_aac_44k1.mp4 \
     -f lavfi -i "$SYNC_VIDEO" -f lavfi -i "$(sync_audio 44100)" \
-    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 30 \
+    -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p -g 30 \
     -c:a aac -b:a 192k -movflags +faststart
 add_entry sync_h264_aac_44k1.mp4 video h264 320 240 30/1 3 yuv420p false null aac 44100 2 0 null null "$SYNC_EXTRA"
 
@@ -493,7 +497,7 @@ fi
 
 make sync_h264_pcm.mov \
     -f lavfi -i "$SYNC_VIDEO" -f lavfi -i "$(sync_audio 48000)" \
-    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 30 \
+    -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p -g 30 \
     -c:a pcm_s16le
 add_entry sync_h264_pcm.mov video h264 320 240 30/1 3 yuv420p false null pcm_s16le 48000 2 0 null null "$SYNC_EXTRA"
 
@@ -534,7 +538,7 @@ make scenes_cuts_640x360_30.mp4 \
     -f lavfi -i "testsrc=size=640x360:rate=30:duration=2,fade=t=in:start_frame=0:nb_frames=15,$SHOT" \
     -f lavfi -i "smptehdbars=size=1280x720:rate=30:duration=2,crop=640:360:x='n*4':y=180,$SHOT" \
     -filter_complex "[0:v][1:v][2:v][3:v][4:v][5:v]concat=n=6:v=1:a=0[v]" -map "[v]" \
-    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 30 -movflags +faststart
+    -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p -g 30 -movflags +faststart
 add_entry scenes_cuts_640x360_30.mp4 video h264 640 360 30/1 12 yuv420p false 360 null null null 0 null null \
     '"hard_cuts": [60, 120, 180, 300], "fade_through_black": 240, "flash_frames": [90, 91]'
 
@@ -637,7 +641,7 @@ TAG_CHECKS=()
 TAGGED_MOV="tagged_phone_h264_320x180_25.mov"
 make "$TAGGED_MOV" \
     -f lavfi -i "testsrc2=size=320x180:rate=25:duration=1" \
-    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 25 -timecode 19:48:07:11 \
+    -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p -g 25 -timecode 19:48:07:11 \
     -metadata com.apple.quicktime.make=Apple \
     -metadata com.apple.quicktime.model="iPhone 15 Pro" \
     -metadata com.apple.quicktime.camera.lens_model="iPhone 15 Pro back camera 6.765mm f/1.78" \
@@ -653,7 +657,7 @@ TAG_CHECKS+=("$TAGGED_MOV|com.apple.quicktime.model|iPhone 15 Pro"
 TAGGED_MP4="tagged_location_h264_320x180_25.mp4"
 make "$TAGGED_MP4" \
     -f lavfi -i "testsrc2=size=320x180:rate=25:duration=1" \
-    -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 25 \
+    -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p -g 25 \
     -metadata location="+35.6586+139.7454/" -metadata date=2026-08-12 \
     -metadata creation_time="2026-08-12T10:00:00.000000Z" -movflags +faststart
 add_entry "$TAGGED_MP4" video h264 320 180 25/1 1 yuv420p false 25 null null null 0 null null \

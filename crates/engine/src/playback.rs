@@ -614,7 +614,7 @@ impl PlayState {
 
 /// The governor's counters, published by render after every change.
 #[derive(Default)]
-struct SharedQuality {
+pub(crate) struct SharedQuality {
     level: AtomicU8,
     frames: AtomicU64,
     misses: AtomicU64,
@@ -625,7 +625,7 @@ struct SharedQuality {
 }
 
 impl SharedQuality {
-    fn publish(&self, stats: &QualityStats) {
+    pub(crate) fn publish(&self, stats: &QualityStats) {
         let store = |c: &AtomicU64, v: u64| c.store(v, Ordering::Relaxed);
         store(&self.frames, stats.frames);
         store(&self.misses, stats.misses);
@@ -636,7 +636,7 @@ impl SharedQuality {
         self.level.store(stats.level as u8, Ordering::Relaxed);
     }
 
-    fn snapshot(&self) -> QualityStats {
+    pub(crate) fn snapshot(&self) -> QualityStats {
         let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
         QualityStats {
             level: QualityLevel::from_index(self.level.load(Ordering::Relaxed)),

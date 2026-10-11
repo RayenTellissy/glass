@@ -104,6 +104,7 @@ fn segment(
         source: SourceRef::new(SourceId(source), PathBuf::from(format!("{source}.mov"))),
         timeline: timeline.clone(),
         source_start: Timestamp::new(source_frame, rate()),
+        speed: Rational::new(1, 1),
         layer,
         hash: SegmentHash::from(timeline.start as u64),
     }
