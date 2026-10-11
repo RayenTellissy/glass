@@ -443,6 +443,7 @@ Done when: every benchmark and budget is enforced in CI and the stress project p
 - [ ] Battery mode: lower preview resolution, pause background analysis (parallel)
 - [ ] Fuzzing of parsers: project files, LUTs, subtitles, with `cargo-fuzz`, run in CI only (parallel)
 - [x] UI snapshot tests for every panel in light and dark (parallel)
+- [~] Timing tests robust under load: frame, GPU and latency budgets that pass on a busy machine and still catch regressions (parallel)
 - [ ] Accessibility: keyboard for everything, screen reader labels, high contrast, scalable UI (parallel)
 - [ ] Full UI localisation and dictionary check in CI (parallel)
 
