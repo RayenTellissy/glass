@@ -91,11 +91,9 @@ pollster = "0.4"
 # The system file picker for importing (`ui::panels::file_dialog`), used asynchronously.
 rfd = "0.17"
 # Frame queues between decode, render and present (`engine::frame_queue`): `rtrb` for
-# single-producer rings, crossbeam's bounded array queue for the decode pool, and
-# crossbeam's parker so a waiting side sleeps instead of spinning.
+# single-producer rings and crossbeam's bounded array queue for the decode pool.
 rtrb = "0.4"
 crossbeam-queue = "0.3"
-crossbeam-utils = "0.8"
 # OS thread ids for the thread registry (`engine::threads`): `pthread_threadid_np` on macOS,
 # `GetCurrentThreadId` on Windows; allocation-free, so the audio callback can call it.
 thread-id = "5"

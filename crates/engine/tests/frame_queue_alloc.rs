@@ -1,7 +1,7 @@
 //! Push, pop, waiting, waking and flushing allocate nothing once a frame queue is warm.
 //! A counting global allocator, so this test lives alone in its binary.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use engine::frame_queue::{FrameStamp, Generation, PopError, PushError, Stamped, mpsc, spsc};
@@ -12,6 +12,7 @@ use media::{Rational, Timestamp};
 #[allow(unsafe_code)]
 mod ffi {
     use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     pub struct Counting;
@@ -19,12 +20,27 @@ mod ffi {
     pub static COUNTING: AtomicBool = AtomicBool::new(false);
     pub static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
 
+    thread_local! {
+        /// Set on the threads that run queue operations; the test harness's own threads
+        /// (which may allocate while a measured section runs) are not counted.
+        static MEASURED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Counts this thread's allocations while counting is on.
+    pub fn measure_this_thread() {
+        MEASURED.with(|measured| measured.set(true));
+    }
+
+    fn count() {
+        if COUNTING.load(Ordering::Relaxed) && MEASURED.try_with(Cell::get).unwrap_or(false) {
+            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     // SAFETY: forwards to the system allocator unchanged; only counts calls.
     unsafe impl GlobalAlloc for Counting {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            if COUNTING.load(Ordering::Relaxed) {
-                ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-            }
+            count();
             // SAFETY: same contract as the caller's.
             unsafe { System.alloc(layout) }
         }
@@ -35,9 +51,7 @@ mod ffi {
         }
 
         unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-            if COUNTING.load(Ordering::Relaxed) {
-                ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-            }
+            count();
             // SAFETY: same contract as the caller's.
             unsafe { System.realloc(ptr, layout, new_size) }
         }
@@ -47,11 +61,20 @@ mod ffi {
     static GLOBAL: Counting = Counting;
 }
 
-use ffi::{ALLOCATIONS, COUNTING};
+use ffi::{ALLOCATIONS, COUNTING, measure_this_thread};
 
 const RATE: Rational = Rational::new(1, 24);
 const WARM_UP: i64 = 1_000;
 const COUNTED: i64 = 20_000;
+
+/// Set once counting stops; the cross-thread producers wait for it before exiting.
+static COUNTED_DONE: AtomicBool = AtomicBool::new(false);
+
+fn wait_for_counting_to_stop() {
+    while !COUNTED_DONE.load(Ordering::Acquire) {
+        thread::yield_now();
+    }
+}
 
 fn frame(generation: u64, index: i64) -> Stamped<[u64; 4]> {
     Stamped::new(
@@ -64,12 +87,14 @@ fn frame(generation: u64, index: i64) -> Stamped<[u64; 4]> {
     )
 }
 
-/// One test so nothing else runs while counting. Both shapes run a producer thread that
+/// One test so nothing else runs while counting. Each shape has a producer thread that
 /// blocks on a small queue (so both sides park and wake many times), with a seek halfway
 /// through the counted part; the main thread pops. Counting starts after the warm-up
-/// frames and covers both threads.
+/// frames and covers the test thread and the producers (not the harness's threads); the
+/// producers stay alive until counting stops, so their exits are not counted.
 #[test]
 fn queue_operations_do_not_allocate_after_warm_up() {
+    measure_this_thread();
     let generation = Generation::new();
 
     // Single thread first: try_push, try_pop, the present policy, advance.
@@ -111,16 +136,28 @@ fn queue_operations_do_not_allocate_after_warm_up() {
     let (mtx, mut mrx) = mpsc::<[u64; 4]>(2, &generation);
     let mut mtx2 = mtx.clone();
     let start = generation.current();
-    let producer = thread::spawn(move || {
+    // One producer thread per queue, as each decoder has its own: with a single producer
+    // feeding both, frames made stale by the seek could fill the spsc queue while the
+    // consumer waits on the mpsc one, and neither side would move.
+    let mpsc_generation = generation.clone();
+    let mpsc_producer = thread::spawn(move || {
+        measure_this_thread();
         let mut mtx = mtx;
         for i in 0..WARM_UP + COUNTED {
-            let current = generation.current();
-            match tx.push(frame(current, i)) {
+            let current = mpsc_generation.current();
+            let target = if i % 2 == 0 { &mut mtx } else { &mut mtx2 };
+            match target.push(frame(current, i)) {
                 Ok(()) | Err(PushError::Stale(_)) => {}
                 Err(other) => panic!("unexpected {other:?}"),
             }
-            let target = if i % 2 == 0 { &mut mtx } else { &mut mtx2 };
-            match target.push(frame(current, i)) {
+        }
+        wait_for_counting_to_stop();
+    });
+    let spsc_producer = thread::spawn(move || {
+        measure_this_thread();
+        for i in 0..WARM_UP + COUNTED {
+            let current = generation.current();
+            match tx.push(frame(current, i)) {
                 Ok(()) | Err(PushError::Stale(_)) => {}
                 Err(other) => panic!("unexpected {other:?}"),
             }
@@ -128,9 +165,9 @@ fn queue_operations_do_not_allocate_after_warm_up() {
                 generation.advance();
             }
         }
+        wait_for_counting_to_stop();
         generation
     });
-    // Counting stops at the last frame, before the producer thread exits.
     let last = WARM_UP + COUNTED - 1;
     let mut popped = 0i64;
     let mut done = [false; 2];
@@ -150,10 +187,12 @@ fn queue_operations_do_not_allocate_after_warm_up() {
         }
     }
     COUNTING.store(false, Ordering::Relaxed);
+    COUNTED_DONE.store(true, Ordering::Release);
     let allocations = ALLOCATIONS.load(Ordering::Relaxed);
     assert_eq!(rx.pop().unwrap_err(), PopError::Disconnected);
     assert_eq!(mrx.pop().unwrap_err(), PopError::Disconnected);
-    let generation = producer.join().unwrap();
+    mpsc_producer.join().unwrap();
+    let generation = spsc_producer.join().unwrap();
     assert!(popped > WARM_UP + COUNTED / 2, "popped only {popped}");
     assert_eq!(generation.current(), start + 1);
     assert_eq!(allocations, 0, "cross-thread operations allocated");
