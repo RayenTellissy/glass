@@ -206,7 +206,7 @@ Done when: a sequence with 5 video layers, blend modes, transforms, text, shapes
 - [x] Effect parameter system: typed params, ranges, defaults, units, keyframeable flag, UI auto-generated from the schema
 - [x] Text rendering via `cosmic-text`: glyph atlas, outlines, shadows, per-glyph transform hooks
 - [x] Vector shapes: rect, ellipse, polygon, path, stroke, fill, gradients
-- [ ] Vector shapes within the 4K budget: 50 mixed shapes into a 4K layer (`fifty_shapes_4k_gpu_time`, ignored until then) at a median under 8 ms GPU; 9.3 ms on the M2 now, with 29.9 M blended accumulate fragments (each edge's quad runs to its outline box's right edge) and 12.8 M paint fragments
+- [~] Vector shapes within the 4K budget: 50 mixed shapes into a 4K layer (`fifty_shapes_4k_gpu_time`, ignored until then) at a median under 8 ms GPU; 9.3 ms on the M2 now, with 29.9 M blended accumulate fragments (each edge's quad runs to its outline box's right edge) and 12.8 M paint fragments
 - [ ] Mask node: shape masks, feather, invert, intersection and union
 - [x] Async GPU readback ring for export and scopes
 - [x] Visual regression tests: render reference sequences, compare against golden PNGs with a tolerance
