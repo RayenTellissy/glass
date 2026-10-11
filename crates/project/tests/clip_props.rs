@@ -119,7 +119,7 @@ fn new_clips_have_every_property_at_its_default() {
     assert_eq!(clip.opacity, 1.0);
     assert_eq!(clip.blend, BlendMode::Normal);
     assert!(clip.effects.is_empty());
-    assert_eq!(*clip, Clip::new(clip.media, Time::seconds(2)));
+    assert_eq!(*clip, Clip::new(clip.source, Time::seconds(2)));
 }
 
 #[test]
