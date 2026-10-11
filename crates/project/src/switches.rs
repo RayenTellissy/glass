@@ -60,7 +60,9 @@ impl Project {
     /// Locks or unlocks a track (any kind). Allowed on a locked track: it is how the
     /// track is unlocked.
     pub fn set_track_locked(&self, track: TrackId, locked: bool) -> Result<Project, EditError> {
-        self.switch_unguarded(track, |t| std::mem::replace(&mut t.locked, locked) != locked)
+        self.switch_unguarded(track, |t| {
+            std::mem::replace(&mut t.locked, locked) != locked
+        })
     }
 
     /// Sets a track's height preset (any kind, locked or not: it only changes the view).
@@ -69,7 +71,9 @@ impl Project {
         track: TrackId,
         height: TrackHeight,
     ) -> Result<Project, EditError> {
-        self.switch_unguarded(track, |t| std::mem::replace(&mut t.height, height) != height)
+        self.switch_unguarded(track, |t| {
+            std::mem::replace(&mut t.height, height) != height
+        })
     }
 
     /// Refuses `next`, the result of an edit of this root, when it changes or removes a

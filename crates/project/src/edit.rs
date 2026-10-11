@@ -9,7 +9,9 @@ use std::sync::Arc;
 use crate::error::EditError;
 use crate::id::{ItemId, MediaId, SequenceId, TrackId};
 use crate::media_pool::{MediaItem, MediaKind, ROOT, file_stem};
-use crate::model::{Adjustment, Clip, Item, ItemKind, Project, Sequence, Subtitle, Track, TrackKind};
+use crate::model::{
+    Adjustment, Clip, Item, ItemKind, Project, Sequence, Subtitle, Track, TrackKind,
+};
 use crate::settings::SequenceFormat;
 use crate::switches::fit_switches;
 use crate::time::{Rational, Time, TimeRange};
@@ -111,7 +113,8 @@ impl Project {
         if index > len {
             return Err(EditError::TrackIndex { index, len });
         }
-        seq.tracks.insert(index, Arc::new(Track::new(id, kind, name)));
+        seq.tracks
+            .insert(index, Arc::new(Track::new(id, kind, name)));
         Ok((next, id))
     }
 

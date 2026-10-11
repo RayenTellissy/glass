@@ -255,6 +255,8 @@ impl Project {
             tracks: Vector::new(),
             ..Sequence::clone(parent)
         };
+        // Edits store frame rates reduced, whatever form a loaded parent holds.
+        child.set_format(parent.format().reduced());
         for track in &parent.tracks {
             let id = TrackId(next.alloc_id());
             let grid = parent.grid(track.kind)?;
@@ -573,6 +575,7 @@ fn copy_sequence(next: &mut Project, id: SequenceId) -> Result<SequenceId, EditE
         tracks: Vector::new(),
         ..Sequence::clone(&source)
     };
+    copy.set_format(source.format().reduced());
     for track in &source.tracks {
         let track_id = TrackId(next.alloc_id());
         let mut ids = HashMap::new();

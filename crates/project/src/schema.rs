@@ -696,8 +696,8 @@ fn v8_media_kind(path: &str) -> &'static str {
         .unwrap_or_default();
     match ext.as_str() {
         "wav" | "aif" | "aiff" | "mp3" | "m4a" | "aac" | "flac" | "ogg" | "opus" | "caf" => "audio",
-        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "heic" | "heif" | "bmp" | "gif" | "webp" | "exr"
-        | "dpx" => "still",
+        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "heic" | "heif" | "bmp" | "gif" | "webp"
+        | "exr" | "dpx" => "still",
         _ => "video",
     }
 }
@@ -1092,7 +1092,16 @@ mod tests {
         let items = v9["media"]["items"].as_array().expect("items");
         let short: Vec<Value> = items
             .iter()
-            .map(|i| json!([i["id"], i["name"], i["kind"], i["path"], i["content_hash"], i["bin"]]))
+            .map(|i| {
+                json!([
+                    i["id"],
+                    i["name"],
+                    i["kind"],
+                    i["path"],
+                    i["content_hash"],
+                    i["bin"]
+                ])
+            })
             .collect();
         assert_eq!(
             short,

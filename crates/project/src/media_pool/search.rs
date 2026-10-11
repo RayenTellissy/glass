@@ -659,14 +659,20 @@ mod tests {
         assert!(!index.is_current(&pool));
         assert!(index.refresh(&pool));
         assert_eq!(
-            names(&pool, index.query(&pool, &Query::parse("selects", &pool), |_| false)),
+            names(
+                &pool,
+                index.query(&pool, &Query::parse("selects", &pool), |_| false)
+            ),
             ["Rope detail"]
         );
 
         let q = Query::parse("label:selects", &pool);
         assert_eq!(q.label, Some(ColourLabel::Amber));
         assert!(q.text.is_empty());
-        assert_eq!(names(&pool, index.query(&pool, &q, |_| false)), ["Rope detail"]);
+        assert_eq!(
+            names(&pool, index.query(&pool, &q, |_| false)),
+            ["Rope detail"]
+        );
 
         let q = Query::parse("type:video tag:interview harb", &pool);
         assert_eq!(q.kind, Some(MediaKind::Video));

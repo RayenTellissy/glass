@@ -975,7 +975,10 @@ mod tests {
     #[test]
     fn kinds_and_names_from_paths() {
         assert_eq!(MediaKind::guess("/a/b/Tone.WAV"), MediaKind::Audio);
-        assert_eq!(MediaKind::guess("C:\\stills\\IMG_0001.heic"), MediaKind::Still);
+        assert_eq!(
+            MediaKind::guess("C:\\stills\\IMG_0001.heic"),
+            MediaKind::Still
+        );
         assert_eq!(MediaKind::guess("/a/A014_C003.mxf"), MediaKind::Video);
         assert_eq!(MediaKind::guess("noext"), MediaKind::Video);
         assert_eq!(file_stem("/a/b/A014_C003.MXF"), "A014_C003");

@@ -478,8 +478,8 @@ impl Item {
 
 /// What a clip shows: a source file, or another sequence of the project (a nested
 /// sequence; schema v8, see [`crate::nest`]). Serialised flat inside the clip, as
-/// `"media": 3` or `"sequence": 7`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// `"media": 3` or `"sequence": 7`; a clip naming both, or neither, does not load.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClipSource {
     Media(MediaId),
@@ -500,6 +500,47 @@ impl ClipSource {
             ClipSource::Sequence(s) => Some(s),
             ClipSource::Media(_) => None,
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for ClipSource {
+    /// Reads every key the clip left over (it is flattened into the clip), so a clip
+    /// with both `media` and `sequence` is refused instead of taking the first one.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Keys;
+
+        impl<'de> serde::de::Visitor<'de> for Keys {
+            type Value = ClipSource;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a clip source, \"media\" or \"sequence\"")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<ClipSource, A::Error> {
+                let mut found = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    let source = match key.as_str() {
+                        "media" => ClipSource::Media(map.next_value()?),
+                        "sequence" => ClipSource::Sequence(map.next_value()?),
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                            continue;
+                        }
+                    };
+                    if found.replace(source).is_some() {
+                        return Err(serde::de::Error::custom(
+                            "a clip names both a media and a sequence source",
+                        ));
+                    }
+                }
+                found.ok_or_else(|| serde::de::Error::custom("a clip names no media or sequence"))
+            }
+        }
+
+        deserializer.deserialize_map(Keys)
     }
 }
 

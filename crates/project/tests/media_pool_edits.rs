@@ -126,7 +126,8 @@ fn imports_take_ids_from_the_node_counter() {
     p.validate().expect("valid");
 
     assert_eq!(
-        p.import_media(BinId(999), [item("x", "/x.mov")]).map(|_| ()),
+        p.import_media(BinId(999), [item("x", "/x.mov")])
+            .map(|_| ()),
         Err(EditError::UnknownBin(BinId(999)))
     );
     let (same, none) = p.import_media(bin, []).expect("nothing");
@@ -140,9 +141,18 @@ fn bare_references_are_named_and_kinded_from_their_paths() {
     let (p, b) = p.add_media("", "C:\\stills\\pier.jpg").expect("b");
     let (p, c) = p.add_media("cc", "/footage/A014_C003.mxf").expect("c");
     let get = |id| MediaItem::clone(p.media().get(id).expect("item"));
-    assert_eq!((get(a).name, get(a).kind), ("gulls".into(), MediaKind::Audio));
-    assert_eq!((get(b).name, get(b).kind), ("pier".into(), MediaKind::Still));
-    assert_eq!((get(c).name, get(c).kind), ("A014_C003".into(), MediaKind::Video));
+    assert_eq!(
+        (get(a).name, get(a).kind),
+        ("gulls".into(), MediaKind::Audio)
+    );
+    assert_eq!(
+        (get(b).name, get(b).kind),
+        ("pier".into(), MediaKind::Still)
+    );
+    assert_eq!(
+        (get(c).name, get(c).kind),
+        ("A014_C003".into(), MediaKind::Video)
+    );
     assert_eq!(get(a).content_hash, "aa");
     assert_eq!(get(b).content_hash, "");
     assert_eq!(get(c).bin, ROOT);
@@ -172,10 +182,7 @@ fn media_a_clip_uses_cannot_be_removed() {
     let removed = p.remove_media(&[f.spare, f.spare]).expect("remove");
     assert!(removed.media().get(f.spare).is_none());
     assert!(removed.media().get(f.used).is_some());
-    assert!(
-        same_timeline(&removed, p),
-        "the timeline is untouched"
-    );
+    assert!(same_timeline(&removed, p), "the timeline is untouched");
     removed.validate().expect("valid");
     assert!(p.remove_media(&[]).expect("nothing").content_eq(p));
     // Once the clip is gone the media can go too.

@@ -47,7 +47,9 @@ fn fixture() -> Fixture {
     let p = Project::new("uid-switches", "Switches");
     let (p, media) = p.add_media("00ff", "/media/a.mov").expect("media");
     let (p, seq) = p.add_sequence("Main", FPS, 48_000).expect("seq");
-    let (p, s1) = p.add_track(seq, TrackKind::Subtitle, "S1", None).expect("s1");
+    let (p, s1) = p
+        .add_track(seq, TrackKind::Subtitle, "S1", None)
+        .expect("s1");
     let (p, v2) = p.add_track(seq, TrackKind::Video, "V2", None).expect("v2");
     let (p, v1) = p.add_track(seq, TrackKind::Video, "V1", None).expect("v1");
     let (p, a1) = p.add_track(seq, TrackKind::Audio, "A1", None).expect("a1");
@@ -115,18 +117,27 @@ fn new_tracks_have_their_switches_at_the_defaults() {
 fn each_switch_is_an_edit_with_its_own_undo_label() {
     let f = fixture();
     let mut h = History::new(f.project.clone());
-    let steps: [(EditLabel, fn(&Project, &Fixture) -> Result<Project, EditError>); 9] = [
+    let steps: [(
+        EditLabel,
+        fn(&Project, &Fixture) -> Result<Project, EditError>,
+    ); 9] = [
         (EditLabel::MuteTrack, |p, f| p.set_track_muted(f.a1, true)),
         (EditLabel::SoloTrack, |p, f| p.set_track_solo(f.a2, true)),
-        (EditLabel::HideTrack, |p, f| p.set_track_visible(f.v2, false)),
+        (EditLabel::HideTrack, |p, f| {
+            p.set_track_visible(f.v2, false)
+        }),
         (EditLabel::TrackHeight, |p, f| {
             p.set_track_height(f.v1, TrackHeight::Large)
         }),
         (EditLabel::LockTrack, |p, f| p.set_track_locked(f.s1, true)),
-        (EditLabel::UnlockTrack, |p, f| p.set_track_locked(f.s1, false)),
+        (EditLabel::UnlockTrack, |p, f| {
+            p.set_track_locked(f.s1, false)
+        }),
         (EditLabel::ShowTrack, |p, f| p.set_track_visible(f.v2, true)),
         (EditLabel::UnsoloTrack, |p, f| p.set_track_solo(f.a2, false)),
-        (EditLabel::UnmuteTrack, |p, f| p.set_track_muted(f.a1, false)),
+        (EditLabel::UnmuteTrack, |p, f| {
+            p.set_track_muted(f.a1, false)
+        }),
     ];
     for (label, step) in &steps {
         let next = step(h.current(), &f).expect("switch");
@@ -149,7 +160,12 @@ fn each_switch_is_an_edit_with_its_own_undo_label() {
             .collect();
         assert_eq!(changed.len(), 1, "{label:?}");
     }
-    assert!(h.current().content_eq(&f.project), "the steps undo each other");
+    // The switches undo each other; only V1's height stays changed.
+    let tall = f
+        .project
+        .set_track_height(f.v1, TrackHeight::Large)
+        .expect("height");
+    assert!(h.current().content_eq(&tall), "the steps undo each other");
     let mut labels = Vec::new();
     while let Some(label) = h.undo_label() {
         labels.push(label);
@@ -218,8 +234,14 @@ fn each_kind_has_its_switches() {
             switch,
         })
     };
-    assert_eq!(p.set_track_muted(f.v1, true), no(f.v1, TrackKind::Video, "mute"));
-    assert_eq!(p.set_track_solo(f.s1, true), no(f.s1, TrackKind::Subtitle, "solo"));
+    assert_eq!(
+        p.set_track_muted(f.v1, true),
+        no(f.v1, TrackKind::Video, "mute")
+    );
+    assert_eq!(
+        p.set_track_solo(f.s1, true),
+        no(f.s1, TrackKind::Subtitle, "solo")
+    );
     assert_eq!(
         p.set_track_visible(f.a1, false),
         no(f.a1, TrackKind::Audio, "visibility")
@@ -313,9 +335,7 @@ fn a_locked_track_refuses_every_edit_to_it_and_to_what_is_on_it() {
             p.set_clip_speed(f.c2, Rational::new(2, 1), project::SpeedKeep::Timeline)
         }),
         ("add effect", p.add_effect(f.c1, &lut, None).map(|(p, _)| p)),
-        ("effect param", {
-            fx_locked.set_effect_enabled(fx, false)
-        }),
+        ("effect param", { fx_locked.set_effect_enabled(fx, false) }),
         ("animate", {
             p.animate_param(
                 KeyTarget::Clip {
@@ -337,12 +357,18 @@ fn a_locked_track_refuses_every_edit_to_it_and_to_what_is_on_it() {
             p.add_transition(TransitionSpec::new(Some(f.c2), None, frames(10)))
                 .map(|(p, _)| p)
         }),
-        ("transition duration", p.set_transition_duration(transition, frames(6))),
+        (
+            "transition duration",
+            p.set_transition_duration(transition, frames(6)),
+        ),
         ("remove transition", p.remove_transition(transition)),
         ("rename", p.rename_track(f.v1, "Picture")),
         ("hide", p.set_track_visible(f.v1, false)),
         ("remove track", p.remove_track(f.v1)),
-        ("source", p.set_clip_source(f.c1, ClipSource::Media(f.media))),
+        (
+            "source",
+            p.set_clip_source(f.c1, ClipSource::Media(f.media)),
+        ),
         ("nest", p.nest_items(&[f.c1], "Nest").map(|(p, _, _)| p)),
     ];
     for (what, result) in checks {
@@ -362,7 +388,8 @@ fn a_locked_track_refuses_every_edit_to_it_and_to_what_is_on_it() {
 
     // Unlocking and the height go through, and the other tracks are free.
     assert!(!track(&p.set_track_locked(f.v1, false).expect("unlock"), f.v1).locked);
-    p.set_track_height(f.v1, TrackHeight::Small).expect("height");
+    p.set_track_height(f.v1, TrackHeight::Small)
+        .expect("height");
     p.insert_clip(f.v2, spec.clone()).expect("other track");
     p.set_clip_opacity(f.top, 0.5).expect("other clip");
     p.set_track_muted(f.a1, true).expect("other switch");
@@ -416,7 +443,11 @@ fn the_lock_comes_after_the_edits_own_errors() {
             switch: "mute",
         })
     );
-    assert!(p.set_track_visible(f.v1, true).expect("no-op").content_eq(&p));
+    assert!(
+        p.set_track_visible(f.v1, true)
+            .expect("no-op")
+            .content_eq(&p)
+    );
     assert_eq!(
         p.set_track_visible(f.v1, false),
         Err(EditError::TrackLocked(f.v1))
@@ -480,7 +511,9 @@ fn switches_save_and_load() {
     let p = p.set_track_solo(f.a2, true).expect("solo");
     let p = p.set_track_visible(f.s1, false).expect("hide");
     let p = p.set_track_locked(f.v1, true).expect("lock");
-    let p = p.set_track_height(f.v2, TrackHeight::Small).expect("height");
+    let p = p
+        .set_track_height(f.v2, TrackHeight::Small)
+        .expect("height");
     let bytes = schema::save(&p);
     let back = schema::load(&bytes).expect("load");
     assert!(back.content_eq(&p));
@@ -510,7 +543,13 @@ fn files_with_switches_a_track_cannot_have_are_refused() {
     let cases = [
         (2, "muted", Value::Bool(true), TrackKind::Video, "mute"),
         (0, "solo", Value::Bool(true), TrackKind::Subtitle, "solo"),
-        (3, "visible", Value::Bool(false), TrackKind::Audio, "visibility"),
+        (
+            3,
+            "visible",
+            Value::Bool(false),
+            TrackKind::Audio,
+            "visibility",
+        ),
     ];
     for (index, key, value, kind, switch) in cases {
         let mut broken = json.clone();

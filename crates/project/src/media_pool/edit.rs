@@ -54,7 +54,10 @@ impl Project {
             .iter()
             .flat_map(|s| s.tracks.iter())
             .flat_map(|t| t.items.iter())
-            .find(|i| i.clip().is_some_and(|c| c.source == ClipSource::Media(media)))
+            .find(|i| {
+                i.clip()
+                    .is_some_and(|c| c.source == ClipSource::Media(media))
+            })
             .map(|i| i.id)
     }
 
@@ -87,12 +90,16 @@ impl Project {
         if name.is_empty() {
             return Err(EditError::EmptyMediaName(media));
         }
-        let item = self.media.get(media).ok_or(EditError::UnknownMedia(media))?;
+        let item = self
+            .media
+            .get(media)
+            .ok_or(EditError::UnknownMedia(media))?;
         if item.name == name {
             return Ok(self.clone());
         }
         let mut next = self.clone();
-        next.media.update_item(media, |i| i.name = name.to_string())?;
+        next.media
+            .update_item(media, |i| i.name = name.to_string())?;
         Ok(next)
     }
 
@@ -199,7 +206,11 @@ impl Project {
     pub fn move_bin(&self, bin: BinId, parent: BinId) -> Result<Project, EditError> {
         let mut next = self.clone();
         next.media.move_bin(bin, parent)?;
-        if self.media.bin(bin).is_some_and(|b| b.parent == Some(parent)) {
+        if self
+            .media
+            .bin(bin)
+            .is_some_and(|b| b.parent == Some(parent))
+        {
             return Ok(self.clone());
         }
         Ok(next)
@@ -234,6 +245,9 @@ impl Project {
     }
 
     fn all_media(&self, media: &[MediaId], f: impl Fn(&MediaItem) -> bool) -> bool {
-        media.iter().filter_map(|id| self.media.get(*id)).all(|i| f(i))
+        media
+            .iter()
+            .filter_map(|id| self.media.get(*id))
+            .all(|i| f(i))
     }
 }

@@ -10,9 +10,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use project::media_pool::{Facts, Gps, MediaItem, MediaKind, Metadata, ROOT};
 use project::params::{ParamDef, ParamSchema, ParamValue, Range, effects};
 use project::schema::{self, LoadError, OLDEST_VERSION, SCHEMA_VERSION};
-use project::media_pool::{Facts, Gps, MediaItem, MediaKind, Metadata, ROOT};
 use project::{
     Alignment, BlendMode, CacheFolder, ChannelLayout, Clip, ClipParam, ClipSource, ClipSpec,
     ColourLabel, ColourSpace, Crop, Handle, HandleSide, Interpolation, KeyTarget, MarkerOwner,
@@ -524,7 +524,11 @@ fn pool() -> Project {
     let p = Project::new("fixture-pool", "Harbour film");
     let (p, day1) = p.add_bin(ROOT, "Day 1").expect("bin");
     let (p, a_cam) = p.add_bin(day1, "A-cam").expect("bin");
-    let mut dusk = MediaItem::new("Harbour at dusk", MediaKind::Video, "/Volumes/A014/C003.MXF");
+    let mut dusk = MediaItem::new(
+        "Harbour at dusk",
+        MediaKind::Video,
+        "/Volumes/A014/C003.MXF",
+    );
     dusk.spanned = vec!["/Volumes/A014/C003_01.MXF".into()];
     dusk.sidecars = vec!["/Volumes/A014/C003M01.XML".into()];
     dusk.content_hash = "9f8e7d".into();
@@ -958,7 +962,11 @@ fn the_pool_fixture_round_trips_the_pool_and_every_switch() {
         .collect();
     assert_eq!(
         names,
-        [("Harbour film", None), ("Day 1", Some(0)), ("A-cam", Some(1))]
+        [
+            ("Harbour film", None),
+            ("Day 1", Some(0)),
+            ("A-cam", Some(1))
+        ]
     );
     assert_eq!(pool.label_name(ColourLabel::Amber), Some("Selects"));
     let dusk = pool.items().next().expect("dusk");
