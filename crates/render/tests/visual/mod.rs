@@ -29,6 +29,7 @@ use render::text::{
     self, FontFamily, GlyphAtlas, GlyphInfo, GlyphTransform, PreparedText, TextEngine, TextFormat,
     TextPaint,
 };
+use render::transition::{Easing, TransitionNode, TransitionRegistry};
 use render::wgpu;
 use render::yuv::{PlaneLayout, YuvParams, YuvPlanes};
 
@@ -96,6 +97,9 @@ pub enum Source {
     /// Another source with masks in its own pixels (`render::mask`), applied before the
     /// layer's transform and blend.
     Masked(Box<Source>, Vec<Mask>),
+    /// The bundled transition `id` from the gradient (A) to the colour bars (B, filtered
+    /// up to the canvas) at linear `progress`, as a canvas-sized layer.
+    Transition { id: &'static str, progress: f64 },
 }
 
 impl Source {
@@ -114,7 +118,7 @@ impl Source {
             Self::Disc => (64, 64),
             Self::Fill { size, .. } => *size,
             Self::Masked(source, _) => source.size(),
-            Self::Gradient | Self::Text(_) | Self::Shapes(_) => CANVAS,
+            Self::Gradient | Self::Text(_) | Self::Shapes(_) | Self::Transition { .. } => CANVAS,
         }
     }
 }
@@ -259,6 +263,32 @@ impl Studio {
                 Source::Shapes(shapes) => g
                     .add(ShapeNode::new(&self.renderer, CANVAS, shapes), &[])
                     .out(0),
+                Source::Transition { id, progress } => {
+                    let bars = g
+                        .add(
+                            YuvSourceNode::new(
+                                YuvPlanes::Biplanar {
+                                    luma: &self.bars_luma,
+                                    chroma: &self.bars_chroma,
+                                },
+                                self.bars_params,
+                                Primaries::Bt709,
+                                WorkingSpace::BT709,
+                            ),
+                            &[],
+                        )
+                        .out(0);
+                    let gradient = g.import("gradient", &self.gradient);
+                    let transition = TransitionRegistry::bundled()
+                        .get(id)
+                        .unwrap_or_else(|| panic!("no bundled transition {id:?}"))
+                        .clone();
+                    g.add(
+                        TransitionNode::new(transition, *progress, Easing::Linear),
+                        &[gradient, bars],
+                    )
+                    .out(0)
+                }
                 Source::Masked(..) => unreachable!("unmasked above"),
             };
             let port = mask::add_to_graph(&mut g, &self.renderer, port, source.size(), masks);
