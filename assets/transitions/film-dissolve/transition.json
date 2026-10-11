@@ -1,0 +1,8 @@
+{
+  "id": "film-dissolve",
+  "name": "transition.name.film_dissolve",
+  "category": "dissolve",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": []
+}

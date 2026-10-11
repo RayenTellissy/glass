@@ -1,0 +1,8 @@
+{
+  "id": "additive-dissolve",
+  "name": "transition.name.additive_dissolve",
+  "category": "dissolve",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": []
+}
