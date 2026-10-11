@@ -211,7 +211,8 @@ Full text in `docs/DECISIONS.md`; one line each here.
 - The debug panel reads thread activity through `threads::global().snapshot_into`.
 
 **Phase 8 (export)**
-- Subtitle export is not wired into the export pipeline yet (waits for the export queue): `glass-export` converts `project::subtitle_export::track_cues` to `media::SubtitleCue`, writes `.srt`/`.vtt` sidecars with `to_srt`/`to_vtt`, adds `SubtitleSettings` streams and calls `ExportSession::push_subtitle`, or burns the cue at each frame's time with `render::subtitle::{cue_at, SubtitleStyle::lay_out, add_burn_in}` before readback (Decision 65). WebM subtitles are untested until an AV1 or VP9 encoder is in the FFmpeg build.
+- Export audio is silence of the right length: the engine has no sequence audio mix yet, so `engine::export` pushes zeros and skips the loudness target (Decision 70). Replace it with the mix once Phase 12 builds one, and check the preset's loudness again. WebM subtitles are untested until an AV1 or VP9 encoder is in the FFmpeg build.
+- The export queue is not wired into an app window yet: the export dialog submits `ExportJob`s, drains `ExportEvent`s once per frame and turns `Notification`s into OS notifications. An HDR project exported with an SDR preset is clipped (no tone mapping).
 
 **Phase 14 / 16 (performance)**
 - Proxy pipeline decodes, scales and encodes on one thread; splitting decode/scale and encode across threads could lift ProRes VT 4K from about 130 to about 230 fps.

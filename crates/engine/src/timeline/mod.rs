@@ -48,4 +48,6 @@ pub use plan::{
 pub use playback::{
     PlaybackStats, Presented, PresentedFrame, TimelineConfig, TimelinePlayback, TimelineScrubRender,
 };
-pub use render::{PREVIEW_FORMAT, RenderStats, RenderedFrame, RendererConfig, TimelineRenderer};
+pub use render::{
+    FrameOutput, PREVIEW_FORMAT, RenderStats, RenderedFrame, RendererConfig, TimelineRenderer,
+};
