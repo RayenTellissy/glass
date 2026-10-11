@@ -157,6 +157,23 @@ impl Project {
         Ok(next)
     }
 
+    /// Renames a track. The name is trimmed; an empty name is refused, and an unchanged
+    /// one returns the project as it was.
+    pub fn rename_track(&self, track: TrackId, name: &str) -> Result<Project, EditError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(EditError::EmptyTrackName(track));
+        }
+        let mut next = self.clone();
+        let (si, ti) = next.locate_track(track)?;
+        let (_, track) = next.track_at_mut(si, ti);
+        if track.name == name {
+            return Ok(self.clone());
+        }
+        track.name = name.to_string();
+        Ok(next)
+    }
+
     /// Places a clip on a video or audio track, with every property at its default
     /// ([`Clip::new`]). Fails if it would overlap another item.
     pub fn insert_clip(

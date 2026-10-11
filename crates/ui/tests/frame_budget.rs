@@ -1,9 +1,11 @@
 //! The UI frame budget gate: a representative editor frame, drawn headless, must keep
 //! its p99 under the frame-time monitor's budget. Later UI tasks add their own screens
-//! the same way: build a `HeadlessUi`, run frames into a `FrameTimeMonitor`, assert.
+//! the same way: build a `HeadlessUi`, run frames through `support::FrameBudget`, assert.
+
+mod support;
 
 use egui::{Align2, Rect, Sense, Stroke, StrokeKind, vec2};
-use ui::frame_time::FrameTimeMonitor;
+use support::FrameBudget;
 use ui::headless::{HeadlessUi, Viewport};
 
 const TRACKS: usize = 10;
@@ -98,14 +100,11 @@ fn editor_frame_p99_is_within_budget() {
     if !text {
         eprintln!("editor frame budget: no fonts found, drawing shapes without text");
     }
-    let mut monitor = FrameTimeMonitor::default();
-    headless
-        .run(WARMUP, FRAMES, &mut monitor, |ui, frame| {
-            editor_frame(ui, frame, text)
-        })
-        .expect("headless frames");
-    let stats = monitor.stats();
+    let stats = FrameBudget::run(&mut headless, WARMUP, FRAMES, |ui, frame| {
+        editor_frame(ui, frame, text)
+    })
+    .expect("headless frames");
     eprintln!("editor frame budget ({}): {stats}", headless.adapter());
-    assert_eq!(stats.frames_in_window, FRAMES);
-    headless.assert_p99_within_budget("editor frame budget", &stats);
+    assert_eq!(stats.wall.frames_in_window, FRAMES);
+    stats.assert_within_budget(&headless, "editor frame budget");
 }

@@ -1,6 +1,9 @@
 //! The `glass-io` autosave thread: ticks only when the tree changed, never makes the UI
 //! wait, and a crash (no clean close) leaves an autosave the next launch restores.
 
+#[path = "../../render/tests/common/timing.rs"]
+mod timing;
+
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
@@ -161,16 +164,15 @@ fn submitting_never_waits_for_a_write() {
     let (p, media, v1) = project(1000);
     // The first snapshot of 1000 clips is written on the thread while we submit.
     let (handle, events) = Autosave::start(config(&cache, &p, 1), p.clone(), 0).expect("start");
-    let mut worst = Duration::ZERO;
+    let mut submits = timing::Laps::default();
     let mut root = p;
     for i in 0..200 {
         root = root
             .insert_clip(v1, clip(media, 40_000 + i * 30, 10))
             .expect("clip")
             .0;
-        let started = Instant::now();
-        handle.submit(&root, i as u64 + 1);
-        worst = worst.max(started.elapsed());
+        let ((), lap) = timing::time(|| handle.submit(&root, i as u64 + 1));
+        submits.push(lap);
     }
     let mut writes = 0;
     let mut slowest = Duration::ZERO;
@@ -190,10 +192,15 @@ fn submitting_never_waits_for_a_write() {
             Err(_) => {}
         }
     }
-    eprintln!("200 submits: slowest {worst:?}; {writes} writes on glass-io, slowest {slowest:?}");
+    eprintln!(
+        "200 submits: wall {}, CPU {}; {writes} writes on glass-io, slowest {slowest:?}",
+        submits.wall(),
+        submits.cpu()
+    );
     assert!(writes > 0);
     // A send on an unbounded channel: microseconds even while a write is in progress.
-    assert!(worst < Duration::from_millis(2), "submit took {worst:?}");
+    // Held to the budget by the shared timing rules (`timing`).
+    submits.assert_within("submit", timing::Stat::Max, 2.0);
     handle.abandon();
     assert_eq!(
         files::recover(&autosave::project_dir(&cache, &root))

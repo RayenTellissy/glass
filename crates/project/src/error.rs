@@ -55,6 +55,8 @@ pub enum EditError {
     InvalidCacheFolder(CacheFolder),
     #[error("track index {index} out of range (sequence has {len} tracks)")]
     TrackIndex { index: usize, len: usize },
+    #[error("track {0} cannot have an empty name")]
+    EmptyTrackName(TrackId),
     #[error("an item cannot move from a {from:?} track to a {to:?} track")]
     TrackKindMismatch { from: TrackKind, to: TrackKind },
     #[error("source time would go before the start of the media: {0} s")]

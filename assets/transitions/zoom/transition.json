@@ -1,0 +1,13 @@
+{
+  "id": "zoom",
+  "name": "transition.name.zoom",
+  "category": "motion",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "mode", "label": "transition.param.mode", "kind": {"choice": {"default": "in", "options": [{"id": "in", "label": "transition.option.zoom_in"}, {"id": "out", "label": "transition.option.zoom_out"}]}}, "unit": "none", "keyframeable": false},
+    {"id": "zoom", "label": "transition.param.zoom", "kind": {"float": {"default": 3.0, "range": {"min": 1.0, "max": 20.0}, "soft": {"min": 1.0, "max": 8.0}, "decimals": 0}}, "unit": "percent", "keyframeable": false},
+    {"id": "blur", "label": "transition.param.blur", "kind": {"float": {"default": 0.3, "range": {"min": 0.0, "max": 1.0}, "soft": null, "decimals": 0}}, "unit": "percent", "keyframeable": false},
+    {"id": "samples", "label": "transition.param.samples", "kind": {"int": {"default": 6, "range": {"min": 1, "max": 64}, "soft": {"min": 2, "max": 32}}}, "unit": "none", "keyframeable": false}
+  ]
+}

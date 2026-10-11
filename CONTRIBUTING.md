@@ -71,7 +71,7 @@ Every task passes the full check. Depending on what it touched, also run:
 | A dependency | `cargo deny check`, then `scripts/licences/third-party.py` and commit `assets/licences/third-party.tsv` | [Licences and advisories](#licences-and-advisories) |
 | UI text | `cargo test -p app --test ui_source -- --nocapture` (fails on missing keys, warns on unused ones) | [User-facing strings](#user-facing-strings) |
 | Theme tokens or colours | `python3 assets/theme/check.py` and the same `ui_source` test | [Colours and theme](#colours-and-theme) |
-| A UI screen | its headless frame-budget test (p99 under 8 ms) | [UI frame budget](#ui-frame-budget) |
+| A UI screen | its headless frame-budget test (p99 under 8 ms) | [UI frame budget](#ui-frame-budget), [Timing tests](#timing-tests) |
 | A panel, dialog, parameter widget or theme | `cargo test -p ui --test ui_snapshots -- --nocapture`; a new module adds a snapshot case | [UI snapshots](#ui-snapshots) |
 | Compositor output (render nodes, shaders, colour) | `cargo test -p render --test visual_regression -- --nocapture`; a new compositor feature adds a case | [Visual regression tests](#visual-regression-tests) |
 | Performance-sensitive code | `cargo bench -p <crate> --bench "*"` against a saved baseline, alone on the machine | [Benchmarks](#benchmarks) |
@@ -166,6 +166,8 @@ It writes H.264 (8-bit 1080p, 10-bit 720p, 4K), 10-bit HEVC, ProRes 422, VP9, AV
 
 The script uses `$FFMPEG_DIR/bin/ffmpeg` (the pinned build, see [FFmpeg](#ffmpeg)) before any `ffmpeg` on `PATH`. The pinned build has no VP9, Opus, AV1 or MP3 encoder, so with it `vp9_720p30.webm`, `sync_vp9_opus.webm`, `av1_1080p30.mp4` and `audio_44k1_mono.mp3` are skipped with a note and left out of the manifest, and the tests that use them skip. An FFmpeg with libvpx, libopus, libsvtav1 and libmp3lame writes them too: `FFMPEG_DIR=<its prefix> tests/fixtures/generate.sh`.
 
+`tests/fixtures/reference.proj` is the reference project `smoke` opens, plays (2 s) and exports (1 s, then verified). It is generated, not hand-edited: after a schema bump or a change to the generator in `crates/smoke/src/reference.rs`, run `scripts/cargo-serial run --bin smoke -- --write-reference` and commit the file (`crates/smoke/tests/reference.rs` fails until you do). Its media paths are relative to the file and point at `tests/fixtures/generated/`, so `smoke` fails with a message until the generated media exists; without a GPU it skips play and export unless `GLASS_REQUIRE_GPU=1`.
+
 ## Benchmarks
 
 Micro-benchmarks use `criterion` and live in each crate's `benches/` folder (a `[[bench]]` target with `harness = false`, plus `[lib] bench = false` so the library's test harness does not receive criterion's flags). Benchmarks are timing measurements, so run them serially and alone: no other build, test or benchmark on the machine at the same time, and no other agent or heavy app running. They build with the release profile.
@@ -186,7 +188,19 @@ In CI the `bench` job in `ci.yml` saves a `main` baseline on every push to `main
 
 ## UI frame budget
 
-UI code is checked headless: `ui::headless::HeadlessUi` renders egui into an offscreen wgpu texture (a locked screen or a CI runner has no visible window) and records each frame into a `ui::frame_time::FrameTimeMonitor`. A UI test runs its screen for a few hundred frames and calls `headless.assert_p99_within_budget(what, &monitor.stats())`, which fails with p50, p95, p99, max and the over-budget count when the p99 is not under 8 ms; `crates/ui/tests/frame_budget.rs` is the example to copy. Keep each such test under a few seconds. Without a GPU the test prints `SKIPPED ...` and returns. On a software rasteriser (lavapipe, WARP; wgpu's `DeviceType::Cpu`) the frames still render but the budget is not judged, and the test prints `BUDGET NOT CHECKED ...`. Set `GLASS_REQUIRE_GPU=1` where a GPU is expected so a missing GPU or a software one fails instead; CI sets it on the macOS arm64 job and installs lavapipe on Linux.
+UI code is checked headless: `ui::headless::HeadlessUi` renders egui into an offscreen wgpu texture (a locked screen or a CI runner has no visible window). A UI test runs its screen for a few hundred frames through `support::FrameBudget` (`crates/ui/tests/support/mod.rs`), which times each frame on the wall clock and on the UI thread's CPU clock into two `ui::frame_time::FrameTimeMonitor`s, and calls `report.assert_within_budget(&headless, what)`, which holds the frames to the 8 ms budget by the [timing rules](#timing-tests) and fails with both clocks' p50, p95, p99, max and over-budget counts. `crates/ui/tests/frame_budget.rs` is the example to copy. Keep each such test under a few seconds. Without a GPU the test prints `SKIPPED ...` and returns. On a software rasteriser (lavapipe, WARP; wgpu's `DeviceType::Cpu`) the frames still render but the budget is not judged, and the test prints `BUDGET NOT CHECKED ...`. Set `GLASS_REQUIRE_GPU=1` where a GPU is expected so a missing GPU or a software one fails instead; CI sets it on the macOS arm64 job and installs lavapipe on Linux.
+
+## Timing tests
+
+Frame budgets, GPU pass times and latency budgets follow one set of rules (Decision 64), in `crates/render/tests/common/timing.rs`, which the `ui` and `engine` tests include by path. Tests in one binary run on parallel threads, other processes share the machine, and an idle GPU clocks down between timed passes, so by default the rules hold figures that load barely moves, and keep each test's own statistic for a quiet machine:
+
+- **Serial.** A timed section holds `timing::serial()` (`FrameBudget` does), so the timing tests of one binary never run at the same time.
+- **CPU sections** (UI frames, a submit, a send) are timed on the wall clock and on the measuring thread's CPU clock (`timing::Stopwatch`, `Laps`). The medians on both clocks are held to the budget: CPU time does not grow while the thread waits for a core, and a section that sleeps or blocks still moves the wall-clock median. The test's own statistic of CPU time (p99 for frames, max for single calls) is held to twice the budget, since a busy machine slows a thread's cores and caches about twofold. Windows has no thread clock fine enough, so there the CPU figures are wall-clock ones.
+- **Wall-clock only** figures (frame lateness, decode frame times) are held to the budget at the median.
+- **GPU pass times** from timestamp queries (`render::profiler::GpuProfiler`, after a warm-up) are held to 1.5 times the budget at the fastest tenth and to 3 times it at the median: other work and a lower GPU clock stretch a pass by up to about 1.8 times.
+- **Strict.** With `GLASS_STRICT_TIMING=1` each test's own statistic is held to the budget itself: the p99 or maximum on both clocks, the GPU median, the mean decode frame time. CI's macOS arm64 job runs the timing tests that way in their own step, one test at a time; run them so locally, alone on the machine, when a change is about performance (`GLASS_STRICT_TIMING=1 cargo test -p ui -p render -p engine -- --test-threads=1 budget gpu_time never_wait throughput late_frames`).
+
+A new timing test uses these helpers rather than its own `Instant` arithmetic. A failure in the default mode is a regression, not load: fix it rather than rerunning until it passes.
 
 ## UI snapshots
 

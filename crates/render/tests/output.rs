@@ -381,9 +381,10 @@ fn output_primaries_are_converted_before_the_transfer() {
 
 /// GPU time of one 4K output pass (Rgba16Float working space to dithered 8-bit sRGB and
 /// to 10-bit PQ, and a plain float copy for comparison), median of 30 frames, from the
-/// pass timestamps.
+/// pass timestamps, held to the budget by the shared timing rules (`common::timing`).
 #[test]
 fn output_pass_at_4k_gpu_time() {
+    let _serial = common::timing::serial();
     let Some(gpu) = gpu() else {
         eprintln!("skipped: no GPU adapter");
         return;
@@ -438,16 +439,11 @@ fn output_pass_at_4k_gpu_time() {
                 times.extend(timings.passes[0].gpu_ms);
             }
         }
-        times.sort_by(f64::total_cmp);
-        let median = times[times.len() / 2];
-        let max = times[times.len() - 1];
-        println!(
-            "4K output pass, {} to {format:?}: median {median:.3} ms, max {max:.3} ms GPU ({} frames)",
-            transfer.name(),
-            times.len()
-        );
-        // Half of the 8 ms compositor budget, loose for a shared GPU.
-        assert!(median < 4.0, "{median} ms");
+        let times = common::timing::Samples::new(times);
+        let what = format!("4K output pass, {} to {format:?}", transfer.name());
+        println!("{what} GPU: {times}");
+        // Half of the 8 ms compositor budget.
+        common::timing::assert_gpu_within(&what, &times, 4.0);
     }
 }
 

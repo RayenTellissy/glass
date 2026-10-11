@@ -53,6 +53,7 @@ pub enum EditLabel {
     ChangeMarker,
     DeleteMarker,
     ChangeTrackKind,
+    RenameTrack,
     AddTransition,
     RemoveTransition,
     TransitionDuration,
@@ -70,7 +71,7 @@ pub enum EditLabel {
 }
 
 impl EditLabel {
-    pub const ALL: [EditLabel; 45] = [
+    pub const ALL: [EditLabel; 46] = [
         EditLabel::AddMedia,
         EditLabel::AddSequence,
         EditLabel::AddTrack,
@@ -102,6 +103,7 @@ impl EditLabel {
         EditLabel::ChangeMarker,
         EditLabel::DeleteMarker,
         EditLabel::ChangeTrackKind,
+        EditLabel::RenameTrack,
         EditLabel::AddTransition,
         EditLabel::RemoveTransition,
         EditLabel::TransitionDuration,
@@ -151,6 +153,7 @@ impl EditLabel {
             EditLabel::ChangeMarker => "edit.label.change_marker",
             EditLabel::DeleteMarker => "edit.label.delete_marker",
             EditLabel::ChangeTrackKind => "edit.label.change_track_kind",
+            EditLabel::RenameTrack => "edit.label.rename_track",
             EditLabel::AddTransition => "edit.label.add_transition",
             EditLabel::RemoveTransition => "edit.label.remove_transition",
             EditLabel::TransitionDuration => "edit.label.transition_duration",

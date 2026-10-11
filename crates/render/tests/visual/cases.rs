@@ -40,6 +40,11 @@ pub fn all() -> Vec<Case> {
             scene: shapes,
         },
         Case {
+            name: "subtitle_burn_in",
+            frames: &[0, 1],
+            scene: subtitle_burn_in,
+        },
+        Case {
             name: "mask_hard",
             frames: &[0],
             scene: mask_hard,
@@ -153,6 +158,51 @@ pub fn all() -> Vec<Case> {
             name: "checker_wipe",
             frames: &[6, 12, 18],
             scene: checker_wipe,
+        },
+        Case {
+            name: "push",
+            frames: &[6, 12, 18],
+            scene: push,
+        },
+        Case {
+            name: "slide",
+            frames: &[6, 12, 18],
+            scene: slide,
+        },
+        Case {
+            name: "slide_out",
+            frames: &[12],
+            scene: slide_out,
+        },
+        Case {
+            name: "whip_pan",
+            frames: &[6, 12, 18],
+            scene: whip_pan,
+        },
+        Case {
+            name: "zoom",
+            frames: &[6, 12, 18],
+            scene: zoom,
+        },
+        Case {
+            name: "zoom_out",
+            frames: &[12],
+            scene: zoom_out,
+        },
+        Case {
+            name: "spin",
+            frames: &[6, 12, 18],
+            scene: spin,
+        },
+        Case {
+            name: "swirl",
+            frames: &[6, 12, 18],
+            scene: swirl,
+        },
+        Case {
+            name: "roll",
+            frames: &[6, 12, 18],
+            scene: roll,
         },
     ]
 }
@@ -279,6 +329,25 @@ fn title_over_video(frame: u32) -> Scene {
                 }),
                 Layer::default().with_opacity((0.4 + t / 40.0).min(1.0)),
             ),
+        ],
+    }
+}
+
+/// A burned-in subtitle in the default style over the colour bars: one line on frame 0;
+/// on frame 1 a cue that wraps at the title-safe width, then a forced second line.
+fn subtitle_burn_in(frame: u32) -> Scene {
+    let cue = if frame == 0 {
+        "Burned-in subtitle"
+    } else {
+        "A longer subtitle that wraps inside the title-safe area of the frame\nand a second line"
+    };
+    Scene {
+        layers: vec![
+            (
+                Source::Bars,
+                Layer::default().with_transform(placed([0.0, 0.0], [2.0, 2.0], 0.0, [0.0, 0.0])),
+            ),
+            (Source::Subtitle(cue), Layer::default()),
         ],
     }
 }
@@ -576,4 +645,59 @@ fn venetian_blinds(frame: u32) -> Scene {
 /// Checker wipe (8 by 5, travelling right), a quarter, half and three quarters of the way.
 fn checker_wipe(frame: u32) -> Scene {
     transition("checker-wipe", frame)
+}
+
+/// Push (default: travelling left, B from the right), a quarter, half and three quarters
+/// of the way.
+fn push(frame: u32) -> Scene {
+    transition("push", frame)
+}
+
+/// Slide in (default: B from the right over A), a quarter, half and three quarters of the
+/// way.
+fn slide(frame: u32) -> Scene {
+    transition("slide", frame)
+}
+
+/// Slide out travelling down: A slides off the bottom uncovering B, half way.
+fn slide_out(frame: u32) -> Scene {
+    transition_with("slide", frame, |node| {
+        node.direction(Direction::Down)
+            .value("mode", &ParamValue::Choice("out".into()))
+    })
+}
+
+/// Whip pan (default: travelling left, a quarter of the frame's blur at the middle), a
+/// quarter, half and three quarters of the way.
+fn whip_pan(frame: u32) -> Scene {
+    transition("whip-pan", frame)
+}
+
+/// Zoom in (3x, 30% blur), a quarter, half and three quarters of the way.
+fn zoom(frame: u32) -> Scene {
+    transition("zoom", frame)
+}
+
+/// Zoom out (3x, 30% blur), half way.
+fn zoom_out(frame: u32) -> Scene {
+    transition_with("zoom", frame, |node| {
+        node.value("mode", &ParamValue::Choice("out".into()))
+    })
+}
+
+/// Spin (half a turn clockwise, 125% zoom), a quarter, half and three quarters of the way.
+fn spin(frame: u32) -> Scene {
+    transition("spin", frame)
+}
+
+/// Swirl (540 degrees clockwise over the inscribed circle), a quarter, half and three
+/// quarters of the way.
+fn swirl(frame: u32) -> Scene {
+    transition("swirl", frame)
+}
+
+/// Roll (default: travelling right about the bottom centre), a quarter, half and three
+/// quarters of the way.
+fn roll(frame: u32) -> Scene {
+    transition("roll", frame)
 }

@@ -1,0 +1,8 @@
+{
+  "id": "push",
+  "name": "transition.name.push",
+  "category": "motion",
+  "directions": ["left", "right", "up", "down"],
+  "thumbnail": 0.5,
+  "params": []
+}

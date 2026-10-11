@@ -2,13 +2,15 @@
 //! folder import dialog for a 200-folder shoot and the progress strip, within the frame
 //! budget.
 
+mod support;
+
 use std::path::PathBuf;
 
 use egui::{Rect, pos2, vec2};
 use engine::media_mgmt::{
     DropSummary, ImportPlan, ImportSource, MediaClass, PlannedFolder, Unreadable,
 };
-use ui::frame_time::FrameTimeMonitor;
+use support::FrameBudget;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::panels::import::{
     DropArea, FolderImport, ImportProgress, drop_area, folder_dialog, kinds_line, progress_strip,
@@ -105,30 +107,25 @@ fn import_surfaces_draw_within_budget() {
         bytes_total: 100,
         elapsed_s: 45.0,
     };
-    let mut monitor = FrameTimeMonitor::default();
-    headless
-        .run(30, 240, &mut monitor, |ui, frame| {
-            egui::CentralPanel::default().show(ui, |ui| {
-                let areas = [DropArea::Empty, over.clone(), warn.clone()];
-                for (i, state) in areas.iter().enumerate() {
-                    let rect = Rect::from_min_size(
-                        pos2(24.0 + i as f32 * 424.0, 24.0),
-                        vec2(382.0, 234.0),
-                    );
-                    drop_area(ui, rect, "Pickups", state);
-                }
-                let strip = Rect::from_min_size(
-                    pos2(24.0, 280.0),
-                    vec2(400.0, ui::panels::import::PROGRESS_STRIP_HEIGHT),
-                );
-                let mut p = progress.clone();
-                p.bytes_done = (frame % 100) as u64;
-                progress_strip(ui, strip, &p);
-                folder_dialog(ui, pos2(480.0, 280.0), &mut dialog);
-            });
-        })
-        .expect("headless frames");
-    let stats = monitor.stats();
+    let stats = FrameBudget::run(&mut headless, 30, 240, |ui, frame| {
+        egui::CentralPanel::default().show(ui, |ui| {
+            let areas = [DropArea::Empty, over.clone(), warn.clone()];
+            for (i, state) in areas.iter().enumerate() {
+                let rect =
+                    Rect::from_min_size(pos2(24.0 + i as f32 * 424.0, 24.0), vec2(382.0, 234.0));
+                drop_area(ui, rect, "Pickups", state);
+            }
+            let strip = Rect::from_min_size(
+                pos2(24.0, 280.0),
+                vec2(400.0, ui::panels::import::PROGRESS_STRIP_HEIGHT),
+            );
+            let mut p = progress.clone();
+            p.bytes_done = (frame % 100) as u64;
+            progress_strip(ui, strip, &p);
+            folder_dialog(ui, pos2(480.0, 280.0), &mut dialog);
+        });
+    })
+    .expect("headless frames");
     eprintln!("import panel ({}): {stats}", headless.adapter());
-    headless.assert_p99_within_budget("import panel", &stats);
+    stats.assert_within_budget(&headless, "import panel");
 }
