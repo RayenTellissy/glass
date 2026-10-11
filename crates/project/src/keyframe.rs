@@ -794,7 +794,7 @@ fn scale_speeds(keys: &mut [Key], selected: &[bool], factor: f64) {
 
 /// `curve`'s keys sorted by time, refusing two at one time.
 fn sort_keys(keys: &mut [Key]) -> Result<(), EditError> {
-    keys.sort_by(|a, b| a.time.cmp(&b.time));
+    keys.sort_by_key(|k| k.time);
     match keys.windows(2).find(|w| w[0].time == w[1].time) {
         Some(w) => Err(EditError::KeyTimeTaken(w[1].time)),
         None => Ok(()),
