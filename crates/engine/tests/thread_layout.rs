@@ -1,6 +1,9 @@
 //! The thread layout: every long-lived thread is named and listed in the registry, the
-//! registry's busy and idle accounting follows what the threads do, the playback
-//! skeleton delivers frames in order across seeks, and shutdown joins every thread.
+//! registry's busy and idle accounting follows what the threads do, timeline playback
+//! (on a stand-in timeline, decoder and renderer) delivers frames in order across seeks,
+//! and shutdown joins every thread.
+
+mod stand_in;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -9,10 +12,14 @@ use std::time::{Duration, Instant};
 
 use engine::analysis::{AnalysisPool, PoolConfig};
 use engine::autosave::{Autosave, AutosaveConfig};
-use engine::frame_queue::{FrameStamp, PopError};
-use engine::playback::{Decode, PassThrough, Playback, PlaybackConfig, Presented};
+use engine::frame_queue::PopError;
 use engine::threads::{self, Role, ThreadInfo, ThreadRegistry, ThreadState};
+use engine::timeline::{Presented, TimelinePlayback};
 use media::CacheDir;
+use stand_in::Immediate;
+
+/// Frames of the stand-in clips: longer than any test plays.
+const LENGTH: i64 = 100_000;
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -36,19 +43,16 @@ impl Drop for TempDir {
     }
 }
 
-fn config(registry: &Arc<ThreadRegistry>, workers: usize) -> PlaybackConfig {
-    PlaybackConfig {
-        decode_workers: workers,
-        registry: registry.clone(),
-        ..PlaybackConfig::default()
-    }
-}
-
 fn pass_through(
     registry: &Arc<ThreadRegistry>,
     workers: usize,
-) -> (Playback, Presented<FrameStamp>) {
-    Playback::start(config(registry, workers), |_| PassThrough, PassThrough).expect("playback")
+) -> (TimelinePlayback<Immediate>, Presented<i64>) {
+    stand_in::start(
+        stand_in::plan(30, 1, LENGTH),
+        Immediate::default(),
+        stand_in::config(registry, workers),
+        Duration::ZERO,
+    )
 }
 
 fn find<'a>(threads: &'a [ThreadInfo], name: &str) -> &'a ThreadInfo {
@@ -74,15 +78,7 @@ fn wait_until(registry: &ThreadRegistry, mut done: impl FnMut(&[ThreadInfo]) -> 
 fn every_thread_of_the_layout_is_named_and_listed() {
     let registry = threads::global();
     let ui = registry.register_current(Role::Ui, None);
-    let (playback, _presented) = Playback::start(
-        PlaybackConfig {
-            decode_workers: 3,
-            ..PlaybackConfig::default()
-        },
-        |_| PassThrough,
-        PassThrough,
-    )
-    .expect("playback");
+    let (playback, _presented) = pass_through(registry, 3);
     let audio = registry.register_audio_callback();
     let dir = TempDir::new("layout");
     let (pool, _events) = AnalysisPool::new(PoolConfig {
@@ -196,33 +192,22 @@ fn accounting_splits_busy_idle_and_blocked_time() {
     drop(handle);
 }
 
-/// Spins for a fixed time per frame, like a software decoder.
-struct Spin(Duration);
-
-impl Decode for Spin {
-    type Frame = FrameStamp;
-
-    fn decode(&mut self, stamp: &FrameStamp) -> FrameStamp {
-        let start = Instant::now();
-        while start.elapsed() < self.0 {
-            std::hint::spin_loop();
-        }
-        *stamp
-    }
-}
-
 #[test]
 fn decode_bound_playback_shows_busy_decoders_and_waiting_scheduler() {
     let registry = ThreadRegistry::new();
-    let (playback, mut presented) = Playback::start(
-        config(&registry, 2),
-        |_| Spin(Duration::from_millis(2)),
-        PassThrough,
-    )
-    .expect("playback");
+    // Two tracks: two segments decode at once, one per worker, spinning 2 ms a frame.
+    let (playback, mut presented) = stand_in::start(
+        stand_in::plan(30, 2, LENGTH),
+        Immediate::default(),
+        stand_in::config(&registry, 2),
+        Duration::from_millis(2),
+    );
+    // Paused at the start, frame 0 is presented first.
+    let first = presented.pop_timeout(WAIT).expect("first frame");
+    assert_eq!(first.stamp.index, 0);
     playback.play();
     let before = registry.snapshot();
-    let mut last = -1;
+    let mut last = 0;
     let start = Instant::now();
     while start.elapsed() < Duration::from_millis(400) {
         if let Ok(frame) = presented.pop_timeout(Duration::from_millis(50)) {
@@ -251,10 +236,9 @@ fn decode_bound_playback_shows_busy_decoders_and_waiting_scheduler() {
         "render busy {}",
         fraction("glass-render")
     );
-    let scheduler = find(&during, "glass-sched");
-    assert!(scheduler.blocked > scheduler.busy, "{scheduler:?}");
 
-    // Paused, with the presenter still draining: everything goes idle.
+    // Paused, with the presenter still draining: render and the scheduler go idle, the
+    // decoders wait on their full lanes, and nothing does any work.
     playback.pause();
     let drain = Instant::now();
     while drain.elapsed() < Duration::from_millis(200) {
@@ -264,7 +248,11 @@ fn decode_bound_playback_shows_busy_decoders_and_waiting_scheduler() {
     std::thread::sleep(Duration::from_millis(100));
     let idle = registry.snapshot();
     for thread in &idle {
-        assert_eq!(thread.state, ThreadState::Idle, "{thread:?}");
+        let expected = match thread.role {
+            Role::Decode => ThreadState::Blocked,
+            _ => ThreadState::Idle,
+        };
+        assert_eq!(thread.state, expected, "{thread:?}");
         let earlier = find(&paused, &thread.name);
         assert!(thread.busy_fraction_since(earlier) < 0.2, "{thread:?}");
     }
@@ -280,10 +268,11 @@ fn frames_arrive_in_order_and_a_seek_starts_a_new_run() {
     for index in 0..200 {
         let frame = presented.pop_timeout(WAIT).expect("frame");
         assert_eq!((frame.stamp.generation, frame.stamp.index), (0, index));
-        assert_eq!(frame.frame, frame.stamp);
+        assert_eq!(frame.frame.frame, index);
+        assert_eq!(frame.frame.texture, index);
     }
     let generation = playback.seek(1_000);
-    assert_eq!(playback.generation(), generation);
+    assert!(generation > 0);
     // Frames of the old generation still queued are dropped as the presenter meets them.
     let first = presented.pop_timeout(WAIT).expect("frame after seek");
     assert_eq!(
@@ -297,7 +286,8 @@ fn frames_arrive_in_order_and_a_seek_starts_a_new_run() {
             (generation, index)
         );
     }
-    // A seek while paused lands on the new position when play resumes.
+    // A seek while paused lands on the new position (in a gap before the clip here),
+    // presented at once, and play resumes from it.
     playback.pause();
     let generation = playback.seek(-24);
     playback.play();
@@ -319,14 +309,14 @@ fn shutdown_joins_every_thread_with_full_queues() {
     let (playback, presented) = pass_through(&registry, 4);
     assert_eq!(registry.len(), 6);
     playback.play();
-    // Nobody presents, so the queues fill and the scheduler and decoders end up waiting.
+    // Nobody presents, so the queues fill and render and the decoders end up waiting.
     wait_until(&registry, |threads| {
         let blocked = |role| {
             threads
                 .iter()
                 .any(|t| t.role == role && t.state == ThreadState::Blocked)
         };
-        blocked(Role::Scheduler) && blocked(Role::Decode)
+        blocked(Role::Render) && blocked(Role::Decode)
     });
     let (done, joined) = std::sync::mpsc::channel();
     std::thread::spawn(move || {

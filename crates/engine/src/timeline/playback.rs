@@ -3,7 +3,7 @@
 //! [`crate::timeline`]).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -13,16 +13,16 @@ use media::{Rational, VideoFrame};
 use render::frame_cache::FrameCacheStats;
 use render::wgpu;
 
+use super::dirty::DirtyFrames;
 use super::plan::TimelinePlan;
-use super::render::{RenderStats, RenderedFrame, RendererConfig, TimelineRenderer};
+use super::render::{RenderStats, RendererConfig, TimelineRenderer};
 use crate::frame_queue::{
     FrameStamp, Generation, PushError, SpscConsumer, SpscProducer, Stamped, spsc,
 };
 use crate::lookahead::{
     FramesError, GopIndexes, Layer, Lookahead, LookaheadConfig, LookaheadFrames, LookaheadStats,
-    MediaDecoder, MediaDecoderOptions, default_depth,
+    MediaDecoder, MediaDecoderOptions, SegmentDecoder, default_decode_workers, default_depth,
 };
-use crate::playback::{PRESENT_RETRY, SharedQuality, default_decode_workers};
 use crate::quality::{
     Admit, FrameTiming, GovernorConfig, QualityGovernor, QualityLevel, QualityStats,
 };
@@ -32,6 +32,48 @@ use crate::threads::{self, Role, ThreadRegistry};
 /// How far past its due time a frame may finish and still count as on time: the clock
 /// is read in floating point.
 const LATE_SLACK: f64 = 1e-4;
+
+/// How often render offers a frame again while the present queue is full.
+const PRESENT_RETRY: Duration = Duration::from_millis(2);
+
+/// What `glass-render` does with a timeline frame: [`TimelineRenderer`] in the app, a
+/// stand-in where tests drive the pipeline without a GPU or media files.
+pub trait FrameRender: Send + 'static {
+    /// The decoded pictures the look-ahead's layers carry.
+    type Frame: Send + Sync + 'static;
+    /// What the presenter gets.
+    type Picture: Send + 'static;
+
+    /// Timeline frame `t` of `plan` at `quality`: from the frame cache when it holds it,
+    /// else rendered from `layers` (bottom first, any order) and cached. Returns once the
+    /// picture is finished, with whether it came from the cache.
+    fn render_frame(
+        &mut self,
+        plan: &TimelinePlan,
+        t: i64,
+        layers: &[Layer<Self::Frame>],
+        quality: QualityLevel,
+    ) -> (Self::Picture, bool);
+
+    /// The cached frame `t` of `plan` at `quality`, if the cache holds it.
+    fn lookup_frame(
+        &mut self,
+        plan: &TimelinePlan,
+        t: i64,
+        quality: QualityLevel,
+    ) -> Option<Self::Picture>;
+
+    /// `plan` replaced the plan the cache index followed; the keys of frames outside
+    /// `dirty` did not change.
+    fn replan(&mut self, plan: &TimelinePlan, dirty: &DirtyFrames);
+
+    /// The full-quality frames the cache holds under the current plan: the frames the
+    /// look-ahead skips and the scrubber answers from.
+    fn cached_frames(&self) -> CachedFrames;
+
+    /// Counters for [`TimelinePlayback::render_stats`].
+    fn counters(&self) -> (RenderStats, FrameCacheStats);
+}
 
 /// Pool size, queue depths, decoder and canvas of a [`TimelinePlayback`].
 #[derive(Clone, Debug)]
@@ -67,10 +109,11 @@ impl TimelineConfig {
 
 /// A frame for the presenter.
 #[derive(Debug)]
-pub struct PresentedFrame {
+pub struct PresentedFrame<P = wgpu::Texture> {
     pub frame: i64,
-    /// [`PREVIEW_FORMAT`](super::PREVIEW_FORMAT), at the quality's preview size.
-    pub texture: wgpu::Texture,
+    /// [`PREVIEW_FORMAT`](super::PREVIEW_FORMAT), at the quality's preview size (the
+    /// stand-in renderer's picture in tests).
+    pub texture: P,
     pub quality: QualityLevel,
     /// When it is due on screen, in seconds of the master clock; `None` for a frame shown
     /// while paused (after a seek, a pause at reduced quality, or a scrub).
@@ -95,6 +138,11 @@ pub struct PlaybackStats {
     pub dropped: u64,
     /// Frames answered from the frame cache while playing.
     pub cache_hits: u64,
+    /// Plans swapped in by [`TimelinePlayback::set_plan`].
+    pub replans: u64,
+    /// Skipped frames the cache had let go of by the time render took them, decoded
+    /// again through [`LookaheadFrames::refill`].
+    pub refills: u64,
     pub render_total: Duration,
     pub render_max: Duration,
     pub decode_wait_total: Duration,
@@ -112,6 +160,8 @@ struct SharedStats {
     late: AtomicU64,
     dropped: AtomicU64,
     cache_hits: AtomicU64,
+    replans: AtomicU64,
+    refills: AtomicU64,
     render_nanos: AtomicU64,
     render_max: AtomicU64,
     wait_nanos: AtomicU64,
@@ -129,6 +179,8 @@ impl SharedStats {
             late: load(&self.late),
             dropped: load(&self.dropped),
             cache_hits: load(&self.cache_hits),
+            replans: load(&self.replans),
+            refills: load(&self.refills),
             render_total: nanos(&self.render_nanos),
             render_max: nanos(&self.render_max),
             decode_wait_total: nanos(&self.wait_nanos),
@@ -143,25 +195,74 @@ fn nanos(d: Duration) -> u64 {
     u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)
 }
 
-enum Control {
+/// The governor's counters, published by render after every change.
+#[derive(Default)]
+struct SharedQuality {
+    level: AtomicU8,
+    frames: AtomicU64,
+    misses: AtomicU64,
+    steps_down: AtomicU64,
+    steps_up: AtomicU64,
+    restores: AtomicU64,
+    drops: AtomicU64,
+}
+
+impl SharedQuality {
+    fn publish(&self, stats: &QualityStats) {
+        let store = |c: &AtomicU64, v: u64| c.store(v, Ordering::Relaxed);
+        store(&self.frames, stats.frames);
+        store(&self.misses, stats.misses);
+        store(&self.steps_down, stats.steps_down);
+        store(&self.steps_up, stats.steps_up);
+        store(&self.restores, stats.restores);
+        store(&self.drops, stats.drops);
+        self.level.store(stats.level as u8, Ordering::Relaxed);
+    }
+
+    fn snapshot(&self) -> QualityStats {
+        let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
+        QualityStats {
+            level: QualityLevel::from_index(self.level.load(Ordering::Relaxed)),
+            frames: load(&self.frames),
+            misses: load(&self.misses),
+            steps_down: load(&self.steps_down),
+            steps_up: load(&self.steps_up),
+            restores: load(&self.restores),
+            drops: load(&self.drops),
+        }
+    }
+}
+
+enum Control<F> {
     Play,
     Pause,
     Seek,
     Show(i64),
     ScrubRender {
         frame: i64,
-        layers: Vec<Layer<VideoFrame>>,
+        layers: Vec<Layer<F>>,
         done: SyncSender<()>,
+    },
+    Plan {
+        plan: Arc<TimelinePlan>,
+        dirty: DirtyFrames,
     },
     Stop,
 }
 
 /// The presenter's end: rendered frames in timeline order.
-pub type Presented = SpscConsumer<PresentedFrame>;
+pub type Presented<P = wgpu::Texture> = SpscConsumer<PresentedFrame<P>>;
+
+/// [`TimelinePlayback::set_plan`] refused a plan at another canvas size or frame rate:
+/// the renderer and the look-ahead are set up for one of each, so the app starts a new
+/// playback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("the sequence's canvas or frame rate changed: start a new playback")]
+pub struct FormatChanged;
 
 /// A playing (or paused) sequence. Dropping it stops and joins every thread.
-pub struct TimelinePlayback {
-    control: Sender<Control>,
+pub struct TimelinePlayback<R: FrameRender = TimelineRenderer> {
+    control: Sender<Control<R::Frame>>,
     lookahead: Option<Lookahead>,
     /// The present queue's generation, advanced with the look-ahead's on every seek so
     /// the two stay equal.
@@ -191,7 +292,29 @@ impl TimelinePlayback {
             ..config.decoder
         };
         let gops = GopIndexes::new();
-        let (lookahead, frames) = Lookahead::start(
+        let renderer = TimelineRenderer::new(device, queue, config.renderer);
+        Self::start_with(plan, renderer, clock, config, move |_| {
+            MediaDecoder::new(options, gops.clone())
+        })
+    }
+}
+
+impl<R: FrameRender> TimelinePlayback<R> {
+    /// [`start`](TimelinePlayback::start) with any renderer and decoders: one from
+    /// `make_decoder(n)` per look-ahead worker. `config.renderer` and `config.decoder`
+    /// are not read.
+    pub fn start_with<D>(
+        plan: Arc<TimelinePlan>,
+        renderer: R,
+        clock: Clock,
+        config: TimelineConfig,
+        make_decoder: impl FnMut(usize) -> D,
+    ) -> std::io::Result<(Self, Presented<R::Picture>)>
+    where
+        D: SegmentDecoder<Frame = R::Frame>,
+    {
+        let cached = renderer.cached_frames();
+        let (lookahead, frames) = Lookahead::start_skipping(
             plan.segments().clone(),
             LookaheadConfig {
                 decode_workers: config.decode_workers,
@@ -199,12 +322,11 @@ impl TimelinePlayback {
                 frame_duration: plan.frame_duration(),
                 registry: config.registry.clone(),
             },
-            |_| MediaDecoder::new(options, gops.clone()),
+            Some(cached.clone()),
+            make_decoder,
         )?;
         let present = Generation::new();
         let (output, presented) = spsc(config.present_depth.max(1), &present);
-        let renderer = TimelineRenderer::new(device, queue, config.renderer);
-        let cached = renderer.cached_frames();
         let (control, control_rx) = mpsc::channel();
         let stats = Arc::new(SharedStats::default());
         let quality = Arc::new(SharedQuality::default());
@@ -287,9 +409,28 @@ impl TimelinePlayback {
         let _ = self.control.send(Control::Show(frame));
     }
 
+    /// Swaps in `plan`, the sequence after an edit, at the next frame boundary of
+    /// `glass-render` (see the module docs of [`crate::timeline`]): `dirty` holds every
+    /// frame whose picture may have changed ([`DirtyRanges`](super::DirtyRanges)).
+    /// Look-ahead lanes of unchanged segments keep decoding, frames whose cache keys did
+    /// not change stay cached, and while paused a dirty frame on screen is presented
+    /// again. A scrubber started earlier keeps the old segments; start a new one.
+    pub fn set_plan(
+        &mut self,
+        plan: Arc<TimelinePlan>,
+        dirty: DirtyFrames,
+    ) -> Result<(), FormatChanged> {
+        if plan.canvas() != self.plan.canvas() || plan.rate() != self.plan.rate() {
+            return Err(FormatChanged);
+        }
+        self.plan = plan.clone();
+        let _ = self.control.send(Control::Plan { plan, dirty });
+        Ok(())
+    }
+
     /// The scrubber's renderer: renders scrubbed frames on `glass-render` into this
     /// playback's frame cache.
-    pub fn scrub_render(&self) -> TimelineScrubRender {
+    pub fn scrub_render(&self) -> TimelineScrubRender<R::Frame> {
         TimelineScrubRender {
             control: self.control.clone(),
         }
@@ -343,7 +484,7 @@ impl TimelinePlayback {
     }
 }
 
-impl Drop for TimelinePlayback {
+impl<R: FrameRender> Drop for TimelinePlayback<R> {
     fn drop(&mut self) {
         self.stop();
     }
@@ -352,12 +493,12 @@ impl Drop for TimelinePlayback {
 /// [`ScrubRender`] for a [`TimelinePlayback`]: hands the scrubbed layers to
 /// `glass-render`, which renders them at full quality into the frame cache and the
 /// scrubber's index, and returns once that is done.
-pub struct TimelineScrubRender {
-    control: Sender<Control>,
+pub struct TimelineScrubRender<F = VideoFrame> {
+    control: Sender<Control<F>>,
 }
 
-impl ScrubRender<VideoFrame> for TimelineScrubRender {
-    fn render(&mut self, frame: i64, layers: &[Layer<VideoFrame>]) {
+impl<F: Send + Sync + 'static> ScrubRender<F> for TimelineScrubRender<F> {
+    fn render(&mut self, frame: i64, layers: &[Layer<F>]) {
         let (done, wait) = mpsc::sync_channel(1);
         let layers = layers.iter().map(copy_layer).collect();
         if self
@@ -381,21 +522,31 @@ fn copy_layer<F>(layer: &Layer<F>) -> Layer<F> {
         source: layer.source,
         source_pts: layer.source_pts,
         frame: layer.frame.clone(),
+        skipped: layer.skipped,
     }
 }
 
-struct RenderLoop {
-    renderer: TimelineRenderer,
+/// A frame render finished: its picture, the level it shows, whether the cache had it
+/// and how long it took.
+struct Done<P> {
+    picture: P,
+    quality: QualityLevel,
+    from_cache: bool,
+    took: Duration,
+}
+
+struct RenderLoop<R: FrameRender> {
+    renderer: R,
     plan: Arc<TimelinePlan>,
-    frames: LookaheadFrames<VideoFrame>,
-    layers: Vec<Layer<VideoFrame>>,
+    frames: LookaheadFrames<R::Frame>,
+    layers: Vec<Layer<R::Frame>>,
     /// The layers of the last frame rendered, kept to render it again on pause.
-    last_layers: Vec<Layer<VideoFrame>>,
+    last_layers: Vec<Layer<R::Frame>>,
     last: Option<FrameStamp>,
-    control: Receiver<Control>,
-    output: SpscProducer<PresentedFrame>,
+    control: Receiver<Control<R::Frame>>,
+    output: SpscProducer<PresentedFrame<R::Picture>>,
     /// A frame the present queue had no room for.
-    pending: Option<Stamped<PresentedFrame>>,
+    pending: Option<Stamped<PresentedFrame<R::Picture>>>,
     clock: Clock,
     /// One frame interval, in seconds.
     interval: f64,
@@ -404,17 +555,17 @@ struct RenderLoop {
     quality: Arc<SharedQuality>,
     render_stats: Arc<std::sync::Mutex<(RenderStats, FrameCacheStats)>>,
     playing: bool,
-    /// Paused: present the next frame the look-ahead hands out (the start position, or
-    /// a seek's).
+    /// Paused: present the next frame the look-ahead hands out (the start position, a
+    /// seek's, or a frame on screen an edit changed).
     show_next: bool,
     /// Clock time and timeline frame of the first frame of the current run.
     anchor: Option<(f64, i64)>,
     generation: u64,
-    /// Since when render has waited for the next frame: instant and clock time.
-    waiting_since: Option<(Instant, f64)>,
+    /// Since when render has waited for the next frame.
+    waiting_since: Option<Instant>,
 }
 
-impl RenderLoop {
+impl<R: FrameRender> RenderLoop<R> {
     fn run(mut self) {
         loop {
             loop {
@@ -458,10 +609,7 @@ impl RenderLoop {
 
     /// Takes, renders and queues the next frame. False when the look-ahead stopped.
     fn step(&mut self) -> bool {
-        let clock = &self.clock;
-        let (since, since_clock) = *self
-            .waiting_since
-            .get_or_insert_with(|| (Instant::now(), clock.now()));
+        let since = *self.waiting_since.get_or_insert_with(Instant::now);
         let timeout = Duration::from_secs_f64(self.interval.clamp(0.005, 0.1));
         let frames = &mut self.frames;
         let layers = &mut self.layers;
@@ -489,9 +637,12 @@ impl RenderLoop {
 
         if !self.playing {
             // A paused frame: the start position or a seek's, at full resolution.
+            let Some(done) = self.render(t, QualityLevel::Full, false) else {
+                self.refill(t);
+                return true;
+            };
             self.show_next = false;
-            let rendered = self.render(t, QualityLevel::Full, false);
-            self.queue(stamp, rendered.0, None, false, decode_wait, rendered.1);
+            self.queue(stamp, done, None, false, decode_wait);
             self.keep_last(stamp);
             return true;
         }
@@ -507,7 +658,13 @@ impl RenderLoop {
             Some(Admit::Render(level)) => level,
             None => QualityLevel::Full,
         };
-        let (rendered, render) = self.render(t, level, false);
+        let Some(done) = self.render(t, level, false) else {
+            // Waiting for the frame decoded again counts as decode lateness.
+            self.refill(t);
+            self.waiting_since = Some(since);
+            return true;
+        };
+        let render = done.took;
         let now = self.clock.now();
         let first = self.anchor.is_none();
         let (c0, f0) = *self.anchor.get_or_insert((now, t));
@@ -515,7 +672,11 @@ impl RenderLoop {
         let late = now > due + LATE_SLACK;
         if !first && let Some(governor) = &mut self.governor {
             governor.record(FrameTiming {
-                budget: Duration::from_secs_f64((due - since_clock).clamp(0.0, self.interval)),
+                // One interval per frame (Decision 52), so the governor's lag adds up
+                // to how far behind the clock render is and a drop catches up an
+                // interval; a budget cut to the time left before the deadline was zero
+                // once render fell behind, and the governor never dropped (Decision 67).
+                budget: Duration::from_secs_f64(self.interval),
                 decode_late: decode_wait,
                 render,
             });
@@ -527,7 +688,7 @@ impl RenderLoop {
         s.presented.fetch_add(1, Ordering::Relaxed);
         s.late.fetch_add(u64::from(late), Ordering::Relaxed);
         s.cache_hits
-            .fetch_add(u64::from(rendered.from_cache), Ordering::Relaxed);
+            .fetch_add(u64::from(done.from_cache), Ordering::Relaxed);
         s.render_nanos.fetch_add(nanos(render), Ordering::Relaxed);
         s.render_max.fetch_max(nanos(render), Ordering::Relaxed);
         s.wait_nanos
@@ -536,56 +697,81 @@ impl RenderLoop {
             s.cost_max
                 .fetch_max(nanos(decode_wait + render), Ordering::Relaxed);
         }
-        self.queue(stamp, rendered, Some(due), late, decode_wait, render);
+        self.queue(stamp, done, Some(due), late, decode_wait);
         self.keep_last(stamp);
         true
     }
 
-    /// Renders timeline frame `t` from the current (or, for `again`, the last) layers
-    /// and waits for the GPU. Returns the frame and how long it took.
-    fn render(&mut self, t: i64, level: QualityLevel, again: bool) -> (RenderedFrame, Duration) {
+    /// Timeline frame `t` from the cache or rendered from the current (or, for `again`,
+    /// the last) layers, finished. `None` when a layer was skipped because the cache
+    /// held the frame and the cache no longer holds it at any level.
+    fn render(&mut self, t: i64, level: QualityLevel, again: bool) -> Option<Done<R::Picture>> {
         let started = Instant::now();
         let layers = if again {
             &self.last_layers
         } else {
             &self.layers
         };
-        let rendered = self.renderer.render(&self.plan, t, layers, level);
-        if let Some(submission) = &rendered.submission {
-            let _ = self.renderer.device().poll(wgpu::PollType::Wait {
-                submission_index: Some(submission.clone()),
-                timeout: None,
-            });
-        }
-        let took = started.elapsed();
+        let done = if layers.iter().any(|l| l.skipped) {
+            let cached = |renderer: &mut R, quality| {
+                renderer
+                    .lookup_frame(&self.plan, t, quality)
+                    .map(|picture| (picture, quality))
+            };
+            let (picture, quality) = cached(&mut self.renderer, level).or_else(|| {
+                (level != QualityLevel::Full)
+                    .then(|| cached(&mut self.renderer, QualityLevel::Full))
+                    .flatten()
+            })?;
+            Done {
+                picture,
+                quality,
+                from_cache: true,
+                took: started.elapsed(),
+            }
+        } else {
+            let (picture, from_cache) = self.renderer.render_frame(&self.plan, t, layers, level);
+            Done {
+                picture,
+                quality: level,
+                from_cache,
+                took: started.elapsed(),
+            }
+        };
         *self
             .render_stats
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            (self.renderer.stats(), self.renderer.cache_stats());
-        (rendered, took)
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = self.renderer.counters();
+        Some(done)
+    }
+
+    /// Frame `t` came skipped but the cache let go of it: drop it from the index (so the
+    /// look-ahead decodes it) and have the look-ahead hand it out again.
+    fn refill(&mut self, t: i64) {
+        self.renderer.cached_frames().remove(t);
+        self.frames.refill(t);
+        self.stats.refills.fetch_add(1, Ordering::Relaxed);
     }
 
     fn queue(
         &mut self,
         stamp: FrameStamp,
-        rendered: RenderedFrame,
+        done: Done<R::Picture>,
         due: Option<f64>,
         late: bool,
         decode_wait: Duration,
-        render: Duration,
     ) {
         self.pending = Some(Stamped::new(
             stamp,
             PresentedFrame {
-                frame: rendered.frame,
-                texture: rendered.texture,
-                quality: rendered.quality,
+                frame: stamp.index,
+                texture: done.picture,
+                quality: done.quality,
                 due,
                 late,
-                from_cache: rendered.from_cache,
+                from_cache: done.from_cache,
                 decode_wait,
-                render,
+                render: done.took,
             },
         ));
     }
@@ -605,7 +791,7 @@ impl RenderLoop {
     }
 
     /// Applies a control message; false means stop.
-    fn apply(&mut self, control: Control) -> bool {
+    fn apply(&mut self, control: Control<R::Frame>) -> bool {
         match control {
             Control::Play => {
                 self.playing = true;
@@ -619,26 +805,33 @@ impl RenderLoop {
                 self.restore_full();
             }
             Control::Seek => {
-                self.pending = None;
+                // Render may already hold the new position's first frame.
+                let current = self.output.generation();
+                self.pending = self
+                    .pending
+                    .take()
+                    .filter(|p| p.stamp.generation >= current);
                 self.show_next = !self.playing;
                 self.stats.ended.store(false, Ordering::Relaxed);
                 self.new_run();
             }
             Control::Show(frame) => {
-                if let Some(texture) = self.renderer.lookup(&self.plan, frame, QualityLevel::Full) {
+                if let Some(picture) =
+                    self.renderer
+                        .lookup_frame(&self.plan, frame, QualityLevel::Full)
+                {
                     let stamp = FrameStamp {
                         generation: self.output.generation(),
                         index: frame,
                         pts: media::Timestamp::new(frame, self.plan.frame_duration()),
                     };
-                    let rendered = RenderedFrame {
-                        frame,
-                        texture,
+                    let done = Done {
+                        picture,
                         quality: QualityLevel::Full,
                         from_cache: true,
-                        submission: None,
+                        took: Duration::ZERO,
                     };
-                    self.queue(stamp, rendered, None, false, Duration::ZERO, Duration::ZERO);
+                    self.queue(stamp, done, None, false, Duration::ZERO);
                 }
             }
             Control::ScrubRender {
@@ -646,20 +839,58 @@ impl RenderLoop {
                 layers,
                 done,
             } => {
-                let rendered = self
-                    .renderer
-                    .render(&self.plan, frame, &layers, QualityLevel::Full);
-                if let Some(submission) = rendered.submission {
-                    let _ = self.renderer.device().poll(wgpu::PollType::Wait {
-                        submission_index: Some(submission),
-                        timeout: None,
-                    });
-                }
+                self.renderer
+                    .render_frame(&self.plan, frame, &layers, QualityLevel::Full);
                 let _ = done.send(());
             }
+            Control::Plan { plan, dirty } => self.replan(plan, &dirty),
             Control::Stop => return false,
         }
         true
+    }
+
+    /// Swaps in an edited sequence's plan between two frames (see
+    /// [`TimelinePlayback::set_plan`]).
+    fn replan(&mut self, plan: Arc<TimelinePlan>, dirty: &DirtyFrames) {
+        self.renderer.replan(&plan, dirty);
+        self.plan = plan;
+        self.stats.replans.fetch_add(1, Ordering::Relaxed);
+        let stale = match dirty {
+            DirtyFrames::All => vec![i64::MIN..i64::MAX],
+            DirtyFrames::Ranges(ranges) => ranges.clone(),
+        };
+        let mut from = self.frames.position();
+        let shown = self.last.map(|s| s.index);
+        if !self.playing
+            && !self.show_next
+            && let Some(t) = shown.filter(|t| dirty.contains(*t))
+        {
+            // The frame on screen changed: present it again, from the layers it was
+            // made of when the new plan reads the same segments, else decoded anew.
+            if self.layers_cover(t) {
+                if let Some(done) = self.render(t, QualityLevel::Full, true)
+                    && let Some(stamp) = self.last
+                {
+                    self.queue(stamp, done, None, false, Duration::ZERO);
+                }
+            } else {
+                from = t;
+                self.show_next = true;
+            }
+        }
+        let segments = self.plan.segments().clone();
+        self.frames.replan(segments, from, stale);
+    }
+
+    /// Whether the last frame's layers hold a picture of every segment `t` reads in the
+    /// current plan.
+    fn layers_cover(&self, t: i64) -> bool {
+        self.plan.frame(t).segments(&self.plan).iter().all(|&s| {
+            let hash = self.plan.segment(s).hash;
+            self.last_layers
+                .iter()
+                .any(|l| l.segment == hash && !l.skipped)
+        })
     }
 
     /// Playback stopped: back to full resolution, and the frame on screen rendered again
@@ -676,7 +907,22 @@ impl RenderLoop {
         let Some(stamp) = self.last else {
             return;
         };
-        let (rendered, render) = self.render(stamp.index, QualityLevel::Full, true);
-        self.queue(stamp, rendered, None, false, Duration::ZERO, render);
+        let t = stamp.index;
+        // After an edit the last layers may no longer be the frame's segments.
+        if !self.last_layers.iter().any(|l| l.skipped) && !self.layers_cover(t) {
+            self.show_again(t);
+            return;
+        }
+        match self.render(t, QualityLevel::Full, true) {
+            Some(done) => self.queue(stamp, done, None, false, Duration::ZERO),
+            None => self.show_again(t),
+        }
+    }
+
+    /// Presents frame `t` again, decoded anew: the look-ahead hands it out once more and
+    /// render shows it as paused.
+    fn show_again(&mut self, t: i64) {
+        self.frames.refill(t);
+        self.show_next = true;
     }
 }

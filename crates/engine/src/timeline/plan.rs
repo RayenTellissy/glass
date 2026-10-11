@@ -291,8 +291,20 @@ impl TimelinePlan {
             h.add(&(d.source_start.num(), d.source_start.den()));
             h.add(&(d.speed.num, d.speed.den));
             let hash = h.finish();
+            // What a frame shows of the clip: the file and the source time at timeline
+            // zero, so trimming either end or stretching over a transition's handle
+            // keeps the frames the clip still shows.
+            let at_zero = d.source_start.checked_sub(
+                Time::from_frames(d.timeline.start, rate)?
+                    .mul_ratio(i64::from(d.speed.num), i64::from(d.speed.den))?,
+            )?;
+            let mut p = Hash128::new("picture");
+            p.add(&d.source.path);
+            p.add(&d.content_hash);
+            p.add(&(at_zero.num(), at_zero.den()));
+            p.add(&(d.speed.num, d.speed.den));
             index_of.insert(d.item, i);
-            look_hashes.push(look_hash(hash, &d.look));
+            look_hashes.push(look_hash(p.finish(), &d.look));
             looks.push(d.look);
             item_ranges.push((d.rank, d.item_range));
             segments.push(PlanSegment {
@@ -529,10 +541,10 @@ impl TimelinePlan {
     }
 }
 
-/// A clip's look hashed with its decode segment.
-fn look_hash(segment: SegmentHash, look: &ClipLook) -> SegmentHash {
+/// A clip's look hashed with what it shows of its source.
+fn look_hash(picture: SegmentHash, look: &ClipLook) -> SegmentHash {
     let mut h = Hash128::new("look");
-    h.add(&segment.0);
+    h.add(&picture.0);
     let t = &look.transform;
     for v in t.position.iter().chain(&t.scale).chain(&t.anchor) {
         h.add_f64(*v);
@@ -837,6 +849,40 @@ mod tests {
             before.span_hash(41),
             "C on and off differ"
         );
+    }
+
+    #[test]
+    fn trims_keep_the_hashes_of_the_frames_a_clip_still_shows() {
+        let f = fixture();
+        let before = TimelinePlan::build(&f.project, f.seq).unwrap();
+        let changed = |after: &TimelinePlan| -> Vec<i64> {
+            (0..90)
+                .filter(|&t| before.span_hash(t) != after.span_hash(t))
+                .collect()
+        };
+        // C on V2 covers 10..40 over A: trimming its tail to 30 changes 30..40 only, and
+        // its head to 20 (the source start moving with it) changes 10..20 only.
+        let tail = f.project.trim_item(f.c, range(10, 30)).unwrap();
+        let tail = TimelinePlan::build(&tail, f.seq).unwrap();
+        assert_eq!(changed(&tail), (30..40).collect::<Vec<_>>());
+        let head = f.project.trim_item(f.c, range(20, 40)).unwrap();
+        let head = TimelinePlan::build(&head, f.seq).unwrap();
+        assert_eq!(changed(&head), (10..20).collect::<Vec<_>>());
+        // Slipping C shows other source frames everywhere it plays.
+        let slipped = f.project.slip_clip(f.c, at(3)).unwrap();
+        let slipped = TimelinePlan::build(&slipped, f.seq).unwrap();
+        assert_eq!(changed(&slipped), (10..40).collect::<Vec<_>>());
+        // Lengthening the dissolve stretches A's and B's decode segments, yet only the
+        // frames it covers change.
+        let longer = f
+            .project
+            .set_transition_duration(
+                f.project.sequence(f.seq).unwrap().tracks[1].transitions[0].id,
+                at(20),
+            )
+            .unwrap();
+        let longer = TimelinePlan::build(&longer, f.seq).unwrap();
+        assert_eq!(changed(&longer), (40..60).collect::<Vec<_>>());
     }
 
     fn video_track(f: &Fixture, index: usize) -> project::TrackId {
