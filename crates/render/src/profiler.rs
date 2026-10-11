@@ -1,7 +1,12 @@
 //! GPU time per render-graph pass from timestamp queries (the proto-gpu approach):
-//! begin and end-of-pass timestamps written by each pass, resolved at the end of the
-//! frame and read back through a small ring of mappable buffers, so reading never waits
-//! for the GPU. Results arrive a frame or two late, for the debug panel and benchmarks.
+//! begin and end-of-pass timestamps written by each pass, resolved once the frame's GPU
+//! work has finished and read back through a small ring of mappable buffers, so reading
+//! never waits for the GPU. Results arrive a frame or two late, for the debug panel and
+//! benchmarks.
+//!
+//! The resolve is a separate submission because Metal on Apple M5 can resolve before
+//! the last pass's end-of-pass sample lands when both are in the same command buffer,
+//! which reads 0 or a stale value.
 //!
 //! Apple GPUs overlap consecutive passes, so per-pass spans overlap and do not add up;
 //! [`FrameTimings::total_ms`] (first begin to last end) is the number to judge.
@@ -27,11 +32,17 @@ pub struct FrameTimings {
 }
 
 const IDLE: u8 = 0;
-const WAITING: u8 = 1;
-const MAPPED: u8 = 2;
-const FAILED: u8 = 3;
+/// The frame's passes are submitted; the GPU has not finished them.
+const RUNNING: u8 = 1;
+/// The frame's GPU work has finished; its queries are ready to resolve.
+const DONE: u8 = 2;
+/// The resolve is submitted and the readback buffer is being mapped.
+const WAITING: u8 = 3;
+const MAPPED: u8 = 4;
+const FAILED: u8 = 5;
 
 struct Readback {
+    query_set: wgpu::QuerySet,
     buffer: wgpu::Buffer,
     state: Arc<AtomicU8>,
     labels: Vec<String>,
@@ -39,7 +50,8 @@ struct Readback {
 }
 
 pub struct GpuProfiler {
-    query_set: Option<wgpu::QuerySet>,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
     resolve: Option<wgpu::Buffer>,
     ring: Vec<Readback>,
     capacity: u32,
@@ -69,13 +81,6 @@ impl GpuProfiler {
         let enabled = device.features().contains(Self::FEATURES);
         let count = (max_passes * 2).clamp(2, wgpu::QUERY_SET_MAX_QUERIES);
         let size = u64::from(count) * 8;
-        let query_set = enabled.then(|| {
-            device.create_query_set(&wgpu::QuerySetDescriptor {
-                label: Some("pass timestamps"),
-                ty: wgpu::QueryType::Timestamp,
-                count,
-            })
-        });
         let resolve = enabled.then(|| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("timestamp resolve"),
@@ -87,6 +92,11 @@ impl GpuProfiler {
         let ring = if enabled {
             (0..RING)
                 .map(|_| Readback {
+                    query_set: device.create_query_set(&wgpu::QuerySetDescriptor {
+                        label: Some("pass timestamps"),
+                        ty: wgpu::QueryType::Timestamp,
+                        count,
+                    }),
                     buffer: device.create_buffer(&wgpu::BufferDescriptor {
                         label: Some("timestamp readback"),
                         size,
@@ -102,7 +112,8 @@ impl GpuProfiler {
             Vec::new()
         };
         Self {
-            query_set,
+            device: device.clone(),
+            queue: queue.clone(),
             resolve,
             ring,
             capacity: count / 2,
@@ -114,7 +125,7 @@ impl GpuProfiler {
     }
 
     pub fn enabled(&self) -> bool {
-        self.query_set.is_some()
+        !self.ring.is_empty()
     }
 
     /// Starts a frame. Returns `false` (and times nothing) when every readback buffer is
@@ -131,41 +142,35 @@ impl GpuProfiler {
     /// Timestamp writes for the next pass, or `None` when the profiler is off, the frame
     /// is not timed or the frame has used every query.
     pub(crate) fn pass(&mut self, label: &str) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
-        self.current?;
+        let slot = self.current?;
         let index = u32::try_from(self.labels.len()).ok()?;
         if index >= self.capacity {
             return None;
         }
         self.labels.push(label.to_owned());
-        self.query_set
-            .as_ref()
-            .map(|query_set| wgpu::RenderPassTimestampWrites {
-                query_set,
-                beginning_of_pass_write_index: Some(index * 2),
-                end_of_pass_write_index: Some(index * 2 + 1),
-            })
+        Some(wgpu::RenderPassTimestampWrites {
+            query_set: &self.ring[slot].query_set,
+            beginning_of_pass_write_index: Some(index * 2),
+            end_of_pass_write_index: Some(index * 2 + 1),
+        })
     }
 
-    /// Resolves this frame's queries into its readback buffer.
-    pub(crate) fn end_frame(&mut self, encoder: &mut wgpu::CommandEncoder) {
-        let (Some(slot), Some(query_set), Some(resolve)) =
-            (self.current, &self.query_set, &self.resolve)
-        else {
+    /// Ends the frame's recording; its queries are resolved after the GPU finishes it.
+    pub(crate) fn end_frame(&mut self) {
+        let Some(slot) = self.current else {
             return;
         };
-        let count = u32::try_from(self.labels.len() * 2).unwrap_or(0);
-        if count == 0 {
+        if self.labels.is_empty() {
             self.current = None;
             return;
         }
-        encoder.resolve_query_set(query_set, 0..count, resolve, 0);
         let readback = &mut self.ring[slot];
-        encoder.copy_buffer_to_buffer(resolve, 0, &readback.buffer, 0, u64::from(count) * 8);
         readback.labels = std::mem::take(&mut self.labels);
         readback.submitted = true;
     }
 
-    /// Call after the frame's commands are submitted: starts mapping its readback.
+    /// Call after the frame's commands are submitted: marks its queries ready to resolve
+    /// once the GPU has finished the submission.
     pub(crate) fn after_submit(&mut self) {
         let Some(slot) = self.current.take() else {
             return;
@@ -174,33 +179,81 @@ impl GpuProfiler {
         if !readback.submitted {
             return;
         }
-        readback.state.store(WAITING, Ordering::Release);
+        readback.state.store(RUNNING, Ordering::Release);
         let state = readback.state.clone();
-        readback
-            .buffer
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, move |result| {
-                let next = if result.is_ok() { MAPPED } else { FAILED };
-                state.store(next, Ordering::Release);
-            });
+        self.queue.on_submitted_work_done(move || {
+            state.store(DONE, Ordering::Release);
+        });
         self.order.push_back(slot);
     }
 
     /// The oldest finished frame's timings, without waiting.
     pub fn poll(&mut self, device: &wgpu::Device) -> Option<FrameTimings> {
         let _ = device.poll(wgpu::PollType::Poll);
+        if self.resolve_finished() {
+            let _ = device.poll(wgpu::PollType::Poll);
+        }
         self.take_ready()
     }
 
     /// Waits for the oldest submitted frame's timings.
     pub fn wait(&mut self, device: &wgpu::Device) -> Option<FrameTimings> {
         let &slot = self.order.front()?;
-        while self.ring[slot].state.load(Ordering::Acquire) == WAITING {
-            if device.poll(wgpu::PollType::wait_indefinitely()).is_err() {
-                break;
+        loop {
+            self.resolve_finished();
+            match self.ring[slot].state.load(Ordering::Acquire) {
+                RUNNING | WAITING => {
+                    if device.poll(wgpu::PollType::wait_indefinitely()).is_err() {
+                        break;
+                    }
+                }
+                _ => break,
             }
         }
         self.take_ready()
+    }
+
+    /// Submits the resolve of every frame whose GPU work has finished and starts mapping
+    /// its readback. Returns whether anything was submitted.
+    fn resolve_finished(&mut self) -> bool {
+        let Some(resolve) = &self.resolve else {
+            return false;
+        };
+        let mut encoder = None;
+        let mut mapping = Vec::new();
+        for &slot in &self.order {
+            let readback = &self.ring[slot];
+            if readback.state.load(Ordering::Acquire) != DONE {
+                continue;
+            }
+            let count = u32::try_from(readback.labels.len() * 2).unwrap_or(0);
+            let encoder = encoder.get_or_insert_with(|| {
+                self.device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("timestamp resolve"),
+                    })
+            });
+            encoder.resolve_query_set(&readback.query_set, 0..count, resolve, 0);
+            encoder.copy_buffer_to_buffer(resolve, 0, &readback.buffer, 0, u64::from(count) * 8);
+            readback.state.store(WAITING, Ordering::Release);
+            mapping.push(slot);
+        }
+        let Some(encoder) = encoder else {
+            return false;
+        };
+        self.queue.submit([encoder.finish()]);
+        for slot in mapping {
+            let readback = &self.ring[slot];
+            let state = readback.state.clone();
+            readback
+                .buffer
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    let next = if result.is_ok() { MAPPED } else { FAILED };
+                    state.store(next, Ordering::Release);
+                });
+        }
+        true
     }
 
     fn take_ready(&mut self) -> Option<FrameTimings> {
