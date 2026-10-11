@@ -120,6 +120,8 @@ pub struct PresentedFrame<P = wgpu::Texture> {
     pub due: Option<f64>,
     /// Render finished after `due`.
     pub late: bool,
+    /// When render finished it, in seconds of the master clock.
+    pub ready: f64,
     pub from_cache: bool,
     /// How long render waited for the frame's decoded layers.
     pub decode_wait: Duration,
@@ -769,6 +771,7 @@ impl<R: FrameRender> RenderLoop<R> {
                 quality: done.quality,
                 due,
                 late,
+                ready: self.clock.now(),
                 from_cache: done.from_cache,
                 decode_wait,
                 render: done.took,
