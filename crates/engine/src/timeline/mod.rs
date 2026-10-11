@@ -23,6 +23,14 @@
 //! look hash covers its media and the source time at timeline zero rather than its range,
 //! so a trim keeps the keys of the frames the clip still shows.
 //!
+//! **Animated and nested** (Decision 75). A clip with keyframes on what it draws has its
+//! look evaluated per frame at the source time the frame shows
+//! ([`TimelinePlan::look_at`]); a clip of a sequence ([`NestedLook`]) shows that
+//! sequence's own plan at the nested frame nearest its source time, its decode segments
+//! flattened into the parent's so its media joins the same look-ahead. Runs of frames
+//! that show either are keyed per frame by the evaluated look and the nested frame's own
+//! hash, so animated frames never alias and constant ones keep their keys.
+//!
 //! **Render.** [`TimelineRenderer`] builds one graph per frame (see its module docs) at
 //! the sequence's canvas ([`TimelinePlan::canvas`], schema v6), scaled by the preview
 //! quality, and caches the 8-bit preview picture.
@@ -52,14 +60,18 @@
 //! `Lookahead::start_skipping`); a skipped frame the cache let go of before render took
 //! it is decoded again through `LookaheadFrames::refill`.
 
+mod animate;
 mod dirty;
+mod nested;
 mod plan;
 mod playback;
 mod render;
 
 pub use dirty::{DirtyFrames, DirtyRanges};
+pub use nested::NestedLook;
 pub use plan::{
-    ClipLook, EffectLook, FrameDesc, PlanError, TimelinePlan, TrackFrame, TransitionLook,
+    ClipLook, EffectLook, FrameDesc, MAX_NESTING_DEPTH, PlanError, TimelinePlan, TrackFrame,
+    TransitionLook,
 };
 pub use playback::{
     FormatChanged, FrameRender, PlaybackStats, Presented, PresentedFrame, TimelineConfig,
