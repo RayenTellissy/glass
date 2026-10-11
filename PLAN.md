@@ -228,7 +228,7 @@ Done when: a 1000-clip project round-trips through save and load byte-identicall
 - [x] Project settings: resolution, frame rate, colour space, audio rate, cache folder
 - [ ] Copy and paste of clips, attributes, and effects, across projects via the clipboard
 - [ ] Pretty JSON project file with stable key order for clean git diffs
-- [ ] `tests/fixtures/reference.proj` filled with a real reference sequence used by `smoke`
+- [~] `tests/fixtures/reference.proj` filled with a real reference sequence used by `smoke`
 
 ## Phase 6 — Timeline UI (M2)
 
