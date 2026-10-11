@@ -38,7 +38,7 @@ impl Project {
                     if let Some(clip) = item.clip()
                         && clip.media == media
                     {
-                        let e = clip.source_range(item.range).end()?;
+                        let e = clip.source_range(item.range)?.end()?;
                         end = Some(end.map_or(e, |x| x.max(e)));
                     }
                 }
