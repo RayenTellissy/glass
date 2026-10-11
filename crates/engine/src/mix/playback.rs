@@ -56,8 +56,8 @@ pub struct FeedStats {
     pub rendered_frames: u64,
     /// Graphs sent to the callback.
     pub swaps: u64,
-    /// Clips that went silent: missing media, nested sequences, unsupported speed,
-    /// unopenable or unreadable files.
+    /// Clips that went silent: missing media, unsupported speed, unopenable or unreadable
+    /// files, nested sequences that cannot be mixed (`SourceStats::silent`).
     pub silent_clips: u64,
 }
 
@@ -105,7 +105,7 @@ impl AudioPlayback {
             sample_rate: mixer.sample_rate,
             layout: mixer.layout,
         };
-        let source = SequenceSource::build(&project, sequence, format, None)?;
+        let source = SequenceSource::build(&project, sequence, format, settings.declick, None)?;
         let meters = Arc::new(ArrayQueue::new(1));
         let stats = Arc::new(SharedStats::default());
         let feed = send_graph(
@@ -301,7 +301,13 @@ impl Feeder {
                 let (project, settings) = *update;
                 let previous =
                     std::mem::replace(&mut self.source, SequenceSource::empty(self.format));
-                match SequenceSource::build(&project, self.sequence, self.format, Some(previous)) {
+                match SequenceSource::build(
+                    &project,
+                    self.sequence,
+                    self.format,
+                    settings.declick,
+                    Some(previous),
+                ) {
                     Ok(source) => {
                         self.source = source;
                         self.project = project;
@@ -310,9 +316,13 @@ impl Feeder {
                     }
                     Err(error) => {
                         // Keep playing the snapshot before (its readers reopen).
-                        if let Ok(source) =
-                            SequenceSource::build(&self.project, self.sequence, self.format, None)
-                        {
+                        if let Ok(source) = SequenceSource::build(
+                            &self.project,
+                            self.sequence,
+                            self.format,
+                            self.settings.declick,
+                            None,
+                        ) {
                             self.source = source;
                         }
                         Err(error)
@@ -384,8 +394,7 @@ impl Feeder {
             start,
             at,
         )?;
-        let source = self.source.stats();
-        let silent = source.missing_media + source.nested_clips + source.unsupported_speed;
+        let silent = self.source.stats().silent();
         self.stats
             .silent_clips
             .store(silent as u64, Ordering::Relaxed);
@@ -414,12 +423,7 @@ impl Feeder {
                 .feed_position
                 .store(self.feed.position().max(0) as u64, Ordering::Relaxed);
         }
-        let source = self.source.stats();
-        let silent = source.missing_media
-            + source.nested_clips
-            + source.unsupported_speed
-            + source.failed_opens
-            + source.decode_errors;
+        let silent = self.source.stats().silent();
         self.stats
             .silent_clips
             .store(silent as u64, Ordering::Relaxed);

@@ -36,17 +36,22 @@
 //! [`DETAIL_WIDTH`], or every clip below [`BLOCK_ZOOM`], are plain blocks, and touching
 //! blocks of one colour merge into one rectangle, so a whole sequence zoomed out is at
 //! most a few shapes per point of width. Everything is collected into a handful of
-//! shape lists and meshes (one per atlas texture, one for all waveforms) and handed to
-//! the painter once.
+//! shape lists and meshes (one per atlas texture, one for waveform peaks and one for
+//! their RMS) and handed to the painter once. Neighbouring waveform columns of the same
+//! height are one rectangle. Names and badges are laid out once per text and width and
+//! kept between frames, so zooming does not shape the same names again on every frame.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use egui::epaint::text::{LayoutJob, TextFormat, TextWrapping};
+use egui::mutex::Mutex;
 use egui::{
-    Align2, Color32, CornerRadius, Mesh, Rangef, Rect, Shape, Stroke, StrokeKind, TextureId, Ui,
-    pos2, vec2,
+    Align2, Color32, CornerRadius, Galley, Id, Mesh, Painter, Rangef, Rect, Shape, Stroke,
+    StrokeKind, TextureId, Ui, pos2, vec2,
 };
-use engine::media::analysis::peaks::Peaks;
+use engine::media::analysis::peaks::{Peak, Peaks};
 use engine::media::analysis::thumbnails::ThumbnailLevel;
 use project::{
     ClipParam, ClipSource, ColourLabel, Item, ItemId, ItemKind, Project, Rational, Sequence, Time,
@@ -273,7 +278,8 @@ fn kind_role(kind: TrackKind) -> Role {
 struct Batch {
     bodies: Vec<Shape>,
     images: Vec<Mesh>,
-    wave: Mesh,
+    wave_peaks: Mesh,
+    wave_rms: Mesh,
     fronts: Vec<Shape>,
     tops: Vec<Shape>,
 }
@@ -300,6 +306,7 @@ struct Block {
 struct Ctx<'a> {
     paint: Paint,
     painter: egui::Painter,
+    text: Arc<Mutex<ClipText>>,
     view: &'a TimelineView,
     clips: &'a ClipsView<'a>,
     hooks: &'a dyn ClipHooks,
@@ -336,6 +343,7 @@ pub fn clips(
         disabled,
         outline,
         painter: ui.painter_at(rect),
+        text: ClipText::shared(ui.ctx()),
         paint,
         view,
         clips,
@@ -423,7 +431,8 @@ pub fn clips(
     let Batch {
         bodies,
         images,
-        wave,
+        wave_peaks,
+        wave_rms,
         fronts,
         tops,
     } = batch;
@@ -434,8 +443,10 @@ pub fn clips(
             .filter(|m| !m.is_empty())
             .map(Shape::mesh),
     );
-    if !wave.is_empty() {
-        cx.painter.add(Shape::mesh(wave));
+    for wave in [wave_peaks, wave_rms] {
+        if !wave.is_empty() {
+            cx.painter.add(Shape::mesh(wave));
+        }
     }
     cx.painter.extend(fronts);
     cx.painter.extend(tops);
@@ -443,6 +454,12 @@ pub fn clips(
 }
 
 impl Ctx<'_> {
+    fn text_line(&self, text: &str, max_width: f32) -> Arc<Galley> {
+        self.text
+            .lock()
+            .line(&self.paint, &self.painter, text, max_width)
+    }
+
     fn role(&self, kind: TrackKind, item: &Item) -> Role {
         if let Some(clip) = item.clip()
             && let ClipSource::Media(m) = clip.source
@@ -638,6 +655,9 @@ impl Ctx<'_> {
         let peak_color = p.c(role);
         let rms_color = p.mix(Role::TextPrimary, 0.35);
         let seconds_per_point = 1.0 / self.px_per_second;
+        let channels = peaks.channels.max(1);
+        let half = lane_h / 2.0 - 1.0;
+        let mut runs = [WaveRuns::default(); 2];
         let mut x = shown.min.floor().max(full.left());
         while x < shown.max {
             let t0 = f64::from(x - full.left()) * seconds_per_point;
@@ -652,34 +672,39 @@ impl Ctx<'_> {
                 constant_gain
             };
             let col_right = (x + 1.0).min(full.right());
-            for lane in 0..lanes {
-                let (mut lo, mut hi, mut rms) = (0.0f32, 0.0f32, 0.0f32);
-                for i in 0..slice.len() {
-                    if let Some(peak) = slice.get(i, lane) {
-                        lo = lo.min(peak.min_f32());
-                        hi = hi.max(peak.max_f32());
-                        rms = rms.max(peak.rms_f32());
+            for (lane, run) in runs.iter_mut().enumerate().take(lanes) {
+                // On the i16 scale, then to floats once: the scaling keeps the order.
+                let mut extremes = Peak::default();
+                if lane < slice.channels {
+                    let mut i = lane;
+                    while let Some(peak) = slice.data.get(i) {
+                        extremes.min = extremes.min.min(peak.min);
+                        extremes.max = extremes.max.max(peak.max);
+                        extremes.rms = extremes.rms.max(peak.rms);
+                        i += channels;
                     }
                 }
-                let half = lane_h / 2.0 - 1.0;
+                let (lo, hi, rms) = (extremes.min_f32(), extremes.max_f32(), extremes.rms_f32());
                 let centre = body.top() + lane_h * (lane as f32 + 0.5);
                 let scale = |v: f32| (v * gain).clamp(-1.0, 1.0) * half;
                 let top = centre - scale(hi).max(0.5);
                 let bottom = centre - scale(lo).min(-0.5);
-                batch.wave.add_colored_rect(
-                    Rect::from_x_y_ranges(x..=col_right, top..=bottom),
+                run.peak.add(
+                    &mut batch.wave_peaks,
                     peak_color,
+                    Some(Column::new(x, col_right, top, bottom)),
                 );
                 let r = scale(rms);
-                if r >= 0.5 {
-                    batch.wave.add_colored_rect(
-                        Rect::from_x_y_ranges(x..=col_right, centre - r..=centre + r),
-                        rms_color,
-                    );
-                }
+                let rms_column =
+                    (r >= 0.5).then(|| Column::new(x, col_right, centre - r, centre + r));
+                run.rms.add(&mut batch.wave_rms, rms_color, rms_column);
             }
             stats.wave_columns += 1;
             x += 1.0;
+        }
+        for run in runs.iter_mut().take(lanes) {
+            run.peak.add(&mut batch.wave_peaks, peak_color, None);
+            run.rms.add(&mut batch.wave_rms, rms_color, None);
         }
     }
 
@@ -695,8 +720,13 @@ impl Ctx<'_> {
         }
         let text_c = p.c(Role::TextInverse);
         let cy = bar.center().y;
+        let badge_h = (bar.height() - 4.0).clamp(8.0, 14.0);
+        let gap = 2.0;
+        // A badge is at least `badge_h` or two pads wide: with no room for the narrowest,
+        // none is shown, so none is made.
+        let room_for_badges = room.span() - (badge_h.min(2.0 * pad) + gap) >= NAME_MIN_WIDTH;
         let mut badges: Vec<Badge> = Vec::new();
-        if let Some(clip) = item.clip() {
+        if room_for_badges && let Some(clip) = item.clip() {
             match clip.effects.len() {
                 0 => {}
                 1 => badges.push(Badge::Text(t!("timeline.clip.effect"))),
@@ -709,27 +739,19 @@ impl Ctx<'_> {
                 badges.push(Badge::Nested);
             }
         }
-        if is_animated(item) {
+        if room_for_badges && is_animated(item) {
             badges.push(Badge::Keyframes);
         }
-        let badge_h = (bar.height() - 4.0).clamp(8.0, 14.0);
         let mut laid: Vec<(f32, Badge, Option<Arc<egui::Galley>>)> = badges
             .into_iter()
             .map(|b| match &b {
                 Badge::Text(s) => {
-                    let g = p.galley(
-                        &self.painter,
-                        s,
-                        Type::Caption,
-                        p.c(Role::TextPrimary),
-                        f32::INFINITY,
-                    );
+                    let g = self.text_line(s, f32::INFINITY);
                     (g.size().x + 2.0 * self.pad, b, Some(g))
                 }
                 _ => (badge_h, b, None),
             })
             .collect();
-        let gap = 2.0;
         let total = |l: &[(f32, Badge, Option<Arc<egui::Galley>>)]| -> f32 {
             l.iter().map(|(w, ..)| w + gap).sum()
         };
@@ -756,7 +778,7 @@ impl Ctx<'_> {
             return;
         }
         let name = item_name(self.clips.project, item);
-        let galley = p.galley(&self.painter, &name, Type::Caption, text_c, name_w);
+        let galley = self.text_line(&name, name_w);
         let size = galley.size();
         let anchor = if self.clips.rtl {
             Align2::RIGHT_CENTER.anchor_size(pos2(room.max, cy), size)
@@ -887,6 +909,148 @@ enum Badge {
     Text(String),
     Keyframes,
     Nested,
+}
+
+/// One waveform column's rectangle: `x0..x1` across, `top..bottom` down.
+#[derive(Clone, Copy, PartialEq)]
+struct Column {
+    x0: f32,
+    x1: f32,
+    top: f32,
+    bottom: f32,
+}
+
+impl Column {
+    fn new(x0: f32, x1: f32, top: f32, bottom: f32) -> Self {
+        Self {
+            x0,
+            x1,
+            top,
+            bottom,
+        }
+    }
+}
+
+/// Touching waveform columns of the same height, drawn as one rectangle: it covers the
+/// same pixels as the columns would.
+#[derive(Clone, Copy, Default)]
+struct Run(Option<Column>);
+
+impl Run {
+    /// Extends the run with `column` when it continues it, else draws the run into
+    /// `mesh` and starts a new one; `None` ends the run.
+    fn add(&mut self, mesh: &mut Mesh, color: Color32, column: Option<Column>) {
+        if let (Some(run), Some(c)) = (&mut self.0, column)
+            && run.x1 == c.x0
+            && run.top == c.top
+            && run.bottom == c.bottom
+        {
+            run.x1 = c.x1;
+            return;
+        }
+        if let Some(run) = std::mem::replace(&mut self.0, column) {
+            mesh.add_colored_rect(
+                Rect::from_x_y_ranges(run.x0..=run.x1, run.top..=run.bottom),
+                color,
+            );
+        }
+    }
+}
+
+/// The peak and RMS runs of one waveform lane.
+#[derive(Clone, Copy, Default)]
+struct WaveRuns {
+    peak: Run,
+    rms: Run,
+}
+
+/// Clip names and badge texts laid out on earlier frames. egui keeps only the layouts
+/// used in the previous frame, and a zoom gives most names a new width every frame, so
+/// without this the same names were shaped again on every frame of a zoom.
+///
+/// A name that fits its room uses its one unlimited layout (the same rows a cut layout
+/// gets when nothing is cut); a cut name is kept per whole-point width, the width egui
+/// lays it out at. Layouts are in the placeholder colour, painted in any colour, and
+/// dropped when egui recreates its fonts, which a marker layout that egui must keep
+/// alive reveals (as the About dialog's kept layouts do).
+#[derive(Default)]
+struct ClipText {
+    pass: Option<u64>,
+    marker: Option<Arc<Galley>>,
+    galleys: HashMap<u64, Arc<Galley>>,
+}
+
+/// Plenty for the names and badges of a sequence at every zoom a session goes through.
+const CLIP_TEXT_MAX: usize = 4096;
+
+impl ClipText {
+    fn shared(ctx: &egui::Context) -> Arc<Mutex<Self>> {
+        ctx.data_mut(|d| {
+            d.get_temp_mut_or_default::<Arc<Mutex<Self>>>(Id::new("glass.timeline.clip_text"))
+                .clone()
+        })
+    }
+
+    /// One caption line cut with an ellipsis at `max_width`, as [`Paint::galley`] lays
+    /// it out.
+    fn line(
+        &mut self,
+        paint: &Paint,
+        painter: &Painter,
+        text: &str,
+        max_width: f32,
+    ) -> Arc<Galley> {
+        let pass = painter.ctx().cumulative_pass_nr();
+        if self.pass != Some(pass) {
+            self.pass = Some(pass);
+            let marker = painter.layout_no_wrap(
+                "glass.timeline.clips".to_owned(),
+                egui::FontId::default(),
+                Color32::PLACEHOLDER,
+            );
+            if !self
+                .marker
+                .as_ref()
+                .is_some_and(|m| Arc::ptr_eq(m, &marker))
+            {
+                self.galleys.clear();
+            }
+            self.marker = Some(marker);
+        }
+        // egui lays a cut line out at its whole-point width.
+        let width = max_width.max(1.0).round();
+        let font = paint.font(Type::Caption);
+        let ppp = painter.pixels_per_point();
+        let key = |width: f32| egui::util::hash((text, &font, width.to_bits(), ppp.to_bits()));
+        let key_at_width = key(width);
+        if let Some(galley) = self.galleys.get(&key_at_width) {
+            return galley.clone();
+        }
+        if self.galleys.len() >= CLIP_TEXT_MAX {
+            self.galleys.clear();
+        }
+        let lay_out = |width: f32| {
+            let mut job = LayoutJob::single_section(
+                text.to_owned(),
+                TextFormat::simple(font.clone(), Color32::PLACEHOLDER),
+            );
+            job.wrap = TextWrapping::truncate_at_width(width);
+            job.break_on_newline = false;
+            painter.layout_job(job)
+        };
+        let whole = self
+            .galleys
+            .entry(key(f32::INFINITY))
+            .or_insert_with(|| lay_out(f32::INFINITY))
+            .clone();
+        let galley = if whole.size().x <= width {
+            whole
+        } else {
+            lay_out(width)
+        };
+        self.galleys.insert(key_at_width, galley.clone());
+        galley
+    }
 }
 
 fn db_to_gain(db: f64) -> f32 {
