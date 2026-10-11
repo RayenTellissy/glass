@@ -43,7 +43,7 @@
 //! every worker exits after its current job; the handle joins them all.
 //!
 //! **Source frames.** Timeline frame `t` of a segment shows the last source frame
-//! presented at or before `source_start + (t - start) * frame_duration`, compared
+//! presented at or before `source_start + (t - start) * frame_duration * speed`, compared
 //! exactly, so a 25 fps source on a 30 fps timeline repeats every fifth frame (the same
 //! decoded frame, shared through an `Arc`) and past its end a source holds its last frame.
 //! A source that fails to open or seek yields layers with no frame (render draws the
@@ -584,6 +584,7 @@ impl<D: SegmentDecoder> Worker<D> {
         };
         self.counters.add_seek(started.elapsed());
 
+        let step = segment.source_step(self.frame_duration);
         let mut current: Option<(Timestamp, Arc<D::Frame>)> = None;
         let mut upcoming: Option<(Timestamp, Arc<D::Frame>)> = None;
         let mut ended = false;
@@ -605,12 +606,7 @@ impl<D: SegmentDecoder> Worker<D> {
                 }
                 let take = upcoming.as_ref().is_some_and(|(pts, _)| {
                     current.is_none()
-                        || plan::at_or_before(
-                            *pts,
-                            segment.source_start,
-                            offset,
-                            self.frame_duration,
-                        )
+                        || plan::at_or_before(*pts, segment.source_start, offset, step)
                 });
                 if !take {
                     break;

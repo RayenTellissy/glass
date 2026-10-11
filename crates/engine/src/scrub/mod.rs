@@ -688,11 +688,12 @@ where
 }
 
 /// The first timeline frame of `segment` whose instant is at or after source time
-/// `at`: `start + ceil((at - source_start) / frame_duration)`, exact.
+/// `at`: `start + ceil((at - source_start) / step)`, exact, where `step` is the source
+/// time one timeline frame advances ([`PlanSegment::source_step`]).
 fn first_frame_showing(segment: &PlanSegment, at: Timestamp, frame_duration: Rational) -> i64 {
     let (an, ad) = positive(at.time_base);
     let (sn, sd) = positive(segment.source_start.time_base);
-    let (fn_, fd) = positive(frame_duration);
+    let (fn_, fd) = positive(segment.source_step(frame_duration));
     // (at.value * an / ad - start.value * sn / sd) / (fn / fd), over a common denominator.
     let num =
         (i128::from(at.value) * an * sd - i128::from(segment.source_start.value) * sn * ad) * fd;
@@ -724,6 +725,7 @@ mod tests {
             source: SourceRef::new(SourceId(1), "a.mp4"),
             timeline: start..start + 100,
             source_start: Timestamp::new(source_start, time_base),
+            speed: Rational::new(1, 1),
             layer: 0,
             hash: SegmentHash::from(1),
         }

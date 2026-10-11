@@ -66,6 +66,7 @@ fn segment(
         source: fixture.source.clone(),
         timeline: timeline.clone(),
         source_start: fixture.at_frame(source_frame),
+        speed: Rational::new(1, 1),
         layer,
         hash: SegmentHash::from(timeline.start as u64),
     }
@@ -528,6 +529,7 @@ fn counting_segment(source: u64, source_frame: i64, timeline: std::ops::Range<i6
         source: SourceRef::new(SourceId(source), PathBuf::from(format!("{source}.mov"))),
         timeline: timeline.clone(),
         source_start: Timestamp::new(source_frame, timeline_rate()),
+        speed: Rational::new(1, 1),
         layer: 0,
         hash: SegmentHash::from(timeline.start as u64),
     }

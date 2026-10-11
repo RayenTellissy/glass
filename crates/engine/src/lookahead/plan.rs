@@ -30,8 +30,8 @@ impl SourceRef {
 
 /// A run of timeline frames that show consecutive frames of one source: timeline frame
 /// `t` in `timeline` shows the source frame on screen at
-/// `source_start + (t - timeline.start) * frame_duration` (the last frame presented at
-/// or before that instant, as `media::timemap` defines it). A cut is one segment ending
+/// `source_start + (t - timeline.start) * frame_duration * speed` (the last frame
+/// presented at or before that instant, as `media::timemap` defines it). A cut is one segment ending
 /// where the next starts; a transition is two segments that overlap, the incoming one on
 /// a higher `layer`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,6 +41,8 @@ pub struct PlanSegment {
     pub timeline: Range<i64>,
     /// The source time shown at `timeline.start`.
     pub source_start: Timestamp,
+    /// Source seconds per timeline second: 1/1 plays at normal speed, 2/1 twice as fast.
+    pub speed: Rational,
     /// Stacking order of overlapping segments: higher draws on top.
     pub layer: u32,
     /// The frame cache's segment key for the frames this segment renders.
@@ -48,11 +50,36 @@ pub struct PlanSegment {
 }
 
 impl PlanSegment {
+    /// The source time one timeline frame of `frame_duration` advances: the frame
+    /// duration times the speed, reduced (rounded to a microsecond in the rare case the
+    /// exact product does not fit).
+    pub fn source_step(&self, frame_duration: Rational) -> Rational {
+        let (fn_, fd) = positive(frame_duration);
+        let (sn, sd) = positive(self.speed);
+        let (num, den) = (fn_ * sn, fd * sd);
+        let g = gcd(num.unsigned_abs(), den.unsigned_abs()).max(1) as i128;
+        let (num, den) = (num / g, den / g);
+        match (i32::try_from(num), i32::try_from(den)) {
+            (Ok(num), Ok(den)) => Rational::new(num, den),
+            _ => {
+                let micros = if den == 0 {
+                    0.0
+                } else {
+                    num as f64 / den as f64 * 1e6
+                };
+                Rational::new(
+                    micros.round().clamp(1.0, f64::from(i32::MAX)) as i32,
+                    1_000_000,
+                )
+            }
+        }
+    }
+
     /// The source time shown at timeline frame `t`, rounded down to a tick of
     /// `source_start`'s base (exact whenever a source frame starts there, since frame
     /// times are whole ticks).
     pub fn source_time_at(&self, t: i64, frame_duration: Rational) -> Timestamp {
-        let offset = Timestamp::new(t - self.timeline.start, frame_duration)
+        let offset = Timestamp::new(t - self.timeline.start, self.source_step(frame_duration))
             .rescale_floor(self.source_start.time_base);
         Timestamp::new(
             self.source_start.value.saturating_add(offset.value),
@@ -62,16 +89,17 @@ impl PlanSegment {
 }
 
 /// Whether a source frame at `pts` is presented at or before the instant timeline frame
-/// `start + offset` shows, `source_start + offset * frame_duration`, compared exactly.
+/// `start + offset` shows, `source_start + offset * step` (`step`:
+/// [`PlanSegment::source_step`]), compared exactly.
 pub(crate) fn at_or_before(
     pts: Timestamp,
     source_start: Timestamp,
     offset: i64,
-    frame_duration: Rational,
+    step: Rational,
 ) -> bool {
     let (pn, pd) = positive(pts.time_base);
     let (sn, sd) = positive(source_start.time_base);
-    let (fn_, fd) = positive(frame_duration);
+    let (fn_, fd) = positive(step);
     // pts.value * pn / pd <= start.value * sn / sd + offset * fn / fd, times pd * sd * fd.
     let left = i128::from(pts.value) * pn * sd * fd;
     let right = i128::from(source_start.value) * sn * pd * fd + i128::from(offset) * fn_ * pd * sd;
@@ -84,6 +112,13 @@ fn positive(r: Rational) -> (i128, i128) {
     } else {
         (i128::from(r.num), i128::from(r.den))
     }
+}
+
+fn gcd(mut a: u128, mut b: u128) -> u128 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
 }
 
 /// Where segments come from. A later task builds one from a sequence's tracks and clips;
@@ -163,6 +198,7 @@ mod tests {
             source: SourceRef::new(SourceId(1), "a.mp4"),
             timeline: start..end,
             source_start: Timestamp::new(0, Rational::new(1, 12800)),
+            speed: Rational::new(1, 1),
             layer: 0,
             hash: SegmentHash::from(start as u64),
         }
@@ -190,5 +226,20 @@ mod tests {
         assert!(at_or_before(frame(4), s.source_start, 5, fd));
         assert_eq!(s.source_time_at(6, fd), frame(5));
         assert_eq!(s.source_time_at(1, fd).value, 426);
+    }
+
+    #[test]
+    fn speed_scales_the_source_step() {
+        let fd = Rational::new(1, 30);
+        let mut s = segment(0, 30);
+        s.speed = Rational::new(2, 1);
+        assert_eq!(s.source_step(fd), Rational::new(1, 15));
+        // Twice as fast: timeline frame 3 shows source time 0.2 s, 2560 ticks.
+        assert_eq!(s.source_time_at(3, fd).value, 2560);
+        s.speed = Rational::new(1, 2);
+        assert_eq!(
+            s.source_step(Rational::new(1001, 30000)),
+            Rational::new(1001, 60000)
+        );
     }
 }

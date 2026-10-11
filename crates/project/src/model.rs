@@ -18,6 +18,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::clip::{BlendMode, Crop, Effect, SpeedMap, Transform};
 use crate::error::EditError;
 use crate::id::{EffectId, ItemId, MarkerId, MediaId, SequenceId, TrackId};
+use crate::keyframe::{ClipParam, Curve};
 use crate::marker::Marker;
 use crate::settings::{ChannelLayout, ProjectSettings, Resolution, SequenceFormat};
 use crate::time::{Rational, Time, TimeError, TimeRange};
@@ -461,6 +462,11 @@ pub struct Clip {
     pub blend: BlendMode,
     /// The effect stack, applied first to last.
     pub effects: Vector<Arc<Effect>>,
+    /// Curves of the animated properties, by property (schema v7; see
+    /// [`crate::keyframe`]). While a property has a curve, its constant field above is
+    /// ignored: read the values through [`Clip::param_at`], [`Clip::transform_at`] and the
+    /// other `*_at` readers.
+    pub keyframes: OrdMap<ClipParam, Arc<Curve>>,
     /// Markers on the clip in source time, so they stay on their frame when the clip is
     /// trimmed or moved; ordered by start then id (schema v3).
     pub markers: Vector<Arc<Marker>>,
@@ -468,8 +474,8 @@ pub struct Clip {
 
 impl Clip {
     /// A clip of `media` from `source_start` with every property at its default: speed 1,
-    /// enabled, 0 dB, centred at 100%, uncropped, opaque, normal blend, no effects, no
-    /// markers.
+    /// enabled, 0 dB, centred at 100%, uncropped, opaque, normal blend, no effects, nothing
+    /// animated, no markers.
     pub fn new(media: MediaId, source_start: Time) -> Self {
         Self {
             media,
@@ -482,6 +488,7 @@ impl Clip {
             opacity: 1.0,
             blend: BlendMode::Normal,
             effects: Vector::new(),
+            keyframes: OrdMap::new(),
             markers: Vector::new(),
         }
     }

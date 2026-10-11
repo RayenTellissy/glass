@@ -14,6 +14,7 @@ pub mod playback;
 pub mod quality;
 pub mod scrub;
 pub mod threads;
+pub mod timeline;
 
 /// Names of the optional codec and AI features compiled into this build.
 pub fn enabled_features() -> Vec<&'static str> {
