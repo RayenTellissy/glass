@@ -289,7 +289,7 @@ Done when: the v0.1 checklist passes on both platforms and a tagged build ships 
 Done when: the transition browser has 150+ items, the title browser 60+, the LUT browser 50+, all with hover preview, and the app never shows an empty panel on first launch.
 
 ### Transitions (all GPU, all with editable duration, easing, direction, hover preview)
-- [ ] Transition framework: a transition is a shader plus a param schema plus a thumbnail, discovered from `assets/transitions/`
+- [~] Transition framework: a transition is a shader plus a param schema plus a thumbnail, discovered from `assets/transitions/`
 - [ ] Dissolve family: cross, dip to black, dip to white, dip to colour, film, additive, non-additive
 - [ ] Wipes: linear in 8 directions, radial, clock, iris shapes, barn door, venetian, checker
 - [ ] Motion: push, slide, whip pan with blur, zoom in and out, spin, swirl, roll
