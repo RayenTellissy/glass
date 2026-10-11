@@ -218,8 +218,9 @@ fn every_view_within_the_frame_budget() {
         let mut dialog = AboutDialog::new();
         let mut monitor = FrameTimeMonitor::default();
         headless
-            // Each view is drawn for 20 frames; warming up through all of them keeps
-            // first-show text layout out of the measured frames.
+            // Each view is drawn for 20 frames; warming up through all of them lays out
+            // every view's text once. The dialog keeps those layouts, so the frames that
+            // switch views paint them instead of laying the text out again.
             .run(20 * views.len(), 240, &mut monitor, |ui, frame| {
                 dialog.set_view(views[(frame / 20) % views.len()]);
                 dialog.select(Some(frame % 7));
