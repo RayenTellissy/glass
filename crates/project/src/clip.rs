@@ -19,7 +19,9 @@
 //! apply to clips on video tracks, gain to clips on audio tracks, and the others are kept
 //! and ignored. Numbers given to an edit are clamped to their range (a value that is not
 //! finite is refused); `Project::validate` refuses a loaded tree with a value outside its
-//! range.
+//! range. The transform, crop, opacity, gain and numeric effect parameters can be animated
+//! by keyframe curves ([`crate::keyframe`], schema v7); while one is, the value stored here
+//! is ignored and the `*_at` readers give the animated value.
 //!
 //! The edits here follow [`crate::edit`]: pure, validated, sharing everything they do not
 //! touch. Each copies only the clip's item and its track's spine, and an edit that changes
@@ -27,11 +29,13 @@
 
 use std::sync::Arc;
 
+use imbl::OrdMap;
 use serde::{Deserialize, Serialize};
 
 use crate::edit::place;
 use crate::error::EditError;
 use crate::id::{EffectId, ItemId};
+use crate::keyframe::{Curve, check_clip_curves};
 use crate::model::{Clip, Item, ItemKind, Project};
 use crate::params::{ParamSchema, ParamValue, ParamValues};
 use crate::time::{Rational, Time, TimeRange};
@@ -374,6 +378,10 @@ pub struct Effect {
     pub schema: String,
     pub enabled: bool,
     pub params: ParamValues,
+    /// Curves of the animated parameters, by parameter id (schema v7; see
+    /// [`crate::keyframe`]). While a parameter has a curve its value in `params` is
+    /// ignored: read it through [`Effect::param_at`].
+    pub keyframes: OrdMap<String, Arc<Curve>>,
 }
 
 /// A schema id is lowercase ASCII, digits, `.`, `_` or `-`, like parameter ids.
@@ -402,7 +410,7 @@ pub(crate) fn check_clip(clip: &Clip) -> Result<(), EditError> {
     for effect in &clip.effects {
         check_schema_id(&effect.schema)?;
     }
-    Ok(())
+    check_clip_curves(clip)
 }
 
 fn finite(what: &'static str, v: f64) -> Result<f64, EditError> {
@@ -583,6 +591,7 @@ impl Project {
                 schema: schema.id.clone(),
                 enabled: true,
                 params: schema.defaults(),
+                keyframes: OrdMap::new(),
             };
             clip.effects.insert(index, Arc::new(effect));
             Ok(())
@@ -656,7 +665,7 @@ impl Project {
         })
     }
 
-    fn locate_effect(&self, effect: EffectId) -> Result<(ItemId, usize), EditError> {
+    pub(crate) fn locate_effect(&self, effect: EffectId) -> Result<(ItemId, usize), EditError> {
         self.sequences
             .iter()
             .flat_map(|s| s.tracks.iter())
@@ -670,7 +679,7 @@ impl Project {
 
     /// Applies `change` to a copy of the clip `item` and puts the copy in its place. A
     /// change that leaves the clip equal returns this root.
-    fn change_clip(
+    pub(crate) fn change_clip(
         &self,
         item: ItemId,
         change: impl FnOnce(&mut Clip) -> Result<(), EditError>,

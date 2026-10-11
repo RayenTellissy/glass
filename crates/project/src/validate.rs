@@ -34,7 +34,8 @@ impl Project {
     /// Checks every invariant the edit operations maintain: unique allocated ids, valid
     /// project settings and sequence formats ([`crate::settings`]), items of a kind their track accepts, on its grid, sorted and not
     /// overlapping, clips pointing at known media with their properties in range (a
-    /// constant speed map, finite numbers within their limits, valid effect schema ids),
+    /// constant speed map, finite numbers within their limits, valid effect schema ids,
+    /// keyframe curves sorted and finite with valid handles, [`crate::keyframe`]),
     /// markers sorted, not before zero and (on sequences) on the frame grid, and
     /// transitions ordered by id on cuts that resolve, fitting their clips and head
     /// handles without overlapping ([`crate::transition`]).

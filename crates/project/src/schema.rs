@@ -6,7 +6,7 @@
 //! ```json
 //! {
 //!   "format": "glass.project",
-//!   "schema_version": 6,
+//!   "schema_version": 7,
 //!   "project": { "uid": "...", "name": "...", "next_id": 7, "settings": {...}, "media": {...}, "sequences": [...] }
 //! }
 //! ```
@@ -49,6 +49,9 @@
 //! - v6: the project carries `settings` (`crate::settings`: the format new sequences
 //!   start with, the colour space and the cache folder), and every sequence its own
 //!   `resolution`, `drop_frame` and `channel_layout` beside its frame and sample rates.
+//! - v7: clips and effects carry `keyframes` (`crate::keyframe`): curves of keys in source
+//!   time by animated parameter, under the clip property's id (`"opacity"`,
+//!   `"crop.left"`) or the effect parameter's id.
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -60,7 +63,7 @@ use crate::validate::ValidationError;
 pub const FORMAT: &str = "glass.project";
 
 /// The schema version this build writes, and the newest it reads.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// The oldest schema version this build reads.
 pub const OLDEST_VERSION: u32 = 1;
@@ -75,6 +78,7 @@ pub const MIGRATIONS: [Migration; (SCHEMA_VERSION - OLDEST_VERSION) as usize] = 
     migrate_v3_to_v4,
     migrate_v4_to_v5,
     migrate_v5_to_v6,
+    migrate_v6_to_v7,
 ];
 
 /// Why a project file could not be read. [`LoadError::i18n_key`] names the message to
@@ -427,6 +431,73 @@ pub fn migrate_v5_to_v6(mut project: Value) -> Result<Value, String> {
     Ok(project)
 }
 
+/// v6 → v7: every clip and every effect in a clip's stack gets an empty `keyframes` map
+/// (nothing is animated). Nothing else changes, nor does `next_id`.
+pub fn migrate_v6_to_v7(mut project: Value) -> Result<Value, String> {
+    let root = object(&mut project)?;
+    let Some(sequences) = root.get_mut("sequences") else {
+        return Ok(project);
+    };
+    let sequences = sequences
+        .as_array_mut()
+        .ok_or_else(|| "sequences is not a list".to_string())?;
+    for sequence in sequences {
+        let Some(tracks) = sequence
+            .as_object_mut()
+            .ok_or_else(|| "a sequence is not an object".to_string())?
+            .get_mut("tracks")
+        else {
+            continue;
+        };
+        for track in tracks
+            .as_array_mut()
+            .ok_or_else(|| "tracks is not a list".to_string())?
+        {
+            let Some(items) = track
+                .as_object_mut()
+                .ok_or_else(|| "a track is not an object".to_string())?
+                .get_mut("items")
+            else {
+                continue;
+            };
+            for item in items
+                .as_array_mut()
+                .ok_or_else(|| "items is not a list".to_string())?
+            {
+                let item = item
+                    .as_object_mut()
+                    .ok_or_else(|| "an item is not an object".to_string())?;
+                if item.get("type").and_then(Value::as_str) != Some("clip") {
+                    continue;
+                }
+                add_keyframes(item, "clip")?;
+                let Some(effects) = item.get_mut("effects") else {
+                    continue;
+                };
+                for effect in effects
+                    .as_array_mut()
+                    .ok_or_else(|| "effects is not a list".to_string())?
+                {
+                    let effect = effect
+                        .as_object_mut()
+                        .ok_or_else(|| "an effect is not an object".to_string())?;
+                    add_keyframes(effect, "effect")?;
+                }
+            }
+        }
+    }
+    Ok(project)
+}
+
+/// Adds an empty `keyframes` map to a v6 clip or effect, which never has one.
+fn add_keyframes(node: &mut Map<String, Value>, what: &str) -> Result<(), String> {
+    if node.contains_key("keyframes") {
+        return Err(format!("a v6 {what} already has keyframes"));
+    }
+    node.insert("keyframes".to_string(), Value::Object(Map::new()));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -670,6 +741,75 @@ mod tests {
         let bare = migrate_v5_to_v6(json!({ "uid": "u" })).expect("no sequences");
         assert_eq!(bare["uid"], json!("u"));
         assert!(bare["settings"].is_object());
+    }
+
+    #[test]
+    fn v6_to_v7_gives_clips_and_effects_empty_keyframes() {
+        let v6 = json!({
+            "next_id": 9,
+            "sequences": [
+                {
+                    "id": 2,
+                    "tracks": [
+                        {
+                            "id": 3,
+                            "kind": "video",
+                            "items": [
+                                {
+                                    "id": 4,
+                                    "type": "clip",
+                                    "effects": [{ "id": 5, "schema": "lut" }, { "id": 6, "schema": "x" }]
+                                },
+                                { "id": 7, "type": "clip", "effects": [] }
+                            ]
+                        },
+                        { "id": 8, "kind": "subtitle", "items": [{ "id": 1, "type": "subtitle" }] }
+                    ]
+                },
+                { "id": 10 }
+            ]
+        });
+        let v7 = migrate_v6_to_v7(v6.clone()).expect("migrates");
+        let mut expected = v6;
+        let items = &mut expected["sequences"][0]["tracks"][0]["items"];
+        for item in items.as_array_mut().expect("items") {
+            item["keyframes"] = json!({});
+            for effect in item["effects"].as_array_mut().expect("effects") {
+                effect["keyframes"] = json!({});
+            }
+        }
+        assert_eq!(v7, expected);
+    }
+
+    #[test]
+    fn v6_to_v7_rejects_malformed_trees() {
+        assert!(migrate_v6_to_v7(json!([])).is_err());
+        assert!(migrate_v6_to_v7(json!({ "sequences": {} })).is_err());
+        assert!(migrate_v6_to_v7(json!({ "sequences": [1] })).is_err());
+        assert!(migrate_v6_to_v7(json!({ "sequences": [{ "tracks": [3] }] })).is_err());
+        let clip = |extra: Value| json!({ "sequences": [{ "tracks": [{ "items": [extra] }] }] });
+        assert_eq!(
+            migrate_v6_to_v7(clip(json!({ "type": "clip", "keyframes": {} }))),
+            Err("a v6 clip already has keyframes".to_string())
+        );
+        assert_eq!(
+            migrate_v6_to_v7(clip(
+                json!({ "type": "clip", "effects": [{ "keyframes": {} }] })
+            )),
+            Err("a v6 effect already has keyframes".to_string())
+        );
+        assert_eq!(
+            migrate_v6_to_v7(clip(json!({ "type": "clip", "effects": {} }))),
+            Err("effects is not a list".to_string())
+        );
+        assert_eq!(
+            migrate_v6_to_v7(clip(json!({ "type": "clip", "effects": [2] }))),
+            Err("an effect is not an object".to_string())
+        );
+        assert_eq!(
+            migrate_v6_to_v7(json!({ "uid": "u" })).expect("no sequences"),
+            json!({ "uid": "u" })
+        );
     }
 
     #[test]

@@ -1,11 +1,13 @@
 //! The About dialog: its views and links driven by pointer and keys on a real egui
 //! context, its layout against the board, and every view within the frame budget.
 
+mod support;
+
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2};
+use support::FrameBudget;
 use ui::dialogs::about::{
     AboutAction, AboutDialog, AboutInfo, Control, Licence, View, WIDTH, components,
 };
-use ui::frame_time::FrameTimeMonitor;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::theme::{self, ThemeKind};
 
@@ -216,21 +218,18 @@ fn every_view_within_the_frame_budget() {
     for kind in ThemeKind::ALL {
         theme::set(headless.context(), kind);
         let mut dialog = AboutDialog::new();
-        let mut monitor = FrameTimeMonitor::default();
-        headless
-            // Each view is drawn for 20 frames; warming up through all of them lays out
-            // every view's text once. The dialog keeps those layouts, so the frames that
-            // switch views paint them instead of laying the text out again.
-            .run(20 * views.len(), 240, &mut monitor, |ui, frame| {
-                dialog.set_view(views[(frame / 20) % views.len()]);
-                dialog.select(Some(frame % 7));
-                egui::CentralPanel::default().show(ui, |_| {});
-                dialog.show(ui.ctx(), &info);
-            })
-            .expect("headless frames");
+        // Each view is drawn for 20 frames; warming up through all of them lays out
+        // every view's text once. The dialog keeps those layouts, so the frames that
+        // switch views paint them instead of laying the text out again.
+        let stats = FrameBudget::run(&mut headless, 20 * views.len(), 240, |ui, frame| {
+            dialog.set_view(views[(frame / 20) % views.len()]);
+            dialog.select(Some(frame % 7));
+            egui::CentralPanel::default().show(ui, |_| {});
+            dialog.show(ui.ctx(), &info);
+        })
+        .expect("headless frames");
         assert!(dialog.control_rect(Control::Close).is_some(), "{kind:?}");
-        let stats = monitor.stats();
         eprintln!("about dialog {kind:?} ({}): {stats}", headless.adapter());
-        headless.assert_p99_within_budget("about dialog", &stats);
+        stats.assert_within_budget(&headless, "about dialog");
     }
 }
