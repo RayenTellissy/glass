@@ -25,6 +25,7 @@ use render::mask::{self, Mask};
 use render::nodes::{Layer, OutputNode, YuvSourceNode, composite_stack};
 use render::renderer::Renderer;
 use render::shape::{Shape, ShapeNode};
+use render::subtitle::SubtitleStyle;
 use render::text::{
     self, FontFamily, GlyphAtlas, GlyphInfo, GlyphTransform, PreparedText, TextEngine, TextFormat,
     TextPaint,
@@ -92,6 +93,9 @@ pub enum Source {
     Fill { colour: [f32; 4], size: (u32, u32) },
     /// Text drawn onto a transparent canvas-sized layer.
     Text(TextSpec),
+    /// A subtitle cue in Arial laid out by `render::subtitle` with the default style
+    /// (size, safe area, outline and shadow from the canvas), as a canvas-sized layer.
+    Subtitle(&'static str),
     /// Vector shapes drawn in order onto a transparent canvas-sized layer.
     Shapes(Vec<Shape>),
     /// Another source with masks in its own pixels (`render::mask`), applied before the
@@ -123,7 +127,11 @@ impl Source {
             Self::Disc => (64, 64),
             Self::Fill { size, .. } => *size,
             Self::Masked(source, _) => source.size(),
-            Self::Gradient | Self::Text(_) | Self::Shapes(_) | Self::Transition { .. } => CANVAS,
+            Self::Gradient
+            | Self::Text(_)
+            | Self::Subtitle(_)
+            | Self::Shapes(_)
+            | Self::Transition { .. } => CANVAS,
         }
     }
 }
@@ -230,6 +238,19 @@ impl Studio {
                         spec.glyphs.as_deref(),
                     ));
                 }
+                Source::Subtitle(cue) => {
+                    let style = SubtitleStyle {
+                        family: FontFamily::Named("Arial".to_owned()),
+                        ..Default::default()
+                    };
+                    let burn = style.lay_out(&mut self.engine, cue, CANVAS);
+                    texts.push(self.atlas.prepare(
+                        &mut self.engine,
+                        &burn.layout,
+                        &burn.paint,
+                        None,
+                    ));
+                }
                 _ => {}
             }
         }
@@ -259,7 +280,7 @@ impl Studio {
                 Source::Disc => g.import("disc", &self.disc),
                 Source::Gradient => g.import("gradient", &self.gradient),
                 Source::Fill { .. } => g.import("fill", fill.next().expect("made above")),
-                Source::Text(_) => text::add_to_graph(
+                Source::Text(_) | Source::Subtitle(_) => text::add_to_graph(
                     &mut g,
                     &self.atlas,
                     text.next().expect("prepared above"),

@@ -365,7 +365,7 @@ fn a_format_1_autosave_from_before_schema_v2_is_refused_by_version() {
     );
     fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
 
-    assert_eq!(autosave::FORMAT_VERSION, 6);
+    assert_eq!(autosave::FORMAT_VERSION, 7);
     assert!(matches!(
         autosave::recover(&dir),
         Err(autosave::AutosaveError::Format(1))
@@ -520,6 +520,100 @@ fn a_format_5_autosave_from_before_schema_v6_is_refused_by_version() {
         autosave::recover(&dir),
         Err(autosave::AutosaveError::Format(5))
     ));
+    fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// Autosaves written before project schema v7 (format 6, clips and effects without
+/// keyframes) are refused by their format version too.
+#[test]
+fn a_format_6_autosave_from_before_schema_v7_is_refused_by_version() {
+    let s = setup();
+    let dir = temp_dir("format-6");
+    let (p, item) = s
+        .project
+        .insert_clip(s.v1, clip(s.media, 0, 5))
+        .expect("clip");
+    let (p, _) = p
+        .add_effect(item, &project::params::effects::lut(), None)
+        .expect("effect");
+    let mut writer = AutosaveWriter::open(&dir, &p, None, 0, 0).expect("open");
+    writer.tick(&p, 1, 10).expect("tick");
+    drop(writer);
+    let snapshot = dir.join("snapshot-00000001.json");
+    let mut old: serde_json::Value =
+        serde_json::from_slice(&fs::read(&snapshot).expect("snapshot")).expect("json");
+    old["autosave_format"] = 6.into();
+    let item = old["project"]["sequences"][0]["tracks"][0]["items"][0]
+        .as_object_mut()
+        .expect("clip");
+    item.remove("keyframes").expect("v7 clip keyframes");
+    item["effects"][0]
+        .as_object_mut()
+        .expect("effect")
+        .remove("keyframes")
+        .expect("v7 effect keyframes");
+    assert!(
+        serde_json::from_value::<Project>(old["project"].clone()).is_err(),
+        "a format 6 project no longer parses"
+    );
+    fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
+    assert!(matches!(
+        autosave::recover(&dir),
+        Err(autosave::AutosaveError::Format(6))
+    ));
+    fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// Keyframe curves travel inside their item's record and recover from the log.
+#[test]
+fn keyframe_edits_recover_from_the_log() {
+    let s = setup();
+    let dir = temp_dir("keyframes");
+    let (p, item) = s
+        .project
+        .insert_clip(s.v1, clip(s.media, 0, 50))
+        .expect("clip");
+    let lut = project::params::effects::lut();
+    let (p, effect) = p.add_effect(item, &lut, None).expect("effect");
+    let mut writer = AutosaveWriter::open(&dir, &p, None, 0, 0).expect("open");
+    let opacity = project::KeyTarget::Clip {
+        item,
+        param: project::ClipParam::Opacity,
+    };
+    let intensity = project::KeyTarget::Effect {
+        effect,
+        schema: &lut,
+        param: "intensity",
+    };
+    let p = p.animate_param(opacity, Time::ZERO).expect("animate");
+    let p = p
+        .set_key(
+            opacity,
+            Time::seconds(1),
+            project::params::ParamValue::Float(0.0),
+        )
+        .expect("key");
+    let p = p.animate_param(intensity, Time::ZERO).expect("animate");
+    let p = p
+        .set_key_interpolation(intensity, Time::ZERO, project::Interpolation::ease(1))
+        .expect("ease");
+    let tick = writer.tick(&p, 4, 10).expect("tick");
+    assert!(
+        matches!(
+            tick,
+            Tick::Appended {
+                upserts: 1,
+                removals: 0,
+                ..
+            }
+        ),
+        "only the one item: {tick:?}"
+    );
+    let p = p.remove_key(opacity, Time::seconds(1)).expect("remove");
+    writer.tick(&p, 1, 20).expect("tick");
+    drop(writer);
+    let recovered = autosave::recover(&dir).expect("recovers");
+    assert!(recovered.project.content_eq(&p));
     fs::remove_dir_all(&dir).expect("cleanup");
 }
 

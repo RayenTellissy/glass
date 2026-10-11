@@ -34,6 +34,9 @@
 //!
 //! A clip whose source is offline shows a [`slate`]: rendered once per size and label,
 //! cached, and imported into each frame's graph like a decoded frame.
+//!
+//! Burned-in subtitles ([`subtitle`]) lay the cue showing at a frame's time out with
+//! [`text`], sized and placed from the frame, and composite it over the frame.
 
 pub mod blend;
 pub mod colour;
@@ -51,6 +54,7 @@ pub mod renderer;
 pub mod shaders;
 pub mod shape;
 pub mod slate;
+pub mod subtitle;
 pub mod text;
 pub mod transform;
 pub mod transition;

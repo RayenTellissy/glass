@@ -210,6 +210,9 @@ Full text in `docs/DECISIONS.md`; one line each here.
 - The shared `Paint::floating` glass background shows a band at mid-height in tall dialogs.
 - The debug panel reads thread activity through `threads::global().snapshot_into`.
 
+**Phase 8 (export)**
+- Subtitle export is not wired into the export pipeline yet (waits for the export queue): `glass-export` converts `project::subtitle_export::track_cues` to `media::SubtitleCue`, writes `.srt`/`.vtt` sidecars with `to_srt`/`to_vtt`, adds `SubtitleSettings` streams and calls `ExportSession::push_subtitle`, or burns the cue at each frame's time with `render::subtitle::{cue_at, SubtitleStyle::lay_out, add_burn_in}` before readback (Decision 65). WebM subtitles are untested until an AV1 or VP9 encoder is in the FFmpeg build.
+
 **Phase 14 / 16 (performance)**
 - Proxy pipeline decodes, scales and encodes on one thread; splitting decode/scale and encode across threads could lift ProRes VT 4K from about 130 to about 230 fps.
 - The frame-budget test `every_theme_renders_within_the_frame_budget` can fail under parallel load or swap; rerun it alone before treating it as a failure.

@@ -772,6 +772,95 @@ pub(crate) fn set_stream_codec_tag(
     Ok(())
 }
 
+// ---- Subtitles ----------------------------------------------------------------------------
+
+/// Stores an ASS script header on a subtitle encoder's context before it is opened (the
+/// text encoders read their default style from it).
+pub(crate) fn set_subtitle_header(
+    context: &mut ffmpeg::codec::Context,
+    header: &str,
+) -> Result<(), ffmpeg::Error> {
+    let bytes = header.as_bytes();
+    let size = c_int::try_from(bytes.len()).map_err(|_| ffmpeg::Error::InvalidData)?;
+    // SAFETY: the context is owned by the wrapper and not open yet. The buffer is
+    // allocated with av_malloc, NUL-terminated, and owned by the context from here on
+    // (avcodec_free_context frees `subtitle_header`); a previous header is freed first.
+    unsafe {
+        let buffer = sys::av_malloc(bytes.len() + 1).cast::<u8>();
+        if buffer.is_null() {
+            return Err(ffmpeg::Error::Other {
+                errno: ffmpeg::error::ENOMEM,
+            });
+        }
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer, bytes.len());
+        *buffer.add(bytes.len()) = 0;
+        let ctx = context.as_mut_ptr();
+        sys::av_freep(std::ptr::addr_of_mut!((*ctx).subtitle_header).cast::<c_void>());
+        (*ctx).subtitle_header = buffer;
+        (*ctx).subtitle_header_size = size;
+    }
+    Ok(())
+}
+
+/// Encodes one ASS dialogue line shown for `duration_ms` into `out`; returns the
+/// payload's length.
+pub(crate) fn encode_subtitle(
+    encoder: &mut ffmpeg::encoder::subtitle::Encoder,
+    dialogue: &str,
+    duration_ms: u32,
+    out: &mut [u8],
+) -> Result<usize, ffmpeg::Error> {
+    let dialogue = dialogue.replace('\0', "");
+    let mut subtitle = ffmpeg::Subtitle::new();
+    subtitle.set_end(duration_ms);
+    if let ffmpeg::subtitle::RectMut::Ass(mut rect) = subtitle.add_rect(ffmpeg::subtitle::Type::Ass)
+    {
+        rect.set(&dialogue);
+    }
+    let size = c_int::try_from(out.len()).unwrap_or(c_int::MAX);
+    // SAFETY: the encoder is open and borrowed mutably; `out` is valid for `size` bytes;
+    // the subtitle's rects were allocated with av_realloc, av_mallocz and av_strdup by
+    // the wrapper, which is what avsubtitle_free releases (the wrapper has no Drop).
+    let written = unsafe {
+        let written = sys::avcodec_encode_subtitle(
+            encoder.as_mut_ptr(),
+            out.as_mut_ptr(),
+            size,
+            subtitle.as_ptr(),
+        );
+        sys::avsubtitle_free(subtitle.as_mut_ptr());
+        written
+    };
+    usize::try_from(written).map_err(|_| ffmpeg::Error::from(written))
+}
+
+/// Decodes one subtitle packet; returns the ASS (or plain text) of each rectangle, or
+/// `None` when the packet gave no subtitle.
+pub(crate) fn decode_subtitle_texts(
+    decoder: &mut ffmpeg::decoder::Subtitle,
+    packet: &ffmpeg::Packet,
+) -> Result<Option<Vec<String>>, ffmpeg::Error> {
+    let mut subtitle = ffmpeg::Subtitle::new();
+    let got = decoder.decode(packet, &mut subtitle);
+    let texts = match got {
+        Ok(true) => Some(
+            subtitle
+                .rects()
+                .filter_map(|rect| match rect {
+                    ffmpeg::subtitle::Rect::Ass(a) => Some(a.get().to_string()),
+                    ffmpeg::subtitle::Rect::Text(t) => Some(t.get().to_string()),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        Ok(false) | Err(_) => None,
+    };
+    // SAFETY: the decoder filled the subtitle with av_malloc'd rects (or left it zeroed);
+    // avsubtitle_free releases them and resets it. Nothing borrows it any more.
+    unsafe { sys::avsubtitle_free(subtitle.as_mut_ptr()) };
+    got.map(|_| texts)
+}
+
 /// One plane of caller memory for [`Sws::scale`]: the bytes and the distance between
 /// rows.
 #[derive(Clone, Copy, Debug)]
