@@ -162,7 +162,7 @@ fn the_cue_is_drawn_over_the_frame() {
         }
     }
     // The text's rows near the bottom centre hold white fill and dark outline.
-    let rows = (burn.paint.origin[1] as usize)..(513usize);
+    let rows = (burn.paint.origin[1] as usize)..513;
     let (mut white, mut dark) = (0, 0);
     for y in rows {
         for x in 420..540 {

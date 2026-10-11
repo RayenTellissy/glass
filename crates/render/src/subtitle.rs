@@ -103,7 +103,7 @@ impl SubtitleStyle {
         let paint = TextPaint {
             origin: [left, bottom - layout.height],
             fill: self.fill,
-            outline: (self.outline > 0.0).then(|| Outline {
+            outline: (self.outline > 0.0).then_some(Outline {
                 width: self.outline * font,
                 color: self.outline_color,
             }),
