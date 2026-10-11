@@ -1,0 +1,10 @@
+{
+  "id": "slide",
+  "name": "transition.name.slide",
+  "category": "motion",
+  "directions": ["left", "right", "up", "down"],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "mode", "label": "transition.param.mode", "kind": {"choice": {"default": "in", "options": [{"id": "in", "label": "transition.option.slide_in"}, {"id": "out", "label": "transition.option.slide_out"}]}}, "unit": "none", "keyframeable": false}
+  ]
+}
