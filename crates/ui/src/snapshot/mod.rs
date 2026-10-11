@@ -8,6 +8,7 @@
 //! `src/panels/`, `src/dialogs/` or `src/params/` has none ([`uncovered_modules`]).
 
 mod cases;
+mod clip_cases;
 pub mod compare;
 pub mod fonts;
 mod pool_cases;
