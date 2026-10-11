@@ -149,6 +149,7 @@ Done when: every fixture file decodes to GPU textures and f32 audio through the 
 - [x] Colour space plumbing: BT.709, BT.2020, sRGB, limited and full range, 8/10/12-bit, PQ and HLG flags carried on every frame
 - [x] VFR normalisation to the sequence frame rate with a per-clip timestamp map
 - [x] Accurate seek: nearest keyframe then decode forward, GOP index cached per file on disk
+  - [~] Seek within the current frame: `seek_exact` to a time inside the frame it just returned (after its pts, before the next frame's) returns that frame, not the next one
 - [ ] Still images, image sequences, GIF, WebP, HEIC via `image` and platform decoders (needs-human: blocked only on the Windows sub-task below)
   - [x] `media::source::VideoSource` for video files, stills (PNG, JPEG, TIFF, BMP, WebP, GIF with `image`; HEIC, HEIF and AVIF with ImageIO on macOS), animated GIF and WebP (variable-rate timelines from frame delays) and numbered sequences (caller's rate, gaps reported); colour from `cICP` and ICC with Display P3 flagged; EXIF orientation applied; fixtures and tests
   - [ ] HEIC, HEIF and AVIF stills on Windows through WIC with the HEIF and AV1 Video Extensions, replacing the `media.unsupported.heif`/`avif` error there (needs-human: needs a Windows PC to implement and verify)
