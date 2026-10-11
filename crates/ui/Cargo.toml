@@ -19,10 +19,15 @@ assets.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true
 pollster.workspace = true
+rfd.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+# PNG goldens for the UI snapshot tests.
+image.workspace = true
 
 [[bench]]
 name = "frame_time"

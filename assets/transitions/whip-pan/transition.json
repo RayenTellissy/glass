@@ -1,0 +1,17 @@
+{
+  "id": "whip-pan",
+  "name": "transition.name.whip_pan",
+  "category": "motion",
+  "directions": ["left", "right", "up", "down"],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "blur", "label": "transition.param.blur", "kind": {"float": {"default": 0.25, "range": {"min": 0.0, "max": 1.0}, "soft": null, "decimals": 0}}, "unit": "percent", "keyframeable": false},
+    {"id": "samples", "label": "transition.param.samples", "kind": {"int": {"default": 8, "range": {"min": 2, "max": 128}, "soft": {"min": 4, "max": 64}}}, "unit": "none", "keyframeable": false}
+  ],
+  "passes": [
+    {"entry": "strip", "scale": {"along": 0.25, "across": 1}, "min": 256},
+    {"entry": "smear", "scale": {"along": 0.25, "across": 1}, "min": 256},
+    {"entry": "smear", "scale": {"along": 0.25, "across": 1}, "min": 256},
+    {"entry": "smear", "scale": {"along": 0.25, "across": 1}, "min": 256}
+  ]
+}

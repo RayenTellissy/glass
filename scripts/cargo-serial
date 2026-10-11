@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Runs one cargo command at a time across every checkout of this repository.
+#
+# Usage: scripts/cargo-serial <cargo arguments>
+#   e.g. scripts/cargo-serial test --workspace
+#
+# Holds an exclusive lock on <git common dir>/glass-cargo.lock (shared by the main
+# checkout and all linked worktrees) for the whole command, test runs included, then
+# releases it. Exit status and signals are passed through. GLASS_CARGO_BIN overrides
+# the cargo binary.
+#
+# Every checkout shares one target directory, and cargo names a workspace crate's
+# fingerprint and artifacts by its path relative to the workspace root, so the same
+# crate built in two checkouts gets the same names. When the previous command ran in
+# another checkout (<git common dir>/glass-cargo-last-checkout), the workspace
+# packages' fingerprints are deleted before cargo runs, so this checkout's sources are
+# compiled instead of being compared against the other checkout's outputs.
+# Dependencies' fingerprints are kept.
+
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" &&
+    checkout="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    lock_file="$common_dir/glass-cargo.lock"
+elif common_dir="$(git -C "$script_dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" &&
+    checkout="$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null)"; then
+    lock_file="$common_dir/glass-cargo.lock"
+else
+    common_dir=""
+    checkout=""
+    lock_file="${TMPDIR:-/tmp}/glass-cargo.lock"
+fi
+
+exec python3 -c "
+import fcntl, glob, json, os, re, shutil, signal, subprocess, sys, time
+
+lock_path, common_dir, checkout, cargo, args = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
+fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+try:
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    try:
+        with open(lock_path) as f:
+            holder = f.read().strip() or lock_path
+    except OSError:
+        holder = lock_path
+    print(f\"cargo-serial: waiting for another cargo command in {holder}…\", file=sys.stderr, flush=True)
+    start = time.monotonic()
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    print(f\"cargo-serial: waited {time.monotonic() - start:.1f} s\", file=sys.stderr, flush=True)
+
+os.ftruncate(fd, 0)
+os.write(fd, f\"{os.getcwd()} ({os.path.basename(cargo)} {' '.join(args)}, pid {os.getpid()})\n\".encode())
+
+def forget_workspace_fingerprints():
+    record = os.path.join(common_dir, 'glass-cargo-last-checkout')
+    try:
+        with open(record) as f:
+            previous = f.read().strip()
+    except OSError:
+        previous = ''
+    if previous == checkout:
+        return
+    target = os.environ.get('CARGO_TARGET_DIR') or os.path.join(os.path.dirname(common_dir), 'target')
+    target = os.path.abspath(target)
+    try:
+        meta = json.loads(subprocess.check_output(
+            ['cargo', 'metadata', '--no-deps', '--format-version', '1'], cwd=checkout, stderr=subprocess.DEVNULL))
+    except (OSError, subprocess.CalledProcessError, ValueError) as e:
+        print(f'cargo-serial: cannot list workspace packages ({e}); fingerprints kept', file=sys.stderr, flush=True)
+        return
+    names = {p['name'] for p in meta['packages']}
+    names |= {n.replace('-', '_') for n in names}
+    pattern = re.compile('^(' + '|'.join(re.escape(n) for n in sorted(names)) + ')-[0-9a-f]{16}\$')
+    removed = 0
+    for depth in ('*', '*/*', '*/*/*'):
+        for fingerprints in glob.glob(os.path.join(target, depth, '.fingerprint')):
+            for entry in os.listdir(fingerprints):
+                if pattern.match(entry):
+                    shutil.rmtree(os.path.join(fingerprints, entry), ignore_errors=True)
+                    removed += 1
+    print(f'cargo-serial: last build was from {previous or \"an unknown checkout\"}; '
+          f'forgot {removed} fingerprints of {len(meta[\"packages\"])} workspace packages in {target}',
+          file=sys.stderr, flush=True)
+    with open(record, 'w') as f:
+        f.write(checkout + '\\n')
+
+if common_dir and checkout:
+    forget_workspace_fingerprints()
+
+try:
+    child = subprocess.Popen([cargo, *args])
+except OSError as e:
+    print(f\"cargo-serial: cannot run {cargo}: {e}\", file=sys.stderr)
+    sys.exit(127)
+
+def forward(signum, _frame):
+    try:
+        child.send_signal(signum)
+    except ProcessLookupError:
+        pass
+
+for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT):
+    signal.signal(s, forward)
+
+while True:
+    try:
+        code = child.wait()
+        break
+    except InterruptedError:
+        continue
+
+os.ftruncate(fd, 0)
+fcntl.flock(fd, fcntl.LOCK_UN)
+os.close(fd)
+
+if code < 0:
+    signal.signal(-code, signal.SIG_DFL)
+    os.kill(os.getpid(), -code)
+    sys.exit(128 - code)
+sys.exit(code)
+" "$lock_file" "$common_dir" "$checkout" "${GLASS_CARGO_BIN:-cargo}" "$@"

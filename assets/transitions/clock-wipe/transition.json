@@ -1,0 +1,15 @@
+{
+  "id": "clock-wipe",
+  "name": "transition.name.clock_wipe",
+  "category": "wipe",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "start_angle", "label": "transition.param.start_angle", "kind": {"angle": {"default": 0.0, "range": {"min": null, "max": null}}}, "unit": "degrees", "keyframeable": false},
+    {"id": "rotation", "label": "transition.param.rotation", "kind": {"choice": {"default": "clockwise", "options": [{"id": "clockwise", "label": "transition.option.clockwise"}, {"id": "anticlockwise", "label": "transition.option.anticlockwise"}]}}, "unit": "none", "keyframeable": false},
+    {"id": "centre", "label": "transition.param.centre", "kind": {"point": {"default": [0.5, 0.5], "range": {"min": null, "max": null}, "decimals": 1}}, "unit": "percent", "keyframeable": false},
+    {"id": "softness", "label": "transition.param.softness", "kind": {"float": {"default": 0.0, "range": {"min": 0.0, "max": 1000.0}, "soft": {"min": 0.0, "max": 100.0}, "decimals": 1}}, "unit": "pixels", "keyframeable": false},
+    {"id": "border_width", "label": "transition.param.border_width", "kind": {"float": {"default": 0.0, "range": {"min": 0.0, "max": 500.0}, "soft": {"min": 0.0, "max": 40.0}, "decimals": 1}}, "unit": "pixels", "keyframeable": false},
+    {"id": "border_colour", "label": "transition.param.border_colour", "kind": {"colour": {"default": [1.0, 1.0, 1.0, 1.0], "alpha": true}}, "unit": "none", "keyframeable": false}
+  ]
+}

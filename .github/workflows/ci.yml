@@ -147,6 +147,50 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # UI snapshots against the goldens in crates/ui/tests/snapshots (CONTRIBUTING.md,
+      # "UI snapshots"). `cargo test --workspace` runs them too; this step prints the
+      # comparison and keeps the .actual.png and .diff.png files when one differs. The
+      # goldens are macOS-only until the Geist fonts are bundled.
+      - name: UI snapshots
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: cargo test -p ui --test ui_snapshots -- --nocapture
+
+      - name: Upload UI snapshot differences
+        if: failure() && matrix.target == 'aarch64-apple-darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-snapshot-differences
+          path: |
+            crates/ui/tests/snapshots/**/*.actual.png
+            crates/ui/tests/snapshots/**/*.diff.png
+          if-no-files-found: ignore
+
+      # Visual regression: reference sequences rendered through the render graph against
+      # the goldens in crates/render/tests/visual/goldens (CONTRIBUTING.md, "Visual
+      # regression tests"). macOS-only, like the UI snapshots: texts use the system Arial.
+      - name: Visual regression
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: cargo test -p render --test visual_regression -- --nocapture
+
+      - name: Upload visual regression differences
+        if: failure() && matrix.target == 'aarch64-apple-darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-differences
+          path: |
+            crates/render/tests/visual/goldens/**/*.actual.png
+            crates/render/tests/visual/goldens/**/*.diff.png
+          if-no-files-found: ignore
+
+      # The timing tests again with GLASS_STRICT_TIMING=1, one test at a time: each holds
+      # its own statistic (wall-clock p99 or max, GPU median) to the budget, not only the
+      # load-robust ones the Test step checks (CONTRIBUTING.md, "Timing tests").
+      - name: Strict timing
+        if: matrix.target == 'aarch64-apple-darwin'
+        env:
+          GLASS_STRICT_TIMING: "1"
+        run: cargo test -p ui -p render -p engine -- --test-threads=1 budget gpu_time never_wait throughput late_frames
+
       - name: Smoke
         run: cargo run --bin smoke
 

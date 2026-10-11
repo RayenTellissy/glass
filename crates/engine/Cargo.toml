@@ -25,11 +25,18 @@ render.workspace = true
 audio.workspace = true
 plugins.workspace = true
 assets.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+rtrb.workspace = true
+crossbeam-queue.workspace = true
+thread-id.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+pollster.workspace = true
 
 [[bench]]
 name = "engine"

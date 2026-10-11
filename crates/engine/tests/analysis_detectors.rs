@@ -1,0 +1,175 @@
+//! Scene cut, silence, beat and loudness jobs through the pool: results, the disk cache
+//! and keys that follow the settings. Skips without fixtures (`tests/fixtures/generate.sh`).
+
+use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
+use std::time::Duration;
+
+use engine::analysis::{
+    AnalysisJob, AnalysisPool, BeatsJob, JobEvent, JobEventKind, LoudnessJob, Outcome, PoolConfig,
+    Priority, SceneJob, SilenceJob,
+};
+use media::analysis::beats::BeatSettings;
+use media::analysis::loudness::LoudnessSettings;
+use media::analysis::scenes::SceneSettings;
+use media::analysis::silence::SilenceSettings;
+use media::{CacheDir, SourceFile};
+
+const LIMIT: Duration = Duration::from_secs(120);
+
+fn fixture(name: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/generated")
+        .join(name);
+    if path.exists() {
+        Some(path)
+    } else {
+        eprintln!("skipped: {name} missing; run tests/fixtures/generate.sh to create it");
+        None
+    }
+}
+
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("glass-detect-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        Self(dir)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn next_outcome(events: &Receiver<JobEvent>) -> Outcome {
+    loop {
+        let event = events.recv_timeout(LIMIT).expect("event");
+        if let JobEventKind::Finished(outcome) = event.kind {
+            return outcome;
+        }
+    }
+}
+
+/// Runs `job` twice (computed, then cached), then `other` (another key: computed).
+fn computed_cached_rekeyed<J: AnalysisJob + Clone>(
+    name: &str,
+    job: J,
+    other: J,
+) -> Option<std::sync::Arc<J::Output>> {
+    let dir = TempDir::new(name);
+    let (pool, events) = AnalysisPool::new(PoolConfig::new(CacheDir::new(&dir.0))).expect("pool");
+    assert_ne!(job.key(), other.key());
+    let first = pool
+        .submit(job.clone(), Priority::Visible)
+        .wait_timeout(LIMIT)
+        .expect("finished")
+        .expect("ok");
+    assert_eq!(next_outcome(&events), Outcome::Computed);
+    pool.submit(job, Priority::Visible)
+        .wait_timeout(LIMIT)
+        .expect("finished")
+        .expect("ok");
+    assert_eq!(next_outcome(&events), Outcome::Cached);
+    pool.submit(other, Priority::Visible)
+        .wait_timeout(LIMIT)
+        .expect("finished")
+        .expect("ok");
+    assert_eq!(next_outcome(&events), Outcome::Computed);
+    Some(first)
+}
+
+#[test]
+fn scene_job_caches_by_settings() {
+    let Some(path) = fixture("scenes_cuts_640x360_30.mp4") else {
+        return;
+    };
+    let source = SourceFile::open(&path).expect("hash");
+    let job = SceneJob {
+        source: source.clone(),
+        settings: SceneSettings::default(),
+    };
+    let other = SceneJob {
+        source,
+        settings: SceneSettings {
+            sensitivity: 0.8,
+            ..SceneSettings::default()
+        },
+    };
+    let cuts = computed_cached_rekeyed("scenes", job, other).expect("cuts");
+    let frames: Vec<u64> = cuts.cuts.iter().map(|c| c.frame).collect();
+    assert_eq!(frames, [60, 120, 180, 240, 300]);
+}
+
+#[test]
+fn silence_job_caches_by_settings() {
+    let Some(path) = fixture("silence_48k_stereo.wav") else {
+        return;
+    };
+    let source = SourceFile::open(&path).expect("hash");
+    let job = SilenceJob {
+        source: source.clone(),
+        settings: SilenceSettings::default(),
+    };
+    let other = SilenceJob {
+        source,
+        settings: SilenceSettings {
+            min_ms: 1000,
+            ..SilenceSettings::default()
+        },
+    };
+    let silences = computed_cached_rekeyed("silence", job, other).expect("silences");
+    let starts: Vec<u64> = silences.ranges.iter().map(|r| r.start / 48).collect();
+    assert_eq!(starts.len(), 5, "{silences:?}");
+    for (got, ms) in starts.iter().zip([0, 1500, 3500, 5020, 7200]) {
+        assert!(got.abs_diff(ms) <= 3, "{silences:?}");
+    }
+}
+
+#[test]
+fn loudness_job_caches_by_source() {
+    let (Some(wav), Some(flac)) = (
+        fixture("loudness_program_48k_stereo.wav"),
+        fixture("loudness_program_44k1_stereo.flac"),
+    ) else {
+        return;
+    };
+    let job = LoudnessJob {
+        source: SourceFile::open(&wav).expect("hash"),
+        settings: LoudnessSettings,
+    };
+    let other = LoudnessJob {
+        source: SourceFile::open(&flac).expect("hash"),
+        settings: LoudnessSettings,
+    };
+    let loudness = computed_cached_rekeyed("loudness", job, other).expect("loudness");
+    let integrated = loudness.integrated_lufs.expect("integrated");
+    assert!((integrated + 26.1).abs() <= 0.1, "{integrated}");
+    assert_eq!(loudness.short_term.len(), 300);
+}
+
+#[test]
+fn beats_job_caches_by_settings() {
+    let Some(path) = fixture("beats_120_clicks.flac") else {
+        return;
+    };
+    let source = SourceFile::open(&path).expect("hash");
+    let job = BeatsJob {
+        source: source.clone(),
+        settings: BeatSettings::default(),
+    };
+    let other = BeatsJob {
+        source,
+        settings: BeatSettings {
+            min_bpm: 70.0,
+            max_bpm: 180.0,
+        },
+    };
+    let beats = computed_cached_rekeyed("beats", job, other).expect("beats");
+    assert!((beats.bpm - 120.0).abs() <= 1.0, "{}", beats.bpm);
+    assert!(beats.beats.len() >= 38, "{}", beats.beats.len());
+}

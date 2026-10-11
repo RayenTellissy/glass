@@ -11,11 +11,86 @@ default = []
 codec-av1 = []
 codec-prores-sw = []
 
+# Criterion benches take their own command-line flags, which the libtest harness of the
+# library target would reject under `cargo bench`.
+[lib]
+bench = false
+
 [dependencies]
 assets.workspace = true
+audioadapter-buffers.workspace = true
+blake3.workspace = true
+ebur128.workspace = true
+ffmpeg-next.workspace = true
+gif.workspace = true
+image.workspace = true
+image-webp.workspace = true
+realfft.workspace = true
+rubato.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation = { workspace = true, features = ["CFData", "CFDictionary", "CFNumber", "CFString", "CFURL"] }
+objc2-core-graphics.workspace = true
+objc2-core-video.workspace = true
+objc2-image-io.workspace = true
+objc2-io-surface.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
+tracing-subscriber.workspace = true
+criterion.workspace = true
+proptest.workspace = true
+
+[[bench]]
+name = "probe"
+harness = false
+
+[[bench]]
+name = "decode"
+harness = false
+
+[[bench]]
+name = "seek"
+harness = false
+
+[[bench]]
+name = "audio"
+harness = false
+
+[[bench]]
+name = "thumbnails"
+harness = false
+
+[[bench]]
+name = "peaks"
+harness = false
+
+[[bench]]
+name = "proxy"
+harness = false
+
+[[bench]]
+name = "export"
+harness = false
+
+[[bench]]
+name = "scenes"
+harness = false
+
+[[bench]]
+name = "silence"
+harness = false
+
+[[bench]]
+name = "loudness"
+harness = false
+
+[[bench]]
+name = "beats"
+harness = false
 
 [lints]
 workspace = true

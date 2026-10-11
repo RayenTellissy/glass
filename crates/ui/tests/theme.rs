@@ -1,8 +1,10 @@
 //! Every bundled theme applies to a real egui context, switches at run time, and draws a
 //! themed editor frame headless within the frame budget.
 
+mod support;
+
 use egui::{Rect, Sense, Stroke, StrokeKind, vec2};
-use ui::frame_time::FrameTimeMonitor;
+use support::FrameBudget;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::t;
 use ui::theme::{self, Role, ThemeKind};
@@ -83,20 +85,17 @@ fn every_theme_renders_within_the_frame_budget() {
     eprintln!("themed frame budget: fonts {}", headless.font_source());
     for kind in ThemeKind::ALL {
         theme::set(headless.context(), kind);
-        let mut monitor = FrameTimeMonitor::default();
-        headless
-            .run(WARMUP, FRAMES, &mut monitor, |ui, frame| {
-                themed_frame(ui, frame, text)
-            })
-            .expect("headless frames");
-        let stats = monitor.stats();
+        let stats = FrameBudget::run(&mut headless, WARMUP, FRAMES, |ui, frame| {
+            themed_frame(ui, frame, text)
+        })
+        .expect("headless frames");
         eprintln!(
             "themed frame budget, {} ({}): {stats}",
             kind.name(),
             headless.adapter()
         );
-        assert_eq!(stats.frames_in_window, FRAMES);
-        headless.assert_p99_within_budget("themed frame budget", &stats);
+        assert_eq!(stats.wall.frames_in_window, FRAMES);
+        stats.assert_within_budget(&headless, "themed frame budget");
     }
     if text {
         // The loaded font really has glyphs: the name lays out wider than a few points.

@@ -11,7 +11,7 @@ Glass is built one `PLAN.md` task at a time, in phase order, and every task foll
 1. **Read the plan.** Open `PLAN.md` and read the last 20 lines of the Progress Log at the bottom, the current phase's "Done when" line and the Decision Log.
 2. **Check the machine.** Run `df -h /` (see [Disk space](#disk-space)), then `source scripts/dev-env.sh` in the shell you build from.
 3. **Check the tree.** Run the [full check](#the-full-check). If anything fails on a clean checkout, fixing it is your first task.
-4. **Pick a task.** Take the first unchecked `[ ]` task in phase order. Do not start a later phase while an earlier one has open tasks; only tasks tagged `(parallel)` may be done out of order, at most two at a time.
+4. **Pick a task.** Take the first unchecked `[ ]` task in phase order. Independent tasks, including tasks from later phases whose inputs are already built, may run at the same time in their own worktrees (see [Working in parallel](#working-in-parallel)).
 5. **Start it.** Mark it `[~]` in `PLAN.md` and commit `plan: start <short task name>`.
 6. **Build it.** Meet the task's own "Done when", or its phase's. Add or update a test or a benchmark that proves it. If the change alters how data moves between crates or threads, update `docs/ARCHITECTURE.md` in the same commit. Commit the work as `<area>: <what changed>`, where the area is a crate or folder (`ui`, `media`, `docs`, `scripts`); several commits are fine.
 7. **Check it.** Run the full check, the smoke binary, and the extra checks the change calls for (see [Before you mark a task done](#before-you-mark-a-task-done)).
@@ -21,15 +21,43 @@ That is the three-commit rhythm: `plan: start`, the implementation commit(s), `p
 
 Work happens on `goal/phase-<N>` branches, never on `main`; a branch is merged when its phase's "Done when" passes.
 
+### Working in parallel
+
+Several tasks can be worked on at once, each in its own git worktree, while the machine still runs only one cargo command at a time.
+
+1. **One worktree per task.** Branch `task/<name>` off the phase branch and check it out in a new worktree next to the main checkout, then prepare it:
+
+   ```sh
+   git worktree add ../glass-<name> -b task/<name> goal/phase-<N>
+   cd ../glass-<name>
+   scripts/worktree-setup.sh
+   ```
+
+   `scripts/worktree-setup.sh` generates the worktree's own test media (git-ignored, about 25 MB) and prints the resolved `CARGO_TARGET_DIR` and `FFMPEG_DIR`. Running it again is harmless.
+2. **Source the environment** in every shell: `source scripts/dev-env.sh`. It adds `~/.cargo/bin` to `PATH` when `cargo` is not found (non-login shells skip rustup's profile line). In any worktree it points `CARGO_TARGET_DIR` at the main checkout's `target/` and `FFMPEG_DIR` at the main checkout's `.glass-cache/ffmpeg/<host-triple>/`, so dependencies and `ffmpeg-sys` compile once for all worktrees. Workspace crates do not get their own artifacts per worktree: cargo names them by their path relative to the workspace root, so `project` built in one worktree has the same fingerprint and artifact names as `project` built in any other, and a stale build from another worktree can look fresh (Decision 28). `scripts/cargo-serial` handles this (next step); a plain `cargo` command in a worktree does not.
+3. **Run every cargo command through `scripts/cargo-serial`**: build, test, clippy, run and bench. It waits for any cargo command running in another checkout, prints what it is waiting for and for how long, and holds the lock until its own command, test runs included, has finished:
+
+   ```sh
+   source scripts/dev-env.sh && scripts/cargo-serial test --workspace
+   ```
+
+   When the previous `cargo-serial` command ran in a different checkout (recorded in `<git common dir>/glass-cargo-last-checkout`), it first deletes the workspace packages' fingerprints in the shared target directory and prints one line saying so, so cargo recompiles this checkout's workspace crates; dependencies are not rebuilt. Switching checkouts therefore costs a rebuild of the workspace crates the command needs.
+
+   `cargo fmt` does not compile and may run directly. Stop a run with Ctrl-C or `SIGTERM`, which reach cargo and release the lock; `SIGKILL` releases the lock but can leave cargo running.
+4. **Benchmarks only when nothing else is building.** `cargo-serial` keeps other builds out while a benchmark runs, but also check that no other heavy work is going on first (see [Benchmarks](#benchmarks)).
+5. **Merge back when the task's checks pass.** The task follows the usual three-commit rhythm on its branch; when its scoped check is green (the workspace build, the tests of the crates it changed and of the crates that depend on them, clippy, fmt and smoke; Decision 18), merge `task/<name>` into the phase branch and remove the worktree (`git worktree remove ../glass-<name>`). The full `cargo test --workspace` runs on the phase branch after each batch of merges.
+
+`PLAN.md` and `docs/DECISIONS.md` merge with git's union driver (`.gitattributes`), so branches that each append Progress Log or Decision Log lines, or mark different checkboxes, merge without conflicts. The known risk: a line changed differently on two branches (the same checkbox marked `[~]` on one and `[x]` on the other) is kept both ways, so it appears twice. Read the changed parts of `PLAN.md` after every merge and delete the stale copy.
+
 ### The full check
 
 ```sh
 source scripts/dev-env.sh
-cargo build --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+scripts/cargo-serial build --workspace
+scripts/cargo-serial test --workspace
+scripts/cargo-serial clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
-cargo run --bin smoke
+scripts/cargo-serial run --bin smoke
 ```
 
 `cargo test --workspace` includes the source rules for UI code (i18n keys, no literal text, no literal colours) and the headless frame-budget tests. CI's check job runs the same commands, plus `python3 assets/theme/check.py` and the source rules as their own step.
@@ -40,10 +68,12 @@ Every task passes the full check. Depending on what it touched, also run:
 
 | If the change touches | Run | See |
 | --- | --- | --- |
-| A dependency | `cargo deny check` | [Licences and advisories](#licences-and-advisories) |
+| A dependency | `cargo deny check`, then `scripts/licences/third-party.py` and commit `assets/licences/third-party.tsv` | [Licences and advisories](#licences-and-advisories) |
 | UI text | `cargo test -p app --test ui_source -- --nocapture` (fails on missing keys, warns on unused ones) | [User-facing strings](#user-facing-strings) |
 | Theme tokens or colours | `python3 assets/theme/check.py` and the same `ui_source` test | [Colours and theme](#colours-and-theme) |
-| A UI screen | its headless frame-budget test (p99 under 8 ms) | [UI frame budget](#ui-frame-budget) |
+| A UI screen | its headless frame-budget test (p99 under 8 ms) | [UI frame budget](#ui-frame-budget), [Timing tests](#timing-tests) |
+| A panel, dialog, parameter widget or theme | `cargo test -p ui --test ui_snapshots -- --nocapture`; a new module adds a snapshot case | [UI snapshots](#ui-snapshots) |
+| Compositor output (render nodes, shaders, colour) | `cargo test -p render --test visual_regression -- --nocapture`; a new compositor feature adds a case | [Visual regression tests](#visual-regression-tests) |
 | Performance-sensitive code | `cargo bench -p <crate> --bench "*"` against a saved baseline, alone on the machine | [Benchmarks](#benchmarks) |
 | Media decoding or tests that read media | `tests/fixtures/generate.sh --verify` | [Test media](#test-media) |
 | `scripts/ffmpeg/` or `versions.env` | `scripts/ffmpeg/build.sh`, then the full check against the new build | [FFmpeg](#ffmpeg) |
@@ -71,9 +101,9 @@ The reference development machine is an Apple M2 with 8 GB of RAM and a small di
 
 #### Concurrency
 
-- **One `cargo build` or `cargo test` at a time** on the machine. Anything else that compiles waits.
-- The compiler is capped at four jobs: `.cargo/config.toml` sets `[build] jobs = 4`, and `scripts/dev-env.sh` exports `CARGO_BUILD_JOBS=4` for tools that ignore the config.
-- At most 10 concurrent workers (terminals running tasks, automated sessions), coordinator included; 3 to 5 is better. Only `(parallel)` tasks run beside the current phase task, at most two of them.
+- **One cargo command at a time** on the machine (build, test, clippy, run, bench). Anything else that compiles waits. `scripts/cargo-serial` enforces this across every checkout and worktree of the repo, so run cargo through it.
+- The compiler is capped at eight jobs: `.cargo/config.toml` sets `[build] jobs = 8`, and `scripts/dev-env.sh` exports `CARGO_BUILD_JOBS=8` for tools that ignore the config.
+- At most 10 concurrent workers (terminals running tasks, automated sessions), coordinator included; 3 to 5 is better. Each works in its own worktree (see [Working in parallel](#working-in-parallel)).
 - **Benchmarks and the stress project run alone:** serially, with no build, test or other heavy app running. Timing taken on a busy machine is not a result.
 - If the machine swaps, or a build takes more than three times its usual time, drop to a single worker for the rest of the session.
 
@@ -89,7 +119,7 @@ The reference development machine is an Apple M2 with 8 GB of RAM and a small di
 
 ## Building
 
-The development machine is modest, so the compiler is capped at four parallel jobs. `.cargo/config.toml` sets `[build] jobs = 4` for every build in this repo; also export `CARGO_BUILD_JOBS=4` in your shell so tools that ignore the config file follow the same limit.
+The compiler is capped at eight parallel jobs. `.cargo/config.toml` sets `[build] jobs = 8` for every build in this repo; also export `CARGO_BUILD_JOBS=8` in your shell so tools that ignore the config file follow the same limit.
 
 The easiest way to set up a shell is to source the development environment script from the repo root:
 
@@ -97,7 +127,7 @@ The easiest way to set up a shell is to source the development environment scrip
 source scripts/dev-env.sh
 ```
 
-It exports `CARGO_BUILD_JOBS=4` and, when `FFMPEG_DIR` is not already set, points it at the FFmpeg the bindings build against: the pinned build in `.glass-cache/ffmpeg/<host-triple>/` when `scripts/ffmpeg/build.sh` has produced one (see [FFmpeg](#ffmpeg)), otherwise Homebrew's FFmpeg (`brew install ffmpeg`). No machine-specific path is committed to the repo.
+It exports `CARGO_BUILD_JOBS=8`, points `CARGO_TARGET_DIR` at the main checkout's `target/` (shared by every worktree) and, when `FFMPEG_DIR` is not already set, points it at the FFmpeg the bindings build against: the pinned build in the main checkout's `.glass-cache/ffmpeg/<host-triple>/` (or under `GLASS_FFMPEG_CACHE` when set) when `scripts/ffmpeg/build.sh` has produced one (see [FFmpeg](#ffmpeg)), otherwise Homebrew's FFmpeg (`brew install ffmpeg`). No machine-specific path is committed to the repo.
 
 ### Logging
 
@@ -112,7 +142,7 @@ GLASS_CRASH_REPORTS=1 GLASS_DATA_DIR=/tmp/glass-data GLASS_DEBUG_CRASH=segfault 
 ls /tmp/glass-data/crashes
 ```
 
-`GLASS_DEBUG_CRASH` also takes `abort` and `panic`, and works in debug builds only (release builds ignore it); `GLASS_CONFIG_DIR` and `GLASS_DATA_DIR` move the two folders. Read a minidump with `minidump-stackwalk` (`cargo install minidump-stackwalk`) and the matching build's debug symbols.
+`GLASS_DEBUG_CRASH` also takes `abort` and `panic`, and works in debug builds only (release builds ignore it); `GLASS_CONFIG_DIR`, `GLASS_DATA_DIR` and `GLASS_CACHE_DIR` move the config, data and cache folders, and win over portable mode (see [Portable mode](#portable-mode)). Read a minidump with `minidump-stackwalk` (`cargo install minidump-stackwalk`) and the matching build's debug symbols.
 
 ### Feature flags
 
@@ -132,7 +162,11 @@ Reference media is generated, never committed. With the FFmpeg command-line tool
 tests/fixtures/generate.sh --verify
 ```
 
-It writes H.264 (8-bit 1080p, 10-bit 720p, 4K), 10-bit HEVC, ProRes 422, VP9, AV1, a VFR clip, PNG and JPEG stills, a PNG image sequence and a 48 kHz stereo WAV into `tests/fixtures/generated/` (git-ignored, about 25 MB), plus `MANIFEST.json` describing each file's codec, size, frame rate, duration, pixel format and whether it is VFR. Existing files are kept unless you pass `--force`; `--verify` checks every file with `ffprobe` against the manifest. Tests that need the media skip when the manifest is missing.
+It writes H.264 (8-bit 1080p, 10-bit 720p, 4K), 10-bit HEVC, ProRes 422, VP9, AV1, a VFR clip, a small MOV with a 90° display matrix and a `01:02:03:04` timecode track, PNG and JPEG stills, a PNG image sequence and a 48 kHz stereo WAV into `tests/fixtures/generated/` (git-ignored, about 25 MB), plus `MANIFEST.json` describing each file's codec, size, frame rate, duration, pixel format, rotation, timecode and whether it is VFR. Existing files are kept unless you pass `--force` or their recipe changed: `generated/.recipes` records a hash of each file's FFmpeg version and command (or producing function), and a file whose hash differs is regenerated and reported as stale; `--verify` checks every file with `ffprobe` against the manifest. Tests that need the media skip when the manifest is missing.
+
+The script uses `$FFMPEG_DIR/bin/ffmpeg` (the pinned build, see [FFmpeg](#ffmpeg)) before any `ffmpeg` on `PATH`. The pinned build has no VP9, Opus, AV1 or MP3 encoder, so with it `vp9_720p30.webm`, `sync_vp9_opus.webm`, `av1_1080p30.mp4` and `audio_44k1_mono.mp3` are skipped with a note and left out of the manifest, and the tests that use them skip. An FFmpeg with libvpx, libopus, libsvtav1 and libmp3lame writes them too: `FFMPEG_DIR=<its prefix> tests/fixtures/generate.sh`.
+
+`tests/fixtures/reference.proj` is the reference project `smoke` opens, plays (2 s) and exports (1 s, then verified). It is generated, not hand-edited: after a schema bump or a change to the generator in `crates/smoke/src/reference.rs`, run `scripts/cargo-serial run --bin smoke -- --write-reference` and commit the file (`crates/smoke/tests/reference.rs` fails until you do). Its media paths are relative to the file and point at `tests/fixtures/generated/`, so `smoke` fails with a message until the generated media exists; without a GPU it skips play and export unless `GLASS_REQUIRE_GPU=1`.
 
 ## Benchmarks
 
@@ -154,7 +188,42 @@ In CI the `bench` job in `ci.yml` saves a `main` baseline on every push to `main
 
 ## UI frame budget
 
-UI code is checked headless: `ui::headless::HeadlessUi` renders egui into an offscreen wgpu texture (a locked screen or a CI runner has no visible window) and records each frame into a `ui::frame_time::FrameTimeMonitor`. A UI test runs its screen for a few hundred frames and calls `headless.assert_p99_within_budget(what, &monitor.stats())`, which fails with p50, p95, p99, max and the over-budget count when the p99 is not under 8 ms; `crates/ui/tests/frame_budget.rs` is the example to copy. Keep each such test under a few seconds. Without a GPU the test prints `SKIPPED ...` and returns. On a software rasteriser (lavapipe, WARP; wgpu's `DeviceType::Cpu`) the frames still render but the budget is not judged, and the test prints `BUDGET NOT CHECKED ...`. Set `GLASS_REQUIRE_GPU=1` where a GPU is expected so a missing GPU or a software one fails instead; CI sets it on the macOS arm64 job and installs lavapipe on Linux.
+UI code is checked headless: `ui::headless::HeadlessUi` renders egui into an offscreen wgpu texture (a locked screen or a CI runner has no visible window). A UI test runs its screen for a few hundred frames through `support::FrameBudget` (`crates/ui/tests/support/mod.rs`), which times each frame on the wall clock and on the UI thread's CPU clock into two `ui::frame_time::FrameTimeMonitor`s, and calls `report.assert_within_budget(&headless, what)`, which holds the frames to the 8 ms budget by the [timing rules](#timing-tests) and fails with both clocks' p50, p95, p99, max and over-budget counts. `crates/ui/tests/frame_budget.rs` is the example to copy. Keep each such test under a few seconds. Without a GPU the test prints `SKIPPED ...` and returns. On a software rasteriser (lavapipe, WARP; wgpu's `DeviceType::Cpu`) the frames still render but the budget is not judged, and the test prints `BUDGET NOT CHECKED ...`. Set `GLASS_REQUIRE_GPU=1` where a GPU is expected so a missing GPU or a software one fails instead; CI sets it on the macOS arm64 job and installs lavapipe on Linux.
+
+## Timing tests
+
+Frame budgets, GPU pass times and latency budgets follow one set of rules (Decision 64), in `crates/render/tests/common/timing.rs`, which the `ui` and `engine` tests include by path. Tests in one binary run on parallel threads, other processes share the machine, and an idle GPU clocks down between timed passes, so by default the rules hold figures that load barely moves, and keep each test's own statistic for a quiet machine:
+
+- **Serial.** A timed section holds `timing::serial()` (`FrameBudget` does), so the timing tests of one binary never run at the same time.
+- **CPU sections** (UI frames, a submit, a send) are timed on the wall clock and on the measuring thread's CPU clock (`timing::Stopwatch`, `Laps`). The medians on both clocks are held to the budget: CPU time does not grow while the thread waits for a core, and a section that sleeps or blocks still moves the wall-clock median. The test's own statistic of CPU time (p99 for frames, max for single calls) is held to twice the budget, since a busy machine slows a thread's cores and caches about twofold. Windows has no thread clock fine enough, so there the CPU figures are wall-clock ones.
+- **Wall-clock only** figures (frame lateness, decode frame times) are held to the budget at the median.
+- **GPU pass times** from timestamp queries (`render::profiler::GpuProfiler`, after a warm-up) are held to 1.5 times the budget at the fastest tenth and to 3 times it at the median: other work and a lower GPU clock stretch a pass by up to about 1.8 times.
+- **Strict.** With `GLASS_STRICT_TIMING=1` each test's own statistic is held to the budget itself: the p99 or maximum on both clocks, the GPU median, the mean decode frame time. CI's macOS arm64 job runs the timing tests that way in their own step, one test at a time; run them so locally, alone on the machine, when a change is about performance (`GLASS_STRICT_TIMING=1 cargo test -p ui -p render -p engine -- --test-threads=1 budget gpu_time never_wait throughput late_frames`).
+
+A new timing test uses these helpers rather than its own `Instant` arithmetic. A failure in the default mode is a regression, not load: fix it rather than rerunning until it passes.
+
+## UI snapshots
+
+Every panel, dialog and parameter widget has golden images: `crates/ui/tests/ui_snapshots.rs` renders each case registered in `crates/ui/src/snapshot/cases.rs` headless (`HeadlessUi::capture`) in the dark, light and high-contrast themes at 1x and 2x, and compares it with `crates/ui/tests/snapshots/<case>/<theme>@<scale>x.png`.
+
+- **Adding a case.** Add a `SnapshotCase` to the list in `crates/ui/src/snapshot/cases.rs`: a name (the golden folder), the module it covers (`"panels/media_pool"`), a size in points cropped to the piece, and a draw function with realistic sample content through `t!()` strings and theme roles. Then write its goldens with `GLASS_UPDATE_SNAPSHOTS=1 cargo test -p ui --test ui_snapshots` and look at every new PNG before committing it. `every_panel_dialog_and_param_module_has_a_snapshot_case` fails when a `.rs` file or folder under `crates/ui/src/panels/`, `dialogs/` or `params/` has no case, when a case names a module that does not exist, and when a golden folder has no case.
+- **Updating goldens.** After an intended visual change, rerun with `GLASS_UPDATE_SNAPSHOTS=1`, review the changed PNGs in the diff, and commit them with the change.
+- **Tolerance.** A pixel differs when any RGBA channel is more than 16 levels (of 255) off; an image fails when more than 0.002% of its pixels differ (3 pixels of a 480 x 320 point case at 1x, 12 at 2x), or its size changed (`Tolerance::GPU`). egui rasterises text on the CPU, so GPUs differ only in filtering and blending rounding, which the channel threshold absorbs; a single changed letter (15 pixels at 1x, 56 at 2x) still fails, as does any colour, border or layout change. On a software rasteriser (`DeviceType::Cpu`) the looser `Tolerance::SOFTWARE` applies: 48 levels on up to 0.1% of the pixels, which catches a moved control or a wrong theme but not a single letter. The test prints every image that matched with some pixels over the threshold.
+- **Failures.** A failing image writes `<theme>@<scale>x.actual.png` and `<theme>@<scale>x.diff.png` (differing pixels in magenta over a faded golden) next to the golden; both are git-ignored, and CI uploads them as the `ui-snapshot-differences` artifact.
+- **Fonts and platforms.** The runtime font fallback depends on the machine, so snapshots pin their fonts (`ui::snapshot::fonts`): Arial and Courier New from `/System/Library/Fonts/Supplemental/`, which every macOS ships, until the Geist fonts are bundled. `crates/ui/tests/snapshots/FONTS.txt` records the files the goldens were made with, and a failure says so when the fonts differ. Until Geist is bundled the goldens are macOS-only: elsewhere the test prints `SKIPPED ui snapshots: ...`. When the Geist fonts land in `assets/fonts/` the snapshots switch to them automatically; regenerate every golden with `GLASS_UPDATE_SNAPSHOTS=1` in the same change (the other platforms can then compare too).
+- **No GPU.** Like the frame-budget tests, the snapshot test prints `SKIPPED ...` without a GPU and fails instead under `GLASS_REQUIRE_GPU=1`. CI runs it as its own step on the macOS arm64 job.
+- **Size.** Keep cases cropped to the piece; goldens are RGB PNGs at maximum compression. The whole folder should stay under a few MB.
+
+## Visual regression tests
+
+The compositor has golden frames too: `crates/render/tests/visual_regression.rs` renders each reference sequence registered in `crates/render/tests/visual/cases.rs` through the render graph (sources, `composite_stack` with blend modes, transforms, crop and opacity, text, shapes, then `OutputNode::preview` dithered with the frame index as its seed) at 320 x 180, at each of the case's frame indices, and compares it with `crates/render/tests/visual/goldens/<case>/frame_<index>.png`.
+
+- **Adding a case.** Add a `Case` to the list in `crates/render/tests/visual/cases.rs`: a name (the golden folder), a few frame indices, and a function from the frame index to a `Scene`, its layers bottom first, each a `Source` (decoded bars through `YuvSourceNode`, an uploaded still, a solid fill, a text, vector shapes) with its `Layer` settings. The bottom layer must be opaque and cover the canvas (goldens have no alpha). A new kind of source, such as masks, is a `Source` variant plus its arm in `Studio::render`. Write the goldens with `GLASS_UPDATE_SNAPSHOTS=1 cargo test -p render --test visual_regression` and look at every new PNG before committing it. `every_golden_folder_has_a_case` fails on a golden folder or frame with no case.
+- **Updating goldens.** After an intended change to what the compositor draws, rerun with `GLASS_UPDATE_SNAPSHOTS=1`, review the changed PNGs in the diff, and commit them with the change.
+- **Tolerance.** The comparison is the UI snapshots' (shared by path), with the compositor's own thresholds in `crates/render/tests/visual/mod.rs`. On a GPU (`visual::GPU`) a pixel differs when a channel is more than 6 levels off, and a frame fails when more than 0.05% of its pixels differ (28 pixels), so a layer moved by one pixel, a wrong blend mode, colour or opacity fails while one code of dither does not. On a software rasteriser (`visual::SOFTWARE`) it is 24 levels on up to 0.5% of the pixels, which catches a missing, moved or wrongly blended layer but not a one-pixel shift.
+- **Failures.** A failing frame writes `frame_<index>.actual.png` and `frame_<index>.diff.png` (differing pixels in magenta over a faded golden) next to the golden; both are git-ignored, and CI uploads them as the `visual-regression-differences` artifact.
+- **Platforms and GPUs.** Texts are set in Arial from `/System/Library/Fonts/Supplemental/`, so the goldens are macOS-only: elsewhere the test prints `SKIPPED visual regression: ...`. Without a GPU it prints `SKIPPED ...`, and fails instead under `GLASS_REQUIRE_GPU=1`. CI runs it as its own step on the macOS arm64 job.
+- **Size.** Keep scenes at the 320 x 180 canvas and to two or three frames; goldens are RGB PNGs at maximum compression, and the dither noise makes each one 35 to 60 KB. The folder should stay under 1 MB.
 
 ## User-facing strings
 
@@ -189,6 +258,8 @@ cargo deny check
 
 CI runs the same check. If a new dependency is rejected, pick another crate; extend the allow-list only for a licence that is GPLv3-compatible, with a comment saying why.
 
+The About dialog's third-party list is `assets/licences/third-party.tsv`, generated from `cargo metadata` and `scripts/ffmpeg/versions.env` by `scripts/licences/third-party.py` (`--check` only compares). Rerun it whenever `Cargo.lock` or the FFmpeg pins change: `cargo test -p assets` fails while the file and `Cargo.lock` disagree. The licence texts of the shipped crates are not committed; the packaging scripts gather them from the crates' sources into `LICENSES/third-party-crates.txt` in every installer.
+
 ## FFmpeg
 
 Glass links FFmpeg as shared libraries. For day-to-day work Homebrew's FFmpeg is enough; the pinned build that releases ship comes from `scripts/ffmpeg/build.sh`:
@@ -198,17 +269,17 @@ scripts/ffmpeg/build.sh          # about 3 minutes on an M2, once per version bu
 source scripts/dev-env.sh        # now prefers .glass-cache/ffmpeg/<host-triple>
 ```
 
-`scripts/ffmpeg/versions.env` pins FFmpeg 9.0.x, x264 and x265 (and, per target, nv-codec-headers and zlib) by URL and SHA-256. The script downloads the archives into `.glass-cache/ffmpeg/src/`, verifies them, builds its own `pkgconf` (and `nasm` on x86_64 when missing) as host tools, and installs into `.glass-cache/ffmpeg/<target-triple>/` with `lib/`, `include/`, `bin/`, `LICENSES/`, `SOURCES.txt` and `BUILDINFO`. It rebuilds only when `versions.env` or the script changes (`--force` to override). It builds for the host only; CI builds each target on its own runner.
+`scripts/ffmpeg/versions.env` pins FFmpeg 9.0.x, x264, x265 and dav1d (and, per target, nv-codec-headers and zlib) by URL and SHA-256. The script downloads the archives into `.glass-cache/ffmpeg/src/`, verifies them, builds its own `pkgconf` (and `nasm` on x86_64 when missing), `ninja` and `meson` (run from its source with `python3`, which must be on `PATH`) as host tools, and installs into `.glass-cache/ffmpeg/<target-triple>/` with `lib/`, `include/`, `bin/`, `LICENSES/`, `SOURCES.txt` and `BUILDINFO`. It rebuilds only when `versions.env` or the script changes (`--force` to override). It builds for the host only; CI builds each target on its own runner.
 
 ### GPL compliance
 
-That FFmpeg build is configured with `--enable-gpl --enable-version3` and links x264 and x265, so every Glass release is distributed under GPLv3 terms for those libraries. Each release must:
+That FFmpeg build is configured with `--enable-gpl --enable-version3` and links x264, x265 and dav1d (BSD 2-clause), so every Glass release is distributed under GPLv3 terms for those libraries. Each release must:
 
 - bundle the licence texts from `.glass-cache/ffmpeg/<target>/LICENSES/` inside every installer,
 - attach the exact source archives used, produced by `scripts/ffmpeg/package-sources.sh --archive` (archives, `SHA256SUMS`, licence texts and the build scripts, in `.glass-cache/ffmpeg/release-sources.tar.gz`),
 - keep `versions.env` unchanged between building the installers and packaging the sources.
 
-Never patch the FFmpeg, x264 or x265 sources without adding the patches to the source bundle.
+Never patch the FFmpeg, x264, x265 or dav1d sources without adding the patches to the source bundle.
 
 ## Packaging
 
@@ -223,6 +294,10 @@ scripts/package/make-dmg.sh --binary target/dist/glass
 ```
 
 It writes `target/package/<target>/Glass.app` and `glass-<version>-<target>.dmg`, signed ad hoc unless `GLASS_CODESIGN_IDENTITY` names a Developer ID identity, and fails if any bundled binary still references a library outside the bundle or the system. Icons are taken from `assets/icons/` when present.
+
+### Portable mode
+
+Glass runs portable, with nothing written to the user's own folders, when a folder named `Glass Data` sits next to the executable: next to `glass.exe` on Windows, next to the binary or AppImage on Linux, and next to `Glass.app` on macOS (not inside the bundle). Settings then live in `Glass Data/Settings/`, crash reports and later downloads in `Glass Data/Data/`, and the per-user cache (autosaves) in `Glass Data/Cache/`. Projects keep their own `.glass-cache/` beside the project file in both modes. To make a portable copy, put Glass on the drive and create the empty `Glass Data` folder beside it; delete the folder to go back to the normal per-user folders. If a portable folder cannot be written (a locked drive, read-only media, or macOS running a downloaded app from a randomised read-only location until it is moved), Glass logs a warning and uses the normal per-user folder for it instead. The code is `app::locations`.
 
 ### Size budget
 

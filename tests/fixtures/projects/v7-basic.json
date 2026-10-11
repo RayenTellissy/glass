@@ -1,0 +1,228 @@
+{
+  "format": "glass.project",
+  "schema_version": 7,
+  "project": {
+    "uid": "fixture-basic",
+    "name": "Harbour film",
+    "next_id": 9,
+    "settings": {
+      "sequence": {
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 30,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo"
+      },
+      "colour_space": "rec709",
+      "cache_folder": {
+        "relative": ".glass-cache"
+      }
+    },
+    "media": {
+      "refs": [
+        {
+          "id": 1,
+          "content_hash": "a1b2c3",
+          "path": "/footage/harbour.mov"
+        },
+        {
+          "id": 2,
+          "content_hash": "d4e5f6",
+          "path": "/footage/gulls.wav"
+        }
+      ]
+    },
+    "sequences": [
+      {
+        "id": 3,
+        "name": "Main",
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 25,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo",
+        "markers": [],
+        "tracks": [
+          {
+            "id": 4,
+            "kind": "video",
+            "name": "V1",
+            "items": [
+              {
+                "id": 6,
+                "range": {
+                  "start": "0",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "1/2",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "keyframes": {},
+                "markers": []
+              },
+              {
+                "id": 7,
+                "range": {
+                  "start": "2",
+                  "duration": "3/5"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "3",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "keyframes": {},
+                "markers": []
+              }
+            ],
+            "transitions": []
+          },
+          {
+            "id": 5,
+            "kind": "audio",
+            "name": "A1",
+            "items": [
+              {
+                "id": 8,
+                "range": {
+                  "start": "0",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 2,
+                "source_start": "0",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "keyframes": {},
+                "markers": []
+              }
+            ],
+            "transitions": []
+          }
+        ]
+      }
+    ]
+  }
+}

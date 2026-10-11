@@ -1,0 +1,13 @@
+{
+  "id": "radial-wipe",
+  "name": "transition.name.radial_wipe",
+  "category": "wipe",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "centre", "label": "transition.param.centre", "kind": {"point": {"default": [0.5, 0.5], "range": {"min": null, "max": null}, "decimals": 1}}, "unit": "percent", "keyframeable": false},
+    {"id": "softness", "label": "transition.param.softness", "kind": {"float": {"default": 0.0, "range": {"min": 0.0, "max": 1000.0}, "soft": {"min": 0.0, "max": 100.0}, "decimals": 1}}, "unit": "pixels", "keyframeable": false},
+    {"id": "border_width", "label": "transition.param.border_width", "kind": {"float": {"default": 0.0, "range": {"min": 0.0, "max": 500.0}, "soft": {"min": 0.0, "max": 40.0}, "decimals": 1}}, "unit": "pixels", "keyframeable": false},
+    {"id": "border_colour", "label": "transition.param.border_colour", "kind": {"colour": {"default": [1.0, 1.0, 1.0, 1.0], "alpha": true}}, "unit": "none", "keyframeable": false}
+  ]
+}

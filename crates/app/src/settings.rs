@@ -1,57 +1,17 @@
-//! Per-user folders and the settings the app reads before the UI exists.
+//! The settings the app reads before the UI exists.
 //!
-//! Until the Settings dialog exists, settings live in `settings.json` in the user config
-//! folder and can be overridden by environment variables (CONTRIBUTING.md, "Crash
-//! reports").
+//! Until the Settings dialog exists, settings live in `settings.json` in the config
+//! folder ([`crate::locations`]) and can be overridden by environment variables
+//! (CONTRIBUTING.md, "Crash reports").
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Deserialize;
 
-/// Overrides the user config folder (settings).
-pub const CONFIG_DIR_ENV: &str = "GLASS_CONFIG_DIR";
-/// Overrides the user data folder (crash reports, later models and asset packs).
-pub const DATA_DIR_ENV: &str = "GLASS_DATA_DIR";
+use crate::locations::Locations;
+
 /// `1`/`on`/`true` or `0`/`off`/`false`: overrides the crash report setting.
 pub const CRASH_REPORTS_ENV: &str = "GLASS_CRASH_REPORTS";
-
-/// The folder name under the platform's config and data folders.
-const APP_DIR: &str = "Glass";
-
-/// Where per-user files go.
-#[derive(Clone, Debug)]
-pub struct Paths {
-    pub config: PathBuf,
-    pub data: PathBuf,
-}
-
-impl Paths {
-    /// The platform folders (`~/Library/Application Support/Glass` on macOS,
-    /// `%APPDATA%\Glass` on Windows, `$XDG_CONFIG_HOME/Glass` and `$XDG_DATA_HOME/Glass`
-    /// on Linux), unless the environment overrides them.
-    pub fn from_env() -> Self {
-        let pick = |env: &str, base: Option<PathBuf>| {
-            std::env::var_os(env)
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-                .or_else(|| base.map(|b| b.join(APP_DIR)))
-                .unwrap_or_else(|| std::env::temp_dir().join(APP_DIR))
-        };
-        Self {
-            config: pick(CONFIG_DIR_ENV, dirs::config_dir()),
-            data: pick(DATA_DIR_ENV, dirs::data_dir()),
-        }
-    }
-
-    pub fn settings_file(&self) -> PathBuf {
-        self.config.join("settings.json")
-    }
-
-    /// Where crash reports are written. Nothing reads them but the user.
-    pub fn crashes(&self) -> PathBuf {
-        self.data.join("crashes")
-    }
-}
 
 /// The settings read at startup. Every field defaults to off.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -65,8 +25,8 @@ pub struct Settings {
 impl Settings {
     /// Reads `settings.json` (a missing file means defaults; an unreadable one is logged
     /// and means defaults), then applies environment overrides.
-    pub fn load(paths: &Paths) -> Self {
-        let mut settings = Self::read_file(&paths.settings_file());
+    pub fn load(locations: &Locations) -> Self {
+        let mut settings = Self::read_file(&locations.settings_file());
         if let Some(on) = std::env::var(CRASH_REPORTS_ENV)
             .ok()
             .and_then(|v| parse_switch(&v))

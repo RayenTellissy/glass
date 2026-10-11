@@ -11,8 +11,8 @@
 #
 # Archives are taken from the source cache when present (and fetched otherwise), and
 # every one is checked against versions.env. All targets' sources are included, so
-# one bundle covers every installer of a release. The build tools (pkgconf, nasm) are
-# not shipped and are left out.
+# one bundle covers every installer of a release. The build tools (pkgconf, nasm, meson,
+# ninja) are not shipped and are left out.
 
 set -euo pipefail
 
@@ -72,7 +72,7 @@ field() {
     printf "%s" "${!name}"
 }
 
-SHIPPED=(FFMPEG X264 X265 NVCODEC ZLIB)
+SHIPPED=(FFMPEG X264 X265 DAV1D NVCODEC ZLIB)
 SRC_DIR="$CACHE/src"
 mkdir -p "$SRC_DIR"
 
@@ -114,6 +114,7 @@ extract "$FFMPEG_ARCHIVE" "ffmpeg-$FFMPEG_VERSION/COPYING.GPLv3" FFmpeg-COPYING.
 extract "$FFMPEG_ARCHIVE" "ffmpeg-$FFMPEG_VERSION/LICENSE.md" FFmpeg-LICENSE.md
 extract "$X264_ARCHIVE" "x264-$X264_COMMIT/COPYING" x264-COPYING
 extract "$X265_ARCHIVE" "x265_$X265_VERSION/COPYING" x265-COPYING
+extract "$DAV1D_ARCHIVE" "dav1d-$DAV1D_VERSION/COPYING" dav1d-COPYING
 extract "$ZLIB_ARCHIVE" "zlib-$ZLIB_VERSION/LICENSE" zlib-LICENSE
 tar -xOf "$OUT/sources/$NVCODEC_ARCHIVE" \
     "nv-codec-headers-n$NVCODEC_VERSION/include/ffnvcodec/nvEncodeAPI.h" |
@@ -122,8 +123,9 @@ tar -xOf "$OUT/sources/$NVCODEC_ARCHIVE" \
 cp "$SCRIPT_DIR/build.sh" "$SCRIPT_DIR/versions.env" "$SCRIPT_DIR/package-sources.sh" "$OUT/build-scripts/"
 
 {
-    echo "Glass bundles FFmpeg $FFMPEG_VERSION built with x264 and x265 as shared libraries,"
-    echo "licensed under the GNU General Public License version 3 (see LICENSES/)."
+    echo "Glass bundles FFmpeg $FFMPEG_VERSION built with x264, x265 and dav1d as shared"
+    echo "libraries, licensed under the GNU General Public License version 3 (see LICENSES/);"
+    echo "dav1d itself is under the BSD 2-clause licence."
     echo
     echo "sources/ holds the exact, unmodified archives the libraries were built from."
     echo "build-scripts/ holds the script that built them on each target (build.sh, which"

@@ -27,6 +27,38 @@ pub const REQUIRE_GPU_ENV: &str = "GLASS_REQUIRE_GPU";
 
 const FRAMES_IN_FLIGHT: usize = 2;
 
+/// The offscreen target's format: egui paints gamma-encoded colours, as eframe does into
+/// a non-sRGB surface.
+const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
+
+fn create_target(device: &wgpu::Device, viewport: Viewport) -> (wgpu::Texture, wgpu::TextureView) {
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("glass headless target"),
+        size: wgpu::Extent3d {
+            width: viewport.width_px,
+            height: viewport.height_px,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: TARGET_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    (target, view)
+}
+
+/// A frame read back from the GPU: tightly packed RGBA8, gamma-encoded, rows top to
+/// bottom.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Capture {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
 /// Why the harness could not start.
 #[derive(Debug)]
 pub enum HeadlessError {
@@ -92,6 +124,7 @@ pub struct HeadlessUi {
     device: wgpu::Device,
     queue: wgpu::Queue,
     renderer: egui_wgpu::Renderer,
+    target: wgpu::Texture,
     view: wgpu::TextureView,
     screen: egui_wgpu::ScreenDescriptor,
     viewport: Viewport,
@@ -99,6 +132,7 @@ pub struct HeadlessUi {
     adapter: String,
     device_type: wgpu::DeviceType,
     has_text: bool,
+    time: Option<f64>,
 }
 
 impl HeadlessUi {
@@ -118,24 +152,12 @@ impl HeadlessUi {
         }))
         .map_err(|e| HeadlessError::GpuUnavailable(e.to_string()))?;
 
-        let format = wgpu::TextureFormat::Bgra8Unorm;
-        let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("glass headless target"),
-            size: wgpu::Extent3d {
-                width: viewport.width_px,
-                height: viewport.height_px,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let renderer =
-            egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
+        let (target, view) = create_target(&device, viewport);
+        let renderer = egui_wgpu::Renderer::new(
+            &device,
+            TARGET_FORMAT,
+            egui_wgpu::RendererOptions::default(),
+        );
 
         let ctx = egui::Context::default();
         let has_text = crate::fonts::install(&ctx);
@@ -145,6 +167,7 @@ impl HeadlessUi {
             device,
             queue,
             renderer,
+            target,
             view,
             screen: egui_wgpu::ScreenDescriptor {
                 size_in_pixels: [viewport.width_px, viewport.height_px],
@@ -155,6 +178,7 @@ impl HeadlessUi {
             adapter: format!("wgpu {:?} on {}", info.backend, info.name),
             device_type: info.device_type,
             has_text,
+            time: None,
         })
     }
 
@@ -219,6 +243,13 @@ impl HeadlessUi {
         self.has_text
     }
 
+    /// Pins egui's input time for the following frames, so anything drawn from
+    /// `i.time` (spinners) looks the same whatever ran before; `None` lets egui advance
+    /// it by 1/60 s per frame.
+    pub fn set_time(&mut self, time: Option<f64>) {
+        self.time = time;
+    }
+
     /// Runs one frame and returns its UI-thread time.
     pub fn frame(&mut self, draw: impl FnMut(&mut egui::Ui)) -> Result<Duration, HeadlessError> {
         if self.in_flight.len() >= FRAMES_IN_FLIGHT
@@ -238,6 +269,7 @@ impl HeadlessUi {
         );
         let mut raw = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, points)),
+            time: self.time,
             ..Default::default()
         };
         raw.viewports
@@ -301,6 +333,115 @@ impl HeadlessUi {
         Ok(start.elapsed())
     }
 
+    /// Whether the adapter is a software rasteriser (`DeviceType::Cpu`).
+    pub fn is_software(&self) -> bool {
+        self.device_type == wgpu::DeviceType::Cpu
+    }
+
+    pub fn viewport(&self) -> Viewport {
+        self.viewport
+    }
+
+    /// Replaces the offscreen target with one of a new size and scale. Waits for the
+    /// frames in flight, which still draw into the old target.
+    pub fn set_viewport(&mut self, viewport: Viewport) -> Result<(), HeadlessError> {
+        self.wait_idle()?;
+        let (target, view) = create_target(&self.device, viewport);
+        self.target = target;
+        self.view = view;
+        self.viewport = viewport;
+        self.screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [viewport.width_px, viewport.height_px],
+            pixels_per_point: viewport.pixels_per_point,
+        };
+        Ok(())
+    }
+
+    /// Runs `settle` frames of `draw` (egui lays some things out over two frames), then
+    /// reads the last one back.
+    pub fn capture(
+        &mut self,
+        settle: usize,
+        mut draw: impl FnMut(&mut egui::Ui),
+    ) -> Result<Capture, HeadlessError> {
+        for _ in 0..settle.max(1) {
+            self.frame(&mut draw)?;
+        }
+        self.read_back()
+    }
+
+    /// Copies the target into a mappable buffer and waits for it.
+    fn read_back(&mut self) -> Result<Capture, HeadlessError> {
+        let Viewport {
+            width_px: width,
+            height_px: height,
+            ..
+        } = self.viewport;
+        let row = width * 4;
+        let padded_row =
+            row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("glass headless readback"),
+            size: u64::from(padded_row) * u64::from(height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        encoder.copy_texture_to_buffer(
+            self.target.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit([encoder.finish()]);
+        let slice = buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        self.wait_idle()?;
+        rx.recv()
+            .map_err(|e| HeadlessError::Gpu(e.to_string()))?
+            .map_err(|e| HeadlessError::Gpu(e.to_string()))?;
+        let mut rgba = Vec::with_capacity((row * height) as usize);
+        {
+            let mapped = slice
+                .get_mapped_range()
+                .map_err(|e| HeadlessError::Gpu(e.to_string()))?;
+            for line in mapped.chunks_exact(padded_row as usize) {
+                for bgra in line[..row as usize].as_chunks::<4>().0.iter() {
+                    rgba.extend_from_slice(&[bgra[2], bgra[1], bgra[0], bgra[3]]);
+                }
+            }
+        }
+        buffer.unmap();
+        Ok(Capture {
+            width,
+            height,
+            rgba,
+        })
+    }
+
+    fn wait_idle(&mut self) -> Result<(), HeadlessError> {
+        self.in_flight.clear();
+        self.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map(|_| ())
+            .map_err(|e| HeadlessError::Gpu(e.to_string()))
+    }
+
     /// Runs `warmup` untimed frames, then `frames` frames recorded into `monitor`. The
     /// frame index is passed to `draw` so the UI can change from frame to frame.
     pub fn run(
@@ -316,10 +457,7 @@ impl HeadlessUi {
                 monitor.record(elapsed);
             }
         }
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|e| HeadlessError::Gpu(e.to_string()))?;
-        Ok(())
+        self.wait_idle()
     }
 }
 

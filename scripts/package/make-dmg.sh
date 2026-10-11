@@ -16,7 +16,7 @@
 #   GLASS_CODESIGN_IDENTITY  a Developer ID identity; without it everything is signed ad hoc
 #
 # Layout: Glass.app/Contents/{MacOS/glass, Frameworks/<FFmpeg dylibs>, Resources/,
-# Info.plist}. Every FFmpeg, x264 and x265 dylib is copied under the name its install
+# Info.plist}. Every FFmpeg, x264, x265 and dav1d dylib is copied under the name its install
 # id uses, its id becomes @rpath/<name>, references between them become @rpath/<name>,
 # and the executable gets an rpath of @executable_path/../Frameworks. The script fails
 # if any bundled Mach-O still references a path outside @rpath, /usr/lib or /System.

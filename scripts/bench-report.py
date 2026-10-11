@@ -12,6 +12,7 @@ changes are not called out.
 
 import argparse
 import json
+import os
 import pathlib
 import sys
 
@@ -30,7 +31,10 @@ def human(ns):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--criterion", default="target/criterion")
+    parser.add_argument(
+        "--criterion",
+        default=os.path.join(os.environ.get("CARGO_TARGET_DIR", "target"), "criterion"),
+    )
     parser.add_argument("--baseline", default="main")
     parser.add_argument("--threshold", type=float, default=10.0)
     args = parser.parse_args()

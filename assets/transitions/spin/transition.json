@@ -1,0 +1,12 @@
+{
+  "id": "spin",
+  "name": "transition.name.spin",
+  "category": "motion",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "rotation", "label": "transition.param.rotation", "kind": {"choice": {"default": "clockwise", "options": [{"id": "clockwise", "label": "transition.option.clockwise"}, {"id": "anticlockwise", "label": "transition.option.anticlockwise"}]}}, "unit": "none", "keyframeable": false},
+    {"id": "angle", "label": "transition.param.angle", "kind": {"angle": {"default": 180.0, "range": {"min": 0.0, "max": 1440.0}}}, "unit": "degrees", "keyframeable": false},
+    {"id": "zoom", "label": "transition.param.zoom", "kind": {"float": {"default": 1.25, "range": {"min": 1.0, "max": 4.0}, "soft": null, "decimals": 0}}, "unit": "percent", "keyframeable": false}
+  ]
+}

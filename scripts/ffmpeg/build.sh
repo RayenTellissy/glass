@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds the pinned FFmpeg (scripts/ffmpeg/versions.env) with x264 and x265 as shared
-# libraries for the host target, into .glass-cache/ffmpeg/<target-triple>/:
+# Builds the pinned FFmpeg (scripts/ffmpeg/versions.env) with x264, x265 and dav1d as
+# shared libraries for the host target, into .glass-cache/ffmpeg/<target-triple>/:
 #   lib/ include/ bin/   the install prefix (point FFMPEG_DIR here)
 #   LICENSES/            licence texts of everything linked into the libraries
 #   SOURCES.txt          archive names, URLs and SHA-256 of the sources used
@@ -15,7 +15,8 @@
 # Targets: aarch64/x86_64-apple-darwin and x86_64-unknown-linux-gnu natively; on
 # x86_64-pc-windows-msvc from an MSYS2 shell with the MSVC environment loaded (cl,
 # link and cmake on PATH, nasm and pkgconf from MSYS2). Cross builds are not
-# supported: CI builds each target on a native runner.
+# supported: CI builds each target on a native runner. python3 (or python) must be on
+# PATH: meson, which builds dav1d, runs from its pinned source like the other host tools.
 #
 # GLASS_FFMPEG_CACHE overrides the cache root (default <repo>/.glass-cache/ffmpeg).
 
@@ -107,12 +108,12 @@ STAMP="$(cat "$SCRIPT_DIR/versions.env" "$SCRIPT_DIR/build.sh" | {
 } | cut -d " " -f 1)"
 
 # Sources each target needs, by their prefix in versions.env.
-SHIPPED=(FFMPEG X264 X265)
+SHIPPED=(FFMPEG X264 X265 DAV1D)
 case "$OS" in
     linux) SHIPPED+=(NVCODEC) ;;
     windows) SHIPPED+=(NVCODEC ZLIB) ;;
 esac
-TOOLS=()
+TOOLS=(MESON NINJA)
 if [ "$OS" != windows ]; then
     TOOLS+=(PKGCONF)
     if [ "$ARCH" = x86_64 ] && ! command -v nasm >/dev/null 2>&1; then
@@ -153,6 +154,9 @@ unpack() {
         FFMPEG) dir="ffmpeg-$FFMPEG_VERSION" ;;
         X264) dir="x264-$X264_COMMIT" ;;
         X265) dir="x265_$X265_VERSION" ;;
+        DAV1D) dir="dav1d-$DAV1D_VERSION" ;;
+        MESON) dir="meson-$MESON_VERSION" ;;
+        NINJA) dir="ninja-$NINJA_VERSION" ;;
         NVCODEC) dir="nv-codec-headers-n$NVCODEC_VERSION" ;;
         ZLIB) dir="zlib-$ZLIB_VERSION" ;;
         PKGCONF) dir="pkgconf-$PKGCONF_VERSION" ;;
@@ -208,7 +212,26 @@ fi
 
 # Host tools.
 export PATH="$TOOLS_DIR/bin:$PATH"
+PYTHON="$(command -v python3 || command -v python || true)"
+[ -n "$PYTHON" ] || die "python3 not found (meson needs it)"
+EXE=""
+[ "$OS" = windows ] && EXE=".exe"
+if [ "$("$TOOLS_DIR/bin/ninja$EXE" --version 2>/dev/null)" != "$NINJA_VERSION" ]; then
+    echo "tool   ninja $NINJA_VERSION"
+    dir="$(unpack NINJA)"
+    (cd "$dir" && run ninja "$PYTHON" configure.py --bootstrap)
+    mkdir -p "$TOOLS_DIR/bin"
+    cp "$dir/ninja$EXE" "$TOOLS_DIR/bin/ninja$EXE"
+fi
+MESON_DIR="$TOOLS_DIR/meson-$MESON_VERSION"
+if [ ! -f "$MESON_DIR/meson.py" ]; then
+    echo "tool   meson $MESON_VERSION"
+    tar -xf "$SRC_DIR/$MESON_ARCHIVE" -C "$TOOLS_DIR"
+    [ -f "$MESON_DIR/meson.py" ] || die "$MESON_ARCHIVE did not unpack to $MESON_DIR"
+fi
+MESON=("$PYTHON" "$(native_path "$MESON_DIR/meson.py")")
 for name in "${TOOLS[@]}"; do
+    case "$name" in MESON | NINJA) continue ;; esac
     tool="$(printf "%s" "$name" | tr "[:upper:]" "[:lower:]")"
     if [ -x "$TOOLS_DIR/bin/$tool" ]; then
         continue
@@ -295,6 +318,20 @@ run x265 cmake -S "$(native_path "$dir/source")" -B "$(native_path "$dir/build-8
 run x265 cmake --build "$(native_path "$dir/build-8")" --config Release --parallel "$JOBS"
 run x265 cmake --install "$(native_path "$dir/build-8")" --config Release
 
+echo "dav1d  $DAV1D_VERSION"
+dir="$(unpack DAV1D)"
+run dav1d "${MESON[@]}" setup "$(native_path "$dir/build")" "$(native_path "$dir")" \
+    --prefix="$(native_path "$PREFIX")" --libdir=lib --buildtype=release --default-library=shared \
+    -Denable_tools=false -Denable_tests=false -Denable_examples=false
+run dav1d ninja -C "$dir/build" -j "$JOBS"
+run dav1d ninja -C "$dir/build" install
+if [ "$OS" = macos ]; then
+    # meson installs with an @rpath id; use an absolute one like the other libraries.
+    for lib in "$PREFIX"/lib/libdav1d.*.dylib; do
+        [ -L "$lib" ] || install_name_tool -id "$lib" "$lib"
+    done
+fi
+
 echo "ffmpeg $FFMPEG_VERSION"
 dir="$(unpack FFMPEG)"
 ffmpeg_args=(
@@ -302,7 +339,7 @@ ffmpeg_args=(
     --enable-shared --disable-static
     --enable-gpl --enable-version3
     --disable-autodetect
-    --enable-libx264 --enable-libx265
+    --enable-libx264 --enable-libx265 --enable-libdav1d
     --enable-zlib
     --disable-doc --disable-ffplay
     --disable-network
@@ -336,6 +373,7 @@ cp "$BUILD_DIR/ffmpeg-$FFMPEG_VERSION/COPYING.GPLv3" "$PREFIX/LICENSES/FFmpeg-CO
 cp "$BUILD_DIR/ffmpeg-$FFMPEG_VERSION/LICENSE.md" "$PREFIX/LICENSES/FFmpeg-LICENSE.md"
 cp "$BUILD_DIR/x264-$X264_COMMIT/COPYING" "$PREFIX/LICENSES/x264-COPYING"
 cp "$BUILD_DIR/x265_$X265_VERSION/COPYING" "$PREFIX/LICENSES/x265-COPYING"
+cp "$BUILD_DIR/dav1d-$DAV1D_VERSION/COPYING" "$PREFIX/LICENSES/dav1d-COPYING"
 if [ "$OS" != macos ]; then
     # nv-codec-headers carries its MIT licence in each header.
     sed -n "1,/\*\//p" "$BUILD_DIR/nv-codec-headers-n$NVCODEC_VERSION/include/ffnvcodec/nvEncodeAPI.h" \
@@ -365,6 +403,7 @@ ELAPSED=$((SECONDS - START))
     echo "ffmpeg: $FFMPEG_VERSION"
     echo "x264: $X264_COMMIT"
     echo "x265: $X265_VERSION"
+    echo "dav1d: $DAV1D_VERSION (meson $MESON_VERSION, ninja $NINJA_VERSION)"
     echo "built: $(date -u +%Y-%m-%dT%H:%M:%SZ) in ${ELAPSED}s with $JOBS jobs"
     echo "configure: ${ffmpeg_args[*]}"
     echo "stamp: $STAMP"
