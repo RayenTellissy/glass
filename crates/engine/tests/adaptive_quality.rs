@@ -1,14 +1,20 @@
 //! Adaptive quality in the playback pipeline: with a render stage too slow for the frame
 //! rate, the preview resolution drops before any frame does, and pausing renders the
-//! frame on screen again at full resolution.
+//! frame on screen again at full resolution. Timeline playback runs a stand-in timeline,
+//! decoder and renderer, paced by the system clock.
+
+mod stand_in;
 
 use std::time::{Duration, Instant};
 
-use engine::frame_queue::FrameStamp;
-use engine::playback::{PassThrough, Playback, PlaybackConfig, Presented, Render};
+use engine::lookahead::Layer;
 use engine::quality::QualityLevel;
+use engine::scrub::CachedFrames;
 use engine::threads::ThreadRegistry;
-use media::Rational;
+use engine::timeline::{
+    DirtyFrames, FrameRender, Presented, RenderStats, TimelinePlan, TimelinePlayback,
+};
+use render::frame_cache::FrameCacheStats;
 
 /// 100 fps: a 10 ms budget per frame.
 const FPS: i32 = 100;
@@ -28,33 +34,50 @@ impl SlowRender {
     }
 }
 
-impl Render for SlowRender {
-    type Input = FrameStamp;
-    type Output = QualityLevel;
+impl FrameRender for SlowRender {
+    type Frame = ();
+    type Picture = QualityLevel;
 
-    fn render(&mut self, _: &FrameStamp, _: FrameStamp, quality: QualityLevel) -> QualityLevel {
+    fn render_frame(
+        &mut self,
+        _: &TimelinePlan,
+        _: i64,
+        _: &[Layer<()>],
+        quality: QualityLevel,
+    ) -> (QualityLevel, bool) {
         std::thread::sleep(self.cost(quality));
-        quality
+        (quality, false)
     }
 
-    fn rerender(&mut self, _: &FrameStamp, quality: QualityLevel) -> Option<QualityLevel> {
-        std::thread::sleep(self.cost(quality));
-        Some(quality)
+    fn lookup_frame(&mut self, _: &TimelinePlan, _: i64, _: QualityLevel) -> Option<QualityLevel> {
+        None
+    }
+
+    fn replan(&mut self, _: &TimelinePlan, _: &DirtyFrames) {}
+
+    fn cached_frames(&self) -> CachedFrames {
+        CachedFrames::new()
+    }
+
+    fn counters(&self) -> (RenderStats, FrameCacheStats) {
+        Default::default()
     }
 }
 
-fn start(render: SlowRender) -> (Playback, Presented<QualityLevel>) {
-    Playback::start(
-        PlaybackConfig {
-            decode_workers: 2,
-            frame_duration: Rational::new(1, FPS),
-            registry: ThreadRegistry::new(),
-            ..PlaybackConfig::default()
-        },
-        |_| PassThrough,
+fn start(render: SlowRender) -> (TimelinePlayback<SlowRender>, Presented<QualityLevel>) {
+    let (playback, mut presented) = stand_in::start(
+        stand_in::plan(FPS, 1, 10_000),
         render,
-    )
-    .expect("playback")
+        stand_in::config(&ThreadRegistry::new(), 2),
+        Duration::ZERO,
+    );
+    // Paused at the start, frame 0 is presented at full resolution first.
+    let first = presented.pop_timeout(WAIT).expect("first frame");
+    assert_eq!(
+        (first.frame.frame, first.frame.texture),
+        (0, QualityLevel::Full)
+    );
+    (playback, presented)
 }
 
 /// Presented frames as (index, level), popped as soon as they are ready.
@@ -64,7 +87,7 @@ fn collect(presented: &mut Presented<QualityLevel>, until: i64) -> Vec<(i64, Qua
     while frames.last().is_none_or(|(i, _)| *i < until) {
         assert!(Instant::now() < deadline, "timed out after {frames:?}");
         if let Ok(frame) = presented.pop_timeout(Duration::from_millis(50)) {
-            frames.push((frame.stamp.index, frame.frame));
+            frames.push((frame.stamp.index, frame.frame.texture));
         }
     }
     frames
@@ -110,8 +133,10 @@ fn a_slow_render_lowers_the_resolution_before_dropping_frames() {
         stats.steps_up,
         stats.drops,
     );
+    // Frame 0 shows paused before play and frame 1 starts the run untimed: the two
+    // frames after it miss, so the third is at half.
     assert!(
-        first_at(&frames, QualityLevel::Half).is_some_and(|i| i <= 3),
+        first_at(&frames, QualityLevel::Half).is_some_and(|i| i <= 4),
         "full resolution kept: {frames:?}"
     );
     assert!(stats.steps_down >= 1);
@@ -165,13 +190,15 @@ fn frames_drop_only_once_the_lowest_resolution_is_still_late() {
     let restored = loop {
         assert!(Instant::now() < deadline, "no full frame after {tail:?}");
         if let Ok(frame) = presented.pop_timeout(Duration::from_millis(50)) {
-            tail.push((frame.stamp.index, frame.frame));
-            if frame.frame == QualityLevel::Full {
+            tail.push((frame.stamp.index, frame.frame.texture));
+            if frame.frame.texture == QualityLevel::Full {
                 break frame.stamp.index;
             }
         }
     };
-    let shown = tail.iter().rev().nth(1).map_or(last, |(i, _)| *i);
+    // The newest frame render made: the reduced one may still have been waiting for room
+    // in the present queue, and then the full one replaces it.
+    let shown = tail.iter().map(|(i, _)| *i).fold(last, i64::max);
     assert_eq!(
         restored, shown,
         "the frame on screen renders again: {tail:?}"
