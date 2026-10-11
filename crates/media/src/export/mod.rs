@@ -40,9 +40,13 @@
 //! wrote the file and [`ExportSummary::fallbacks`] the ones given up on.
 //! [`VideoSettings::encoder`] names one FFmpeg encoder for the codec instead, without
 //! fallback.
+//!
+//! [`presets`] holds the built-in platform and deliverable presets, which resolve
+//! against a timeline's format into [`ExportSettings`].
 
 mod gif_writer;
 mod picture;
+pub mod presets;
 mod session;
 mod settings;
 
@@ -51,8 +55,9 @@ use std::path::PathBuf;
 pub use picture::{Picture, PicturePlane};
 pub use session::{EncoderFallback, ExportSession, ExportSummary};
 pub use settings::{
-    AudioCodec, AudioSettings, ColourTags, Container, EncoderPreference, ExportSettings,
-    ProResProfile, RateControl, VideoCodec, VideoSettings, is_hardware_encoder, video_encoder_for,
+    AudioCodec, AudioSettings, ColourTags, Container, ContentLight, EncoderPreference,
+    ExportSettings, HdrMetadata, MasteringDisplay, ProResProfile, RateControl, VideoCodec,
+    VideoSettings, is_hardware_encoder, video_encoder_for,
 };
 
 use crate::error::MediaError;

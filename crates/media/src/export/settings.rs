@@ -492,6 +492,61 @@ impl ColourTags {
     }
 }
 
+/// SMPTE ST 2086 mastering display colour volume, in the units HEVC's SEI message and
+/// x265 use: chromaticity coordinates in 1/50000, luminance in 1/10000 cd/m².
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MasteringDisplay {
+    pub red: (u16, u16),
+    pub green: (u16, u16),
+    pub blue: (u16, u16),
+    pub white: (u16, u16),
+    pub max_luminance: u32,
+    pub min_luminance: u32,
+}
+
+impl MasteringDisplay {
+    /// P3 primaries, D65 white, 1000 to 0.0001 cd/m²: the usual HDR10 grading display.
+    pub const P3_D65_1000: Self = Self {
+        red: (34_000, 16_000),
+        green: (13_250, 34_500),
+        blue: (7_500, 3_000),
+        white: (15_635, 16_450),
+        max_luminance: 10_000_000,
+        min_luminance: 1,
+    };
+
+    /// x265's `master-display` value.
+    fn x265_value(&self) -> String {
+        let Self {
+            red: (rx, ry),
+            green: (gx, gy),
+            blue: (bx, by),
+            white: (wx, wy),
+            max_luminance,
+            min_luminance,
+        } = *self;
+        format!(
+            "G({gx},{gy})B({bx},{by})R({rx},{ry})WP({wx},{wy})L({max_luminance},{min_luminance})"
+        )
+    }
+}
+
+/// CTA-861.3 content light levels in cd/m²: the brightest pixel (MaxCLL) and the
+/// brightest frame average (MaxFALL).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ContentLight {
+    pub max_cll: u16,
+    pub max_fall: u16,
+}
+
+/// Static HDR metadata for PQ exports: written into the container (MP4 and MOV `mdcv`
+/// and `clli` boxes, Matroska colour elements) and, by x265, into the HEVC stream's SEI.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct HdrMetadata {
+    pub mastering: Option<MasteringDisplay>,
+    pub content_light: Option<ContentLight>,
+}
+
 /// Settings of the video stream.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VideoSettings {
@@ -505,6 +560,8 @@ pub struct VideoSettings {
     pub pixel_format: Option<PixelFormat>,
     pub rate: RateControl,
     pub colour: ColourTags,
+    /// Mastering display and content light levels; HDR tags only.
+    pub hdr_metadata: Option<HdrMetadata>,
     /// Keyframe interval in frames; `None` keeps the encoder's.
     pub gop: Option<u32>,
     pub max_b_frames: Option<u32>,
@@ -537,6 +594,7 @@ impl VideoSettings {
             } else {
                 ColourTags::Bt709
             },
+            hdr_metadata: None,
             gop: None,
             max_b_frames: None,
             preset: None,
@@ -645,7 +703,15 @@ impl VideoSettings {
             }
         }
         if encoder == "libx265" {
-            push("x265-params", "log-level=error".to_string());
+            let mut params = vec!["log-level=error".to_string()];
+            let hdr = self.hdr_metadata.unwrap_or_default();
+            if let Some(m) = hdr.mastering {
+                params.push(format!("master-display={}", m.x265_value()));
+            }
+            if let Some(c) = hdr.content_light {
+                params.push(format!("max-cll={},{}", c.max_cll, c.max_fall));
+            }
+            push("x265-params", params.join(":"));
         }
         if let VideoCodec::ProRes(profile) = self.codec {
             push("profile", profile.option(encoder).to_string());
@@ -795,6 +861,11 @@ impl ExportSettings {
                         "GIF frame rates are at most 50 fps".into(),
                     ));
                 }
+            }
+            if v.hdr_metadata.is_some() && !v.colour.is_hdr() {
+                return Err(ExportError::Settings(
+                    "HDR metadata needs PQ or HLG colour tags".into(),
+                ));
             }
             if v.codec.is_rgb() && v.colour != ColourTags::Srgb {
                 return Err(ExportError::Settings(format!(

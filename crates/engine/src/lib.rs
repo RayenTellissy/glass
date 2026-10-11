@@ -12,6 +12,7 @@ pub mod media_check;
 pub mod media_mgmt;
 pub mod playback;
 pub mod quality;
+pub mod scrub;
 pub mod threads;
 
 /// Names of the optional codec and AI features compiled into this build.
