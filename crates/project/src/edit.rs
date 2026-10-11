@@ -12,6 +12,7 @@ use crate::model::{
     Adjustment, Clip, Item, ItemKind, MediaRef, Project, Sequence, Subtitle, Track, TrackKind,
 };
 use crate::time::{Rational, Time, TimeRange};
+use crate::transition::fit_track;
 
 /// A new clip: which media, where it goes on the timeline, and the source time at its
 /// start.
@@ -92,6 +93,7 @@ impl Project {
                 kind,
                 name: name.into(),
                 items: imbl::Vector::new(),
+                transitions: imbl::Vector::new(),
             }),
         );
         Ok((next, id))
@@ -117,6 +119,15 @@ impl Project {
         let grid = seq_grid(seq, kind)?;
         for item in &track.items {
             check_item(grid, kind, item)?;
+        }
+        for transition in &track.transitions {
+            if !transition.duration.is_multiple_of(grid) {
+                return Err(EditError::OffGrid {
+                    time: transition.duration,
+                    grid,
+                    kind,
+                });
+            }
         }
         track.kind = kind;
         Ok(next)
@@ -170,20 +181,26 @@ impl Project {
         let item = Item { id, range, kind };
         let (si, ti) = next.locate_track(track)?;
         let (seq, track) = next.track_at_mut(si, ti);
-        place(seq_grid(seq, track.kind)?, track, Arc::new(item))?;
+        let grid = seq_grid(seq, track.kind)?;
+        place(grid, track, Arc::new(item))?;
+        fit_track(track, grid);
         Ok((next, id))
     }
 
-    /// Removes an item, leaving empty space.
+    /// Removes an item, leaving empty space. Transitions on its cuts go with it.
     pub fn remove_item(&self, item: ItemId) -> Result<Project, EditError> {
         let mut next = self.clone();
         let (si, ti, ii) = next.locate_item(item)?;
-        next.track_at_mut(si, ti).1.items.remove(ii);
+        let (seq, track) = next.track_at_mut(si, ti);
+        let grid = seq_grid(seq, track.kind)?;
+        track.items.remove(ii);
+        fit_track(track, grid);
         Ok(next)
     }
 
     /// Moves an item to `start` on `to_track` (which may be its own track). The target
-    /// track must be in the same sequence and of the same kind.
+    /// track must be in the same sequence and of the same kind. Transitions on the cuts it
+    /// leaves are removed; see [`crate::transition`] for how the others are fitted.
     pub fn move_item(
         &self,
         item: ItemId,
@@ -207,14 +224,20 @@ impl Project {
             });
         }
         Arc::make_mut(&mut moved).range.start = start;
-        place(seq_grid(seq, dest_track.kind)?, dest_track, moved)?;
+        let grid = seq_grid(seq, dest_track.kind)?;
+        place(grid, dest_track, moved)?;
+        fit_track(dest_track, grid);
+        if dest != ti {
+            fit_track(next.track_at_mut(si, ti).1, grid);
+        }
         Ok(next)
     }
 
     /// Changes an item's timeline range. For a clip, moving the start trims its head:
     /// the source start moves by the same amount times the clip's speed, so the frames
     /// that stay on the timeline do not move (nor do its markers, which are in source
-    /// time).
+    /// time). Transitions on the clip's cuts are fitted afterwards ([`crate::transition`]):
+    /// removed when the trim moves their cut, shortened when they no longer fit.
     pub fn trim_item(&self, item: ItemId, range: TimeRange) -> Result<Project, EditError> {
         let mut next = self.clone();
         let (si, ti, ii) = next.locate_item(item)?;
@@ -236,6 +259,7 @@ impl Project {
         }
         node.range = range;
         place(grid, track, trimmed)?;
+        fit_track(track, grid);
         Ok(next)
     }
 

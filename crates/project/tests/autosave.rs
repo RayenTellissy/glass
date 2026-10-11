@@ -365,7 +365,7 @@ fn a_format_1_autosave_from_before_schema_v2_is_refused_by_version() {
     );
     fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
 
-    assert_eq!(autosave::FORMAT_VERSION, 4);
+    assert_eq!(autosave::FORMAT_VERSION, 5);
     assert!(matches!(
         autosave::recover(&dir),
         Err(autosave::AutosaveError::Format(1))
@@ -448,6 +448,44 @@ fn a_format_3_autosave_from_before_schema_v4_is_refused_by_version() {
     assert!(matches!(
         autosave::recover(&dir),
         Err(autosave::AutosaveError::Format(3))
+    ));
+    fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// Autosaves written before project schema v5 (format 4, tracks without transitions) are
+/// refused by their format version too.
+#[test]
+fn a_format_4_autosave_from_before_schema_v5_is_refused_by_version() {
+    let s = setup();
+    let dir = temp_dir("format-4");
+    let (p, _) = s
+        .project
+        .insert_clip(s.v1, clip(s.media, 0, 5))
+        .expect("clip");
+    let mut writer = AutosaveWriter::open(&dir, &p, None, 0, 0).expect("open");
+    writer.tick(&p, 1, 10).expect("tick");
+    drop(writer);
+    let snapshot = dir.join("snapshot-00000001.json");
+    let mut old: serde_json::Value =
+        serde_json::from_slice(&fs::read(&snapshot).expect("snapshot")).expect("json");
+    old["autosave_format"] = 4.into();
+    for seq in old["project"]["sequences"]
+        .as_array_mut()
+        .expect("sequences")
+    {
+        for track in seq["tracks"].as_array_mut().expect("tracks") {
+            let track = track.as_object_mut().expect("track");
+            track.remove("transitions").expect("a v5 track list");
+        }
+    }
+    assert!(
+        serde_json::from_value::<Project>(old["project"].clone()).is_err(),
+        "a format 4 project no longer parses"
+    );
+    fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
+    assert!(matches!(
+        autosave::recover(&dir),
+        Err(autosave::AutosaveError::Format(4))
     ));
     fs::remove_dir_all(&dir).expect("cleanup");
 }

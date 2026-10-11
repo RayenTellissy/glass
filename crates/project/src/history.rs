@@ -16,6 +16,7 @@ use std::mem::size_of;
 use std::sync::Arc;
 
 use crate::model::{Item, MediaRef, Project, Sequence, Track};
+use crate::transition::Transition;
 
 /// What an undo step did, for "Undo Trim" in the Edit menu. [`EditLabel::i18n_key`] is
 /// the key of its name in `assets/i18n/en.json`.
@@ -42,13 +43,17 @@ pub enum EditLabel {
     ChangeMarker,
     DeleteMarker,
     ChangeTrackKind,
+    AddTransition,
+    RemoveTransition,
+    TransitionDuration,
+    TransitionAlignment,
     Transition,
     Recover,
     Relink,
 }
 
 impl EditLabel {
-    pub const ALL: [EditLabel; 24] = [
+    pub const ALL: [EditLabel; 28] = [
         EditLabel::AddMedia,
         EditLabel::AddSequence,
         EditLabel::AddTrack,
@@ -70,6 +75,10 @@ impl EditLabel {
         EditLabel::ChangeMarker,
         EditLabel::DeleteMarker,
         EditLabel::ChangeTrackKind,
+        EditLabel::AddTransition,
+        EditLabel::RemoveTransition,
+        EditLabel::TransitionDuration,
+        EditLabel::TransitionAlignment,
         EditLabel::Transition,
         EditLabel::Recover,
         EditLabel::Relink,
@@ -98,6 +107,10 @@ impl EditLabel {
             EditLabel::ChangeMarker => "edit.label.change_marker",
             EditLabel::DeleteMarker => "edit.label.delete_marker",
             EditLabel::ChangeTrackKind => "edit.label.change_track_kind",
+            EditLabel::AddTransition => "edit.label.add_transition",
+            EditLabel::RemoveTransition => "edit.label.remove_transition",
+            EditLabel::TransitionDuration => "edit.label.transition_duration",
+            EditLabel::TransitionAlignment => "edit.label.transition_alignment",
             EditLabel::Transition => "edit.label.transition",
             EditLabel::Recover => "edit.label.recover",
             EditLabel::Relink => "edit.label.relink",
@@ -350,6 +363,12 @@ impl History {
                     }
                     for item in &track.items {
                         visit(arc_addr(item), size_of::<Item>(), &mut stats);
+                    }
+                    for transition in &track.transitions {
+                        let bytes = size_of::<Transition>()
+                            + transition.kind.len()
+                            + transition.easing.len();
+                        visit(arc_addr(transition), bytes, &mut stats);
                     }
                 }
             }
