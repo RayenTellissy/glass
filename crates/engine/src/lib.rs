@@ -10,6 +10,7 @@ pub mod logging;
 pub mod lookahead;
 pub mod media_check;
 pub mod media_mgmt;
+pub mod mix;
 pub mod playback;
 pub mod quality;
 pub mod scrub;
