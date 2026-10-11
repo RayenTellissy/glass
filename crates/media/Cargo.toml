@@ -73,6 +73,10 @@ name = "proxy"
 harness = false
 
 [[bench]]
+name = "export"
+harness = false
+
+[[bench]]
 name = "scenes"
 harness = false
 
