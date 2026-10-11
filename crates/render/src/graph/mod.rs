@@ -555,7 +555,7 @@ impl<'a> CompiledGraph<'a> {
         }
         self.record(renderer, pool, &mut encoder, profiler.as_deref_mut());
         if let Some(p) = profiler.as_deref_mut() {
-            p.end_frame(&mut encoder);
+            p.end_frame();
         }
         let index = renderer.queue().submit([encoder.finish()]);
         if let Some(p) = profiler {
