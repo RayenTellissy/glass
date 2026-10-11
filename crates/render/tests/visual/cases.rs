@@ -5,6 +5,7 @@
 
 use render::blend::BlendMode;
 use render::crop::Crop;
+use render::mask::{Mask, MaskMode};
 use render::nodes::Layer;
 use render::shape::{
     Affine, Cap, Dash, FillRule, Geometry, Join, Paint, Path, Point, Rect, Shape, Stop, Stroke,
@@ -36,6 +37,31 @@ pub fn all() -> Vec<Case> {
             name: "shapes",
             frames: &[0, 12, 24],
             scene: shapes,
+        },
+        Case {
+            name: "mask_hard",
+            frames: &[0],
+            scene: mask_hard,
+        },
+        Case {
+            name: "mask_feathered",
+            frames: &[0],
+            scene: mask_feathered,
+        },
+        Case {
+            name: "mask_inverted",
+            frames: &[0],
+            scene: mask_inverted,
+        },
+        Case {
+            name: "mask_union",
+            frames: &[12],
+            scene: mask_union,
+        },
+        Case {
+            name: "mask_intersection",
+            frames: &[12],
+            scene: mask_intersection,
         },
     ]
 }
@@ -246,4 +272,81 @@ fn shapes(frame: u32) -> Scene {
             ),
         ],
     }
+}
+
+/// The bars (160 x 90, masked in their own pixels) scaled to fill the canvas over the
+/// gradient, with `masks`; turned a little with the frame so the masks follow the layer.
+fn masked_bars(frame: u32, masks: Vec<Mask>) -> Scene {
+    let turn = f64::from(frame) * 0.25;
+    Scene {
+        layers: vec![
+            (Source::Gradient, Layer::default()),
+            (
+                Source::Masked(Box::new(Source::Bars), masks),
+                Layer::default().with_transform(placed(
+                    [160.0, 90.0],
+                    [2.0, 2.0],
+                    turn,
+                    [80.0, 45.0],
+                )),
+            ),
+        ],
+    }
+}
+
+fn mask_rect() -> Shape {
+    Shape::new(Geometry::Rect {
+        rect: Rect::new(18.5, 14.25, 70.0, 50.0),
+        radius: 8.0,
+    })
+}
+
+fn mask_ellipse() -> Shape {
+    Shape::new(Geometry::Ellipse {
+        center: Point::new(0.0, 0.0),
+        radii: [38.0, 24.0],
+    })
+    .transformed(Affine::rotate(-0.35).then(Affine::translate(100.0, 50.0)))
+}
+
+/// A rounded rectangle cut out of the bars with a hard edge.
+fn mask_hard(frame: u32) -> Scene {
+    masked_bars(frame, vec![Mask::new(vec![mask_rect()])])
+}
+
+/// A rotated ellipse feathered by 8 px (16 on the canvas, the layer being doubled).
+fn mask_feathered(frame: u32) -> Scene {
+    masked_bars(frame, vec![Mask::new(vec![mask_ellipse()]).feathered(8.0)])
+}
+
+/// The ellipse inverted and slightly feathered: a soft hole showing the gradient.
+fn mask_inverted(frame: u32) -> Scene {
+    masked_bars(
+        frame,
+        vec![Mask::new(vec![mask_ellipse()]).feathered(2.0).inverted()],
+    )
+}
+
+/// The rectangle and the ellipse as two masks, unioned.
+fn mask_union(frame: u32) -> Scene {
+    masked_bars(
+        frame,
+        vec![
+            Mask::new(vec![mask_rect()]),
+            Mask::new(vec![mask_ellipse()]).feathered(3.0),
+        ],
+    )
+}
+
+/// The rectangle and the ellipse as two masks, intersected.
+fn mask_intersection(frame: u32) -> Scene {
+    masked_bars(
+        frame,
+        vec![
+            Mask::new(vec![mask_rect()]),
+            Mask::new(vec![mask_ellipse()])
+                .feathered(3.0)
+                .with_mode(MaskMode::Intersection),
+        ],
+    )
 }
