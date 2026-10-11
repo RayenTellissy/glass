@@ -22,6 +22,7 @@ pub const EMBEDDED: &[(&str, &str)] = &[
     ("composite", include_str!("../shaders/composite.wgsl")),
     ("gamut", include_str!("../shaders/gamut.wgsl")),
     ("lut", include_str!("../shaders/lut.wgsl")),
+    ("mask", include_str!("../shaders/mask.wgsl")),
     ("output", include_str!("../shaders/output.wgsl")),
     ("shape", include_str!("../shaders/shape.wgsl")),
     ("slate", include_str!("../shaders/slate.wgsl")),

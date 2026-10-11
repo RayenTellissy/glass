@@ -1,5 +1,5 @@
 //! The visual regression harness: reference sequences described as [`Scene`]s (layers of
-//! procedural sources, each with its blend mode, transform, crop and opacity), rendered
+//! procedural sources, each with its masks, blend mode, transform, crop and opacity), rendered
 //! through the render graph (sources, `composite_stack`, `OutputNode::preview` dithered
 //! with the frame number as its seed) into 8-bit sRGB, frame by frame.
 //!
@@ -21,6 +21,7 @@ use media::{
 };
 use render::colour::WorkingSpace;
 use render::graph::{Graph, Port, TexturePool};
+use render::mask::{self, Mask};
 use render::nodes::{Layer, OutputNode, YuvSourceNode, composite_stack};
 use render::renderer::Renderer;
 use render::shape::{Shape, ShapeNode};
@@ -92,6 +93,30 @@ pub enum Source {
     Text(TextSpec),
     /// Vector shapes drawn in order onto a transparent canvas-sized layer.
     Shapes(Vec<Shape>),
+    /// Another source with masks in its own pixels (`render::mask`), applied before the
+    /// layer's transform and blend.
+    Masked(Box<Source>, Vec<Mask>),
+}
+
+impl Source {
+    /// The source under any masks, and the masks.
+    fn unmasked(&self) -> (&Source, &[Mask]) {
+        match self {
+            Self::Masked(source, masks) => (source.unmasked().0, masks),
+            source => (source, &[]),
+        }
+    }
+
+    /// The layer's size in pixels.
+    fn size(&self) -> (u32, u32) {
+        match self {
+            Self::Bars => (160, 90),
+            Self::Disc => (64, 64),
+            Self::Fill { size, .. } => *size,
+            Self::Masked(source, _) => source.size(),
+            Self::Gradient | Self::Text(_) | Self::Shapes(_) => CANVAS,
+        }
+    }
 }
 
 /// The per-glyph transform hook a text animator hands `GlyphAtlas::prepare`.
@@ -174,7 +199,7 @@ impl Studio {
         let mut texts: Vec<PreparedText> = Vec::new();
         self.atlas.begin_frame();
         for (source, _) in &scene.layers {
-            match source {
+            match source.unmasked().0 {
                 Source::Fill { colour, size } => {
                     let pixels = vec![*colour; (size.0 * size.1) as usize];
                     fills.push(
@@ -206,7 +231,8 @@ impl Studio {
         let (mut fill, mut text) = (fills.iter(), texts.iter());
         let mut layers: Vec<(Port, Layer)> = Vec::new();
         for (source, layer) in &scene.layers {
-            let port = match source {
+            let (unmasked, masks) = source.unmasked();
+            let port = match unmasked {
                 Source::Bars => g
                     .add(
                         YuvSourceNode::new(
@@ -233,7 +259,9 @@ impl Studio {
                 Source::Shapes(shapes) => g
                     .add(ShapeNode::new(&self.renderer, CANVAS, shapes), &[])
                     .out(0),
+                Source::Masked(..) => unreachable!("unmasked above"),
             };
+            let port = mask::add_to_graph(&mut g, &self.renderer, port, source.size(), masks);
             layers.push((port, layer.clone()));
         }
         let composite = composite_stack(&mut g, CANVAS, None, layers).expect("a scene has layers");
