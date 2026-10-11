@@ -20,6 +20,9 @@
 //! - the project settings, changed in anything but the format new sequences start with
 //!   and the cache folder (the colour space): every frame of every sequence
 //! - markers, names and audio tracks: nothing
+//! - a nested sequence's dirty frames, in every sequence with a clip of it: mapped to the
+//!   parent's time through the clip's source start and speed, within the clip's extent
+//!   and its transitions' spans (repeated up the nesting)
 //!
 //! Fields a later schema adds to a track, a sequence or the settings count as changing
 //! everything they cover until they are listed above, so a new kind of edit is never
@@ -33,8 +36,8 @@ use std::ops::Range;
 
 use project::diff::{self, Diff, Node};
 use project::{
-    ItemId, ItemKind, MediaId, Project, ProjectSettings, Sequence, SequenceId, TimeRange, Track,
-    TrackId, TrackKind, Transition,
+    ItemId, ItemKind, MediaId, Project, ProjectSettings, Sequence, SequenceId, Time, TimeRange,
+    Track, TrackId, TrackKind, Transition,
 };
 
 /// The frames of one sequence an edit can change.
@@ -144,7 +147,41 @@ impl DirtyRanges {
         for id in &changes.removals {
             roots.changed(&mut collect, old_flat.get(id), None);
         }
-        collect.finish()
+        let mut dirty = collect.finish();
+        dirty.nest(old, new);
+        dirty
+    }
+
+    /// Carries dirty frames of nested sequences up to the clips showing them, in both
+    /// roots, until nothing changes (nesting has no cycles, so at most one pass per
+    /// level).
+    fn nest(&mut self, old: &Project, new: &Project) {
+        let levels = old.sequences().len().max(new.sequences().len()) + 1;
+        for _ in 0..levels {
+            let mut collect = Collect::default();
+            for project in [old, new] {
+                for seq in project.sequences() {
+                    for track in seq.tracks.iter().filter(|t| shows_picture(t.kind)) {
+                        for item in &track.items {
+                            let Some(child) = item.clip().and_then(|c| c.source.sequence()) else {
+                                continue;
+                            };
+                            if let Some(frames) = self.sequences.get(&child) {
+                                collect.nested(project, seq, track, item, child, frames);
+                            }
+                        }
+                    }
+                }
+            }
+            let before = self.clone();
+            for (id, frames) in collect.finish().sequences {
+                let merged = self.sequence(id).union(&frames);
+                self.sequences.insert(id, merged);
+            }
+            if *self == before {
+                return;
+            }
+        }
     }
 
     /// The dirty frames of `sequence` (none when the edit did not touch it).
@@ -234,12 +271,73 @@ impl Collect {
         for seq in project.sequences() {
             for track in &seq.tracks {
                 for item in &track.items {
-                    if item.clip().is_some_and(|c| c.media == media) {
+                    if item.clip().is_some_and(|c| c.source.media() == Some(media)) {
                         self.item(seq, track, item.id);
                     }
                 }
             }
         }
+    }
+
+    /// Dirty `frames` of sequence `child` (at its rate in `project`) as frames of `seq`,
+    /// where `item`, a clip of `child` on `track`, shows them: mapped through the clip's
+    /// source start and speed, kept within the clip's extent and the spans of the
+    /// transitions naming it. Every child frame, or a speed that does not resolve,
+    /// dirties all of that.
+    fn nested(
+        &mut self,
+        project: &Project,
+        seq: &Sequence,
+        track: &Track,
+        item: &project::Item,
+        child: SequenceId,
+        frames: &DirtyFrames,
+    ) {
+        let Some(clip) = item.clip() else {
+            return;
+        };
+        let mut window = Collect::default();
+        window.item(seq, track, item.id);
+        let window = window.finish().sequence(seq.id);
+        let Some(window) = window.ranges() else {
+            self.all(seq.id);
+            return;
+        };
+        let mapped = match (frames, project.sequence(child), clip.speed.speed()) {
+            (DirtyFrames::Ranges(ranges), Some(child_seq), Ok(speed)) if speed.num > 0 => {
+                let to_parent = |f: i64| -> Option<Time> {
+                    let offset = Time::from_frames(f, child_seq.frame_rate)
+                        .ok()?
+                        .checked_sub(clip.source_start)
+                        .ok()?
+                        .mul_ratio(i64::from(speed.den), i64::from(speed.num))
+                        .ok()?;
+                    item.range.start.checked_add(offset).ok()
+                };
+                let rate = seq.frame_rate;
+                ranges
+                    .iter()
+                    .map(|r| {
+                        let start = to_parent(r.start)?.frames_floor(rate);
+                        let end = (-to_parent(r.end)?).frames_floor(rate).saturating_neg();
+                        Some(start..end)
+                    })
+                    .collect::<Option<Vec<_>>>()
+            }
+            _ => None,
+        };
+        let shown: Vec<Range<i64>> = match mapped {
+            Some(mapped) => window
+                .iter()
+                .flat_map(|w| {
+                    mapped
+                        .iter()
+                        .map(move |r| r.start.max(w.start)..r.end.min(w.end))
+                })
+                .collect(),
+            None => window.to_vec(),
+        };
+        self.ranges.entry(seq.id).or_default().extend(shown);
     }
 
     fn finish(self) -> DirtyRanges {
@@ -760,6 +858,46 @@ mod tests {
         assert_eq!(dirty.sequence(other), ranges(&[0..10]));
         assert!(dirty.sequence(f.seq).is_empty());
         assert_eq!(dirty.iter().count(), 1);
+    }
+
+    #[test]
+    fn a_nested_sequence_dirties_the_frames_its_clips_show() {
+        let f = fixture();
+        let (p, inner) = f.p.add_sequence("inner", FPS, 48_000).unwrap();
+        let (p, iv1) = p.add_track(inner, TrackKind::Video, "V1", None).unwrap();
+        let (p, iv2) = p.add_track(inner, TrackKind::Video, "V2", Some(0)).unwrap();
+        let clip = |start, end| ClipSpec {
+            media: f.m1,
+            range: range(start, end),
+            source_start: Time::ZERO,
+        };
+        let (p, _) = p.insert_clip(iv1, clip(0, 150)).unwrap();
+        // Main's V2 shows inner frames 30..60 at 100..130.
+        let (p, _) = p
+            .insert_sequence_clip(f.v2, inner, range(100, 130), at(30))
+            .unwrap();
+        let (shown, _) = p.insert_clip(iv2, clip(40, 50)).unwrap();
+        let dirty = DirtyRanges::between(&p, &shown);
+        assert_eq!(dirty.sequence(inner), ranges(&[40..50]));
+        assert_eq!(dirty.sequence(f.seq), ranges(&[110..120]));
+        // Inner frames the clip does not show change nothing in main.
+        let (hidden, _) = p.insert_clip(iv2, clip(70, 80)).unwrap();
+        let dirty = DirtyRanges::between(&p, &hidden);
+        assert_eq!(dirty.sequence(inner), ranges(&[70..80]));
+        assert!(dirty.sequence(f.seq).is_empty());
+        // A new canvas for the inner sequence: all of the clip.
+        let format = p.sequence(inner).unwrap().format();
+        let bigger = p
+            .set_sequence_format(
+                inner,
+                SequenceFormat {
+                    resolution: Resolution::new(640, 360),
+                    ..format
+                },
+            )
+            .unwrap();
+        let dirty = DirtyRanges::between(&p, &bigger);
+        assert_eq!(dirty.sequence(f.seq), ranges(&[100..130]));
     }
 
     #[test]
