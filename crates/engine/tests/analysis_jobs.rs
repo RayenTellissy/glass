@@ -156,7 +156,7 @@ fn thumbnail_levels_have_the_expected_counts_and_times() {
     for (file, counts, size) in cases {
         let dir = TempDir::new("thumb-levels");
         let Some((strips, events)) = thumbnails(&dir, file) else {
-            return;
+            continue;
         };
         assert_eq!((strips.width, strips.height), size, "{file}");
         assert_eq!(strips.levels.len(), 3);

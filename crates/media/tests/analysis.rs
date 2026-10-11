@@ -72,7 +72,7 @@ fn continuous_motion_has_no_cuts() {
         "hevc_10bit_1080p25.mp4",
     ] {
         let Some(path) = common::fixture(file) else {
-            return;
+            continue;
         };
         let found = scenes::detect(&path, &SceneSettings::default(), &Unattended).expect("detect");
         assert!(found.frames > 30, "{file}");
@@ -107,7 +107,7 @@ fn silences_match_the_fixture_within_3_ms_in_pcm_and_10_ms_in_aac() {
         ("silence_48k_stereo.m4a", 0.010),
     ] {
         let (Some(path), Some(entry)) = (common::fixture(file), entry(file)) else {
-            return;
+            continue;
         };
         let expected = pairs(&entry["silences"]);
         let found =
@@ -227,7 +227,7 @@ fn loudness_matches_ffmpeg_ebur128() {
         "loudness_51_48k.wav",
     ] {
         let (Some(path), Some(entry)) = (common::fixture(file), entry(file)) else {
-            return;
+            continue;
         };
         let reference = &entry["ebur128"];
         let want = |k: &str| reference[k].as_f64().expect("reference");
@@ -321,7 +321,7 @@ fn expected_beats(entry: &serde_json::Value, seconds: f64) -> Vec<f64> {
 fn onset_latency_is_calibrated_on_the_click_fixtures() {
     for file in ["beats_120_clicks.flac", "beats_drift_116_124_clicks.flac"] {
         let (Some(path), Some(entry)) = (common::fixture(file), entry(file)) else {
-            return;
+            continue;
         };
         let mut reader = media::AudioReader::open(
             &path,
@@ -372,7 +372,7 @@ fn beat_fixtures_give_tempo_and_beats() {
         "beats_drift_116_124_clicks.flac",
     ] {
         let (Some(path), Some(entry)) = (common::fixture(file), entry(file)) else {
-            return;
+            continue;
         };
         let found = beats::detect(&path, &BeatSettings::default(), &Unattended).expect("detect");
         let expected = expected_beats(&entry, 20.0);

@@ -222,7 +222,7 @@ fn gop_index_round_trips_on_disk() {
         ),
     ] {
         let Some(path) = common::fixture(file) else {
-            return;
+            continue;
         };
         let cache = temp_cache(file);
         let (built, source) =
@@ -270,7 +270,7 @@ fn seeks_start_at_the_targets_keyframe() {
         "prores422_1080p23976.mov",
     ] {
         let Some(path) = common::fixture(file) else {
-            return;
+            continue;
         };
         let (gop, _) = GopIndex::build(&path, StreamSelect::BestVideo).expect("gop");
         let gop = Arc::new(gop);
