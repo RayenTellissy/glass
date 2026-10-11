@@ -155,7 +155,9 @@ pub fn mix_check(project: &Project, sequence: SequenceId, seconds: i64) -> Resul
     let (right_peak, right_rms) = levels(right);
     let expected = 20.0 * (0.125f64).log10() - 6.0;
     println!(
-        "smoke: mixed {seconds} s of the sequence in {:.0} ms: left peak {left_peak:.2} dBFS          (the tone at -6 dB: {expected:.2}), RMS {left_rms:.2} dBFS; right peak          {right_peak:.2} dBFS, RMS {right_rms:.2} dBFS",
+        "smoke: mixed {seconds} s of the sequence in {:.0} ms: left peak {left_peak:.2} dBFS \
+         (the tone at -6 dB: {expected:.2}), RMS {left_rms:.2} dBFS; right peak \
+         {right_peak:.2} dBFS, RMS {right_rms:.2} dBFS",
         ms(started.elapsed()),
     );
     // The 16-bit fixture rounds the tone's peak by under 0.01 dB.
