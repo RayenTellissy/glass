@@ -246,12 +246,12 @@ impl Prepared {
         let count = self.edges.len() + self.spans.len();
         let mut out = vec![0; count.max(1) * PIECE_BYTES];
         let pieces = self.edges.iter().chain(&self.spans);
-        for (bytes, piece) in out.chunks_exact_mut(PIECE_BYTES).zip(pieces) {
+        for (bytes, piece) in out.as_chunks_mut::<PIECE_BYTES>().0.iter_mut().zip(pieces) {
             let [r0, r1, r2, r3] = piece.rect.map(f32::to_bits);
             let [d0, d1, d2, d3] = piece.data.map(f32::to_bits);
             let words = [r0, r1, r2, r3, d0, d1, d2, d3, piece.item, piece.kind];
-            for (b, w) in bytes.chunks_exact_mut(4).zip(words) {
-                b.copy_from_slice(&w.to_le_bytes());
+            for (b, w) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(words) {
+                *b = w.to_le_bytes();
             }
         }
         out
