@@ -5,6 +5,7 @@
 
 use render::blend::BlendMode;
 use render::crop::Crop;
+use render::mask::{Mask, MaskMode};
 use render::nodes::Layer;
 use render::shape::{
     Affine, Cap, Dash, FillRule, Geometry, Join, Paint, Path, Point, Rect, Shape, Stop, Stroke,
@@ -36,6 +37,66 @@ pub fn all() -> Vec<Case> {
             name: "shapes",
             frames: &[0, 12, 24],
             scene: shapes,
+        },
+        Case {
+            name: "mask_hard",
+            frames: &[0],
+            scene: mask_hard,
+        },
+        Case {
+            name: "mask_feathered",
+            frames: &[0],
+            scene: mask_feathered,
+        },
+        Case {
+            name: "mask_inverted",
+            frames: &[0],
+            scene: mask_inverted,
+        },
+        Case {
+            name: "mask_union",
+            frames: &[12],
+            scene: mask_union,
+        },
+        Case {
+            name: "mask_intersection",
+            frames: &[12],
+            scene: mask_intersection,
+        },
+        Case {
+            name: "cross_dissolve",
+            frames: &[0, 12, 24],
+            scene: cross_dissolve,
+        },
+        Case {
+            name: "dip_to_black",
+            frames: &[6, 12, 18],
+            scene: dip_to_black,
+        },
+        Case {
+            name: "dip_to_white",
+            frames: &[6, 12, 18],
+            scene: dip_to_white,
+        },
+        Case {
+            name: "dip_to_colour",
+            frames: &[6, 12, 18],
+            scene: dip_to_colour,
+        },
+        Case {
+            name: "film_dissolve",
+            frames: &[6, 12, 18],
+            scene: film_dissolve,
+        },
+        Case {
+            name: "additive_dissolve",
+            frames: &[6, 12, 18],
+            scene: additive_dissolve,
+        },
+        Case {
+            name: "non_additive_dissolve",
+            frames: &[6, 12, 18],
+            scene: non_additive_dissolve,
         },
     ]
 }
@@ -246,4 +307,138 @@ fn shapes(frame: u32) -> Scene {
             ),
         ],
     }
+}
+
+/// The bars (160 x 90, masked in their own pixels) scaled to fill the canvas over the
+/// gradient, with `masks`; turned a little with the frame so the masks follow the layer.
+fn masked_bars(frame: u32, masks: Vec<Mask>) -> Scene {
+    let turn = f64::from(frame) * 0.25;
+    Scene {
+        layers: vec![
+            (Source::Gradient, Layer::default()),
+            (
+                Source::Masked(Box::new(Source::Bars), masks),
+                Layer::default().with_transform(placed(
+                    [160.0, 90.0],
+                    [2.0, 2.0],
+                    turn,
+                    [80.0, 45.0],
+                )),
+            ),
+        ],
+    }
+}
+
+fn mask_rect() -> Shape {
+    Shape::new(Geometry::Rect {
+        rect: Rect::new(18.5, 14.25, 70.0, 50.0),
+        radius: 8.0,
+    })
+}
+
+fn mask_ellipse() -> Shape {
+    Shape::new(Geometry::Ellipse {
+        center: Point::new(0.0, 0.0),
+        radii: [38.0, 24.0],
+    })
+    .transformed(Affine::rotate(-0.35).then(Affine::translate(100.0, 50.0)))
+}
+
+/// A rounded rectangle cut out of the bars with a hard edge.
+fn mask_hard(frame: u32) -> Scene {
+    masked_bars(frame, vec![Mask::new(vec![mask_rect()])])
+}
+
+/// A rotated ellipse feathered by 16 px (32 on the canvas, the layer being doubled),
+/// which blurs at half resolution.
+fn mask_feathered(frame: u32) -> Scene {
+    masked_bars(frame, vec![Mask::new(vec![mask_ellipse()]).feathered(16.0)])
+}
+
+/// The ellipse inverted and slightly feathered: a soft hole showing the gradient.
+fn mask_inverted(frame: u32) -> Scene {
+    masked_bars(
+        frame,
+        vec![Mask::new(vec![mask_ellipse()]).feathered(2.0).inverted()],
+    )
+}
+
+/// The rectangle and the ellipse as two masks, unioned.
+fn mask_union(frame: u32) -> Scene {
+    masked_bars(
+        frame,
+        vec![
+            Mask::new(vec![mask_rect()]),
+            Mask::new(vec![mask_ellipse()]).feathered(3.0),
+        ],
+    )
+}
+
+/// The rectangle and the ellipse as two masks, intersected.
+fn mask_intersection(frame: u32) -> Scene {
+    masked_bars(
+        frame,
+        vec![
+            Mask::new(vec![mask_rect()]),
+            Mask::new(vec![mask_ellipse()])
+                .feathered(3.0)
+                .with_mode(MaskMode::Intersection),
+        ],
+    )
+}
+
+/// Cross dissolve from the gradient to the colour bars over 24 frames: frame 0 is the
+/// gradient alone, 12 half way, 24 the bars alone.
+fn cross_dissolve(frame: u32) -> Scene {
+    transition("cross-dissolve", frame)
+}
+
+/// The bundled transition `id` with default parameters from the gradient to the colour
+/// bars over 24 frames.
+fn transition(id: &'static str, frame: u32) -> Scene {
+    Scene {
+        layers: vec![(
+            Source::Transition {
+                id,
+                progress: f64::from(frame) / 24.0,
+            },
+            Layer::default(),
+        )],
+    }
+}
+
+/// Dip to black from the gradient to the colour bars, a quarter, half and three quarters
+/// of the way.
+fn dip_to_black(frame: u32) -> Scene {
+    transition("dip-to-black", frame)
+}
+
+/// Dip to white from the gradient to the colour bars, a quarter, half and three quarters
+/// of the way.
+fn dip_to_white(frame: u32) -> Scene {
+    transition("dip-to-white", frame)
+}
+
+/// Dip to colour (the default red) from the gradient to the colour bars, a quarter, half and three quarters
+/// of the way.
+fn dip_to_colour(frame: u32) -> Scene {
+    transition("dip-to-colour", frame)
+}
+
+/// Film dissolve from the gradient to the colour bars, a quarter, half and three quarters
+/// of the way.
+fn film_dissolve(frame: u32) -> Scene {
+    transition("film-dissolve", frame)
+}
+
+/// Additive dissolve from the gradient to the colour bars, a quarter, half and three quarters
+/// of the way.
+fn additive_dissolve(frame: u32) -> Scene {
+    transition("additive-dissolve", frame)
+}
+
+/// Non-additive dissolve from the gradient to the colour bars, a quarter, half and three quarters
+/// of the way.
+fn non_additive_dissolve(frame: u32) -> Scene {
+    transition("non-additive-dissolve", frame)
 }

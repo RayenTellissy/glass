@@ -9,11 +9,17 @@
 //! [`crate::renderer::Renderer`] rebuilds its pipelines on the next frame. A source that
 //! fails to parse or validate is logged with naga's error, and the last good source and
 //! pipelines stay in use.
+//!
+//! Shaders outside that folder (transitions, from `assets/transitions/`) are added at
+//! run time with [`ShaderLibrary::add_external`]: each is compiled after `common.wgsl`
+//! and a prelude from the folder, and in debug builds its file is watched too. An
+//! edited prelude reports every external shader built on it as changed.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 #[cfg(debug_assertions)]
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 /// Every effect shader by name, embedded at build time.
@@ -22,11 +28,13 @@ pub const EMBEDDED: &[(&str, &str)] = &[
     ("composite", include_str!("../shaders/composite.wgsl")),
     ("gamut", include_str!("../shaders/gamut.wgsl")),
     ("lut", include_str!("../shaders/lut.wgsl")),
+    ("mask", include_str!("../shaders/mask.wgsl")),
     ("output", include_str!("../shaders/output.wgsl")),
     ("shape", include_str!("../shaders/shape.wgsl")),
     ("slate", include_str!("../shaders/slate.wgsl")),
     ("text", include_str!("../shaders/text.wgsl")),
     ("text_glyph", include_str!("../shaders/text_glyph.wgsl")),
+    ("transition", include_str!("../shaders/transition.wgsl")),
 ];
 
 /// The embedded source of one shader file, without `common.wgsl`.
@@ -56,6 +64,28 @@ pub enum ShaderError {
 
 /// Parses and validates a composed effect shader with naga, the compiler wgpu uses.
 pub fn validate(name: &str, source: &str) -> Result<(), ShaderError> {
+    parse(name, source).map(|_| ())
+}
+
+/// [`validate`], and checks the shader has the fragment entry point `fs`, which every
+/// external shader must define.
+pub fn validate_external(name: &str, source: &str) -> Result<(), ShaderError> {
+    let module = parse(name, source)?;
+    if module
+        .entry_points
+        .iter()
+        .any(|e| e.name == "fs" && e.stage == naga::ShaderStage::Fragment)
+    {
+        Ok(())
+    } else {
+        Err(ShaderError::Invalid {
+            name: name.to_owned(),
+            message: "there is no `@fragment fn fs`".to_owned(),
+        })
+    }
+}
+
+fn parse(name: &str, source: &str) -> Result<naga::Module, ShaderError> {
     let path = format!("{name}.wgsl");
     let invalid = |message: String| ShaderError::Invalid {
         name: name.to_owned(),
@@ -69,14 +99,30 @@ pub fn validate(name: &str, source: &str) -> Result<(), ShaderError> {
     )
     .validate(&module)
     .map_err(|e| invalid(e.emit_to_string_with_path(source, &path)))?;
-    Ok(())
+    Ok(module)
+}
+
+/// `common.wgsl`, a prelude and an external shader's body.
+pub fn compose_external(common: &str, prelude: &str, shader: &str) -> String {
+    format!("{common}\n{prelude}\n{shader}")
+}
+
+/// A shader file outside the shaders folder.
+#[derive(Clone, Debug)]
+struct External {
+    /// The embedded shader compiled between `common.wgsl` and this one.
+    prelude: &'static str,
+    /// The file, canonical, when it is on disk (watched in debug builds).
+    path: Option<PathBuf>,
 }
 
 type Sources = Arc<Mutex<HashMap<String, String>>>;
+type Externals = Arc<Mutex<HashMap<String, External>>>;
 
 /// The current source of every effect shader, owned by the [`crate::renderer::Renderer`].
 pub struct ShaderLibrary {
     sources: Sources,
+    externals: Externals,
     #[cfg(debug_assertions)]
     watch: Option<watch::Watch>,
 }
@@ -91,15 +137,14 @@ impl std::fmt::Debug for ShaderLibrary {
 
 impl Default for ShaderLibrary {
     /// Watches [`source_dir`] in debug builds; the embedded sources in release builds.
+    /// Either way with the shaders of [`crate::transition::TransitionRegistry::standard`].
     fn default() -> Self {
         #[cfg(debug_assertions)]
-        {
-            Self::watching(&source_dir())
-        }
+        let library = Self::watching(&source_dir());
         #[cfg(not(debug_assertions))]
-        {
-            Self::embedded_only()
-        }
+        let library = Self::embedded_only();
+        crate::transition::TransitionRegistry::standard().add_shaders(&library);
+        library
     }
 }
 
@@ -113,9 +158,45 @@ impl ShaderLibrary {
                     .map(|(n, s)| ((*n).to_owned(), (*s).to_owned()))
                     .collect(),
             )),
+            externals: Arc::default(),
             #[cfg(debug_assertions)]
             watch: None,
         }
+    }
+
+    /// Adds (or replaces) the shader `name`, compiled as `common.wgsl`, the embedded
+    /// shader `prelude`, then `source`. With a `path`, a watching library rereads that
+    /// file when it changes. Rejects a source that does not validate, keeping what was
+    /// there.
+    pub fn add_external(
+        &self,
+        name: &str,
+        prelude: &'static str,
+        source: String,
+        path: Option<PathBuf>,
+    ) -> Result<(), ShaderError> {
+        {
+            let mut sources = lock(&self.sources);
+            let part = |n: &str| sources.get(n).map_or("", String::as_str);
+            validate_external(
+                name,
+                &compose_external(part("common"), part(prelude), &source),
+            )?;
+            sources.insert(name.to_owned(), source);
+        }
+        let path = path.map(|p| p.canonicalize().unwrap_or(p));
+        lock(&self.externals).insert(
+            name.to_owned(),
+            External {
+                prelude,
+                path: path.clone(),
+            },
+        );
+        #[cfg(debug_assertions)]
+        if let (Some(watch), Some(path)) = (&self.watch, path) {
+            watch.add(name, path);
+        }
+        Ok(())
     }
 
     pub fn is_watching(&self) -> bool {
@@ -134,15 +215,20 @@ impl ShaderLibrary {
         lock(&self.sources).get(name).cloned()
     }
 
-    /// `common.wgsl` followed by `name`.
+    /// `common.wgsl` followed by `name` (and an external shader's prelude before it).
     pub fn composed(&self, name: &str) -> Option<String> {
         let sources = lock(&self.sources);
-        let common = sources.get("common").map_or("", String::as_str);
-        sources.get(name).map(|s| compose(common, s).into_owned())
+        let part = |n: &str| sources.get(n).map_or("", String::as_str);
+        let body = sources.get(name)?;
+        Some(match lock(&self.externals).get(name) {
+            Some(external) => compose_external(part("common"), part(external.prelude), body),
+            None => compose(part("common"), body).into_owned(),
+        })
     }
 
     /// Shaders whose new source validated and was stored since the last call, `common`
-    /// included (every pipeline depends on it). Never blocks; call once per frame.
+    /// included (every pipeline depends on it); an edited prelude brings the external
+    /// shaders built on it. Never blocks; call once per frame.
     pub fn poll_changes(&self) -> Vec<String> {
         #[cfg(debug_assertions)]
         if let Some(watch) = &self.watch {
@@ -176,14 +262,14 @@ impl ShaderLibrary {
     pub fn watching(dir: &Path) -> Self {
         let mut library = Self::embedded_only();
         for (name, _) in EMBEDDED {
-            match watch::read(&library.sources, dir, name) {
+            match watch::read(&library.sources, &library.externals, dir, name) {
                 Ok(source) => {
                     lock(&library.sources).insert((*name).to_owned(), source);
                 }
                 Err(e) => tracing::warn!("{e}; using the built-in {name}.wgsl"),
             }
         }
-        match watch::Watch::start(dir, library.sources.clone()) {
+        match watch::Watch::start(dir, library.sources.clone(), library.externals.clone()) {
             Ok(w) => library.watch = Some(w),
             Err(e) => tracing::warn!("shader hot reload is off: {e}"),
         }
@@ -201,12 +287,16 @@ impl ShaderLibrary {
 
 #[cfg(debug_assertions)]
 mod watch {
+    use std::collections::HashSet;
     use std::path::{Path, PathBuf};
     use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
     use std::sync::{Arc, Condvar, Mutex};
     use std::time::Duration;
 
-    use super::{EMBEDDED, ShaderError, Sources, compose, embedded, lock, validate};
+    use super::{
+        EMBEDDED, Externals, ShaderError, Sources, compose, compose_external, embedded, lock,
+        validate, validate_external,
+    };
 
     /// How long the watch thread waits for more events after the first, so an editor's
     /// truncate-then-write or write-then-rename is read once, complete.
@@ -214,6 +304,8 @@ mod watch {
 
     enum Message {
         Changed(PathBuf),
+        /// Watch an external shader's file (its folder) and reread it once.
+        Add(String, PathBuf),
         Stop,
     }
 
@@ -226,6 +318,15 @@ mod watch {
 
     type Shared<T> = Arc<(Mutex<T>, Condvar)>;
 
+    /// What the watch thread reads and publishes into.
+    struct Shaders {
+        dir: PathBuf,
+        sources: Sources,
+        externals: Externals,
+        publish: Sender<String>,
+        error: Arc<Mutex<Option<String>>>,
+    }
+
     /// The `shader-watch` thread and what it publishes.
     pub(super) struct Watch {
         messages: Sender<Message>,
@@ -235,19 +336,28 @@ mod watch {
     }
 
     impl Watch {
-        pub(super) fn start(dir: &Path, sources: Sources) -> Result<Self, String> {
+        pub(super) fn start(
+            dir: &Path,
+            sources: Sources,
+            externals: Externals,
+        ) -> Result<Self, String> {
             let (messages, inbox) = mpsc::channel();
             let (publish, changed) = mpsc::channel();
             let error = Arc::new(Mutex::new(None));
             let state: Shared<State> = Arc::new((Mutex::new(State::Starting), Condvar::new()));
             let events = messages.clone();
-            let thread_error = error.clone();
             let thread_state = state.clone();
-            let dir = dir.to_owned();
+            let shaders = Shaders {
+                dir: dir.to_owned(),
+                sources,
+                externals,
+                publish,
+                error: error.clone(),
+            };
             std::thread::Builder::new()
                 .name("shader-watch".into())
                 .spawn(move || {
-                    let watcher = register(&dir, events);
+                    let watcher = register(&shaders.dir, events);
                     let (lock_state, ready) = &*thread_state;
                     *lock(lock_state) = if watcher.is_ok() {
                         State::Watching
@@ -255,17 +365,17 @@ mod watch {
                         State::Failed
                     };
                     ready.notify_all();
-                    let _watcher = match watcher {
+                    let mut watcher = match watcher {
                         Ok(w) => w,
                         Err(e) => {
                             tracing::warn!("shader hot reload is off: {e}");
                             return;
                         }
                     };
-                    tracing::info!("watching {} for shader edits", dir.display());
+                    tracing::info!("watching {} for shader edits", shaders.dir.display());
                     let all = EMBEDDED.iter().map(|(n, _)| (*n).to_owned()).collect();
-                    reload(&dir, &sources, all, &publish, &thread_error);
-                    run(&dir, &sources, &inbox, &publish, &thread_error);
+                    shaders.reload(all);
+                    run(&shaders, &mut watcher, &inbox);
                 })
                 .map_err(|e| e.to_string())?;
             Ok(Self {
@@ -274,6 +384,10 @@ mod watch {
                 error,
                 state,
             })
+        }
+
+        pub(super) fn add(&self, name: &str, path: PathBuf) {
+            let _ = self.messages.send(Message::Add(name.to_owned(), path));
         }
 
         pub(super) fn wait_until_watching(&self, timeout: Duration) -> bool {
@@ -320,85 +434,161 @@ mod watch {
         Ok(watcher)
     }
 
-    fn shader_name(path: &Path) -> Option<String> {
-        if path.extension()? != "wgsl" {
-            return None;
-        }
-        let name = path.file_stem()?.to_str()?;
-        embedded(name).map(|_| name.to_owned())
+    /// `path` with its folder resolved (the file itself may be gone mid-save).
+    fn canonical(path: &Path) -> Option<PathBuf> {
+        let parent = path.parent()?.canonicalize().ok()?;
+        Some(parent.join(path.file_name()?))
     }
 
-    fn run(
-        dir: &Path,
-        sources: &Sources,
-        inbox: &Receiver<Message>,
-        publish: &Sender<String>,
-        error: &Mutex<Option<String>>,
-    ) {
-        while let Ok(Message::Changed(path)) = inbox.recv() {
-            let mut pending: Vec<String> = shader_name(&path).into_iter().collect();
+    fn run(shaders: &Shaders, watcher: &mut notify::RecommendedWatcher, inbox: &Receiver<Message>) {
+        use notify::Watcher;
+        let mut folders: HashSet<PathBuf> = HashSet::new();
+        let Ok(mut message) = inbox.recv() else {
+            return;
+        };
+        loop {
+            let mut pending = Vec::new();
             loop {
+                match message {
+                    Message::Changed(path) => pending.extend(shaders.name_of(&path)),
+                    Message::Add(name, path) => {
+                        if let Some(folder) = path.parent()
+                            && folders.insert(folder.to_owned())
+                            && let Err(e) =
+                                watcher.watch(folder, notify::RecursiveMode::NonRecursive)
+                        {
+                            tracing::warn!("not watching {}: {e}", folder.display());
+                        }
+                        pending.push(name);
+                    }
+                    Message::Stop => return,
+                }
                 match inbox.recv_timeout(SETTLE) {
-                    Ok(Message::Changed(path)) => pending.extend(shader_name(&path)),
-                    Ok(Message::Stop) | Err(RecvTimeoutError::Disconnected) => return,
+                    Ok(next) => message = next,
+                    Err(RecvTimeoutError::Disconnected) => return,
                     Err(RecvTimeoutError::Timeout) => break,
                 }
             }
-            reload(dir, sources, pending, publish, error);
+            shaders.reload(pending);
+            match inbox.recv() {
+                Ok(next) => message = next,
+                Err(_) => return,
+            }
         }
     }
 
-    /// Rereads `names`, storing and publishing each one that validates and differs from
-    /// its current source.
-    fn reload(
-        dir: &Path,
-        sources: &Sources,
-        mut names: Vec<String>,
-        publish: &Sender<String>,
-        error: &Mutex<Option<String>>,
-    ) {
-        names.sort();
-        names.dedup();
-        for name in names {
-            match read(sources, dir, &name) {
-                Ok(source) => {
-                    *lock(error) = None;
-                    let mut current = lock(sources);
-                    if current.get(&name) != Some(&source) {
-                        tracing::info!("reloaded {name}.wgsl");
-                        current.insert(name.clone(), source);
-                        // Published under the lock: whoever sees the new source also
-                        // finds its name waiting in `poll_changes`.
-                        let _ = publish.send(name);
+    impl Shaders {
+        /// The shader a changed file holds: an embedded shader's file in the shaders
+        /// folder, or an external shader's file.
+        fn name_of(&self, path: &Path) -> Option<String> {
+            if path.extension()? != "wgsl" {
+                return None;
+            }
+            let canonical = canonical(path);
+            if let Some((name, _)) = lock(&self.externals)
+                .iter()
+                .find(|(_, e)| e.path.is_some() && e.path == canonical)
+            {
+                return Some(name.clone());
+            }
+            if canonical.as_deref().and_then(Path::parent)
+                != self.dir.canonicalize().ok().as_deref()
+            {
+                return None;
+            }
+            let name = path.file_stem()?.to_str()?;
+            embedded(name).map(|_| name.to_owned())
+        }
+
+        /// Rereads `names`, storing and publishing each one that validates and differs
+        /// from its current source, with the external shaders built on a changed prelude.
+        fn reload(&self, mut names: Vec<String>) {
+            names.sort();
+            names.dedup();
+            for name in names {
+                match self.read(&name) {
+                    Ok(source) => {
+                        *lock(&self.error) = None;
+                        let mut current = lock(&self.sources);
+                        if current.get(&name) != Some(&source) {
+                            tracing::info!("reloaded {name}.wgsl");
+                            current.insert(name.clone(), source);
+                            // Published under the lock: whoever sees the new source also
+                            // finds its name waiting in `poll_changes`.
+                            for dependent in self.dependents(&name) {
+                                let _ = self.publish.send(dependent);
+                            }
+                            let _ = self.publish.send(name);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("keeping the last good {name}.wgsl: {e}");
+                        *lock(&self.error) = Some(e.to_string());
                     }
                 }
-                Err(e) => {
-                    tracing::error!("keeping the last good {name}.wgsl: {e}");
-                    *lock(error) = Some(e.to_string());
-                }
             }
+        }
+
+        /// The external shaders compiled with `prelude`.
+        fn dependents(&self, prelude: &str) -> Vec<String> {
+            lock(&self.externals)
+                .iter()
+                .filter(|(_, e)| e.prelude == prelude)
+                .map(|(n, _)| n.clone())
+                .collect()
+        }
+
+        fn read(&self, name: &str) -> Result<String, ShaderError> {
+            read(&self.sources, &self.externals, &self.dir, name)
         }
     }
 
-    /// Reads `name` from `dir` and validates it composed with the current common source
-    /// (or, for `common` itself, with every shader that includes it).
-    pub(super) fn read(sources: &Sources, dir: &Path, name: &str) -> Result<String, ShaderError> {
-        let source =
-            std::fs::read_to_string(dir.join(format!("{name}.wgsl"))).map_err(|error| {
-                ShaderError::Read {
-                    name: name.to_owned(),
-                    error,
-                }
-            })?;
-        let current = lock(sources).clone();
+    /// Reads `name` from its file (in `dir`, or an external shader's own) and validates
+    /// it composed with the current sources (or, for `common` or a prelude, with every
+    /// shader that includes it).
+    pub(super) fn read(
+        sources: &Sources,
+        externals: &Externals,
+        dir: &Path,
+        name: &str,
+    ) -> Result<String, ShaderError> {
+        let external = lock(externals).get(name).cloned();
+        let path = match &external {
+            Some(e) => e.path.clone().ok_or_else(|| ShaderError::Read {
+                name: name.to_owned(),
+                error: std::io::Error::from(std::io::ErrorKind::NotFound),
+            })?,
+            None => dir.join(format!("{name}.wgsl")),
+        };
+        let source = std::fs::read_to_string(path).map_err(|error| ShaderError::Read {
+            name: name.to_owned(),
+            error,
+        })?;
+        let mut current = lock(sources).clone();
+        let externals = lock(externals).clone();
+        current.insert(name.to_owned(), source.clone());
+        let part = |n: &str| current.get(n).map_or("", String::as_str);
+        let check = |other: &str| match externals.get(other) {
+            Some(e) => validate_external(
+                other,
+                &compose_external(part("common"), part(e.prelude), part(other)),
+            ),
+            None => validate(other, &compose(part("common"), part(other))),
+        };
         if name == "common" {
-            for (other, _) in EMBEDDED.iter().filter(|(n, _)| *n != "common") {
-                let body = current.get(*other).map_or("", String::as_str);
-                validate(other, &compose(&source, body))?;
+            for other in EMBEDDED
+                .iter()
+                .map(|(n, _)| *n)
+                .filter(|n| *n != "common")
+                .chain(externals.keys().map(String::as_str))
+            {
+                check(other)?;
             }
         } else {
-            let common = current.get("common").map_or("", String::as_str);
-            validate(name, &compose(common, &source))?;
+            check(name)?;
+            for other in externals.iter().filter(|(_, e)| e.prelude == name) {
+                check(other.0)?;
+            }
         }
         Ok(source)
     }

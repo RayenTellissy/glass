@@ -7,9 +7,11 @@ pub mod analysis;
 pub mod autosave;
 pub mod frame_queue;
 pub mod logging;
+pub mod lookahead;
 pub mod media_check;
 pub mod media_mgmt;
 pub mod playback;
+pub mod quality;
 pub mod threads;
 
 /// Names of the optional codec and AI features compiled into this build.

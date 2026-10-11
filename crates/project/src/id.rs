@@ -1,7 +1,7 @@
 //! Stable node ids.
 //!
-//! Every node in a project (media reference, sequence, track, item, marker, and later
-//! transitions and effects) gets a `u64` from the project's own counter, so ids are unique
+//! Every node in a project (media reference, sequence, track, item, marker, effect, and
+//! later transitions) gets a `u64` from the project's own counter, so ids are unique
 //! across node kinds within a project, never reused, and stable across save and load.
 //! Autosave diffs and undo compare nodes by these ids. Pasting into another project
 //! remaps them.
@@ -64,4 +64,6 @@ id_type!(
     MarkerId,
     /// A bin (folder) in the media pool.
     BinId,
+    /// An effect instance in a clip's effect stack.
+    EffectId,
 );

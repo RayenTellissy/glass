@@ -196,7 +196,7 @@ fn assert_rgb(file: &str, frame: &VideoFrame, want: &[[u8; 3]; 5]) {
 fn bar_fixtures_hold_their_codes_and_convert() {
     for file in [PQ, HLG] {
         let Some(frame) = first_frame(file, HwPreference::Off) else {
-            return;
+            continue;
         };
         assert_codes(file, &luma_codes(&frame), &[64, 572, 721, 940, 237], 2);
         // Encoded R'G'B': black, 58%, 75%, 100% and BT.2020 75% red.
@@ -237,7 +237,7 @@ fn hardware_frames_carry_the_same_description() {
             first_frame(file, HwPreference::Off),
             first_frame(file, HwPreference::Require),
         ) else {
-            return;
+            continue;
         };
         let surface = hw.hardware().expect("a hardware frame");
         assert_eq!(surface.colour_space(), hw.colour_space());

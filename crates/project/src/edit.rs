@@ -122,7 +122,8 @@ impl Project {
         Ok(next)
     }
 
-    /// Places a clip on a video or audio track. Fails if it would overlap another item.
+    /// Places a clip on a video or audio track, with every property at its default
+    /// ([`Clip::new`]). Fails if it would overlap another item.
     pub fn insert_clip(
         &self,
         track: TrackId,
@@ -134,11 +135,7 @@ impl Project {
         if spec.source_start.is_negative() {
             return Err(EditError::SourceBeforeStart(spec.source_start));
         }
-        let clip = Clip {
-            media: spec.media,
-            source_start: spec.source_start,
-            markers: imbl::Vector::new(),
-        };
+        let clip = Clip::new(spec.media, spec.source_start);
         self.insert_item(track, spec.range, ItemKind::Clip(clip))
     }
 
@@ -215,8 +212,9 @@ impl Project {
     }
 
     /// Changes an item's timeline range. For a clip, moving the start trims its head:
-    /// the source start moves by the same amount, so the frames that stay on the
-    /// timeline do not move (nor do its markers, which are in source time).
+    /// the source start moves by the same amount times the clip's speed, so the frames
+    /// that stay on the timeline do not move (nor do its markers, which are in source
+    /// time).
     pub fn trim_item(&self, item: ItemId, range: TimeRange) -> Result<Project, EditError> {
         let mut next = self.clone();
         let (si, ti, ii) = next.locate_item(item)?;
@@ -227,6 +225,7 @@ impl Project {
         let head = range.start.checked_sub(node.range.start)?;
         match &mut node.kind {
             ItemKind::Clip(clip) => {
+                let head = clip.speed.source_duration(head)?;
                 let source_start = clip.source_start.checked_add(head)?;
                 if source_start.is_negative() {
                     return Err(EditError::SourceBeforeStart(source_start));

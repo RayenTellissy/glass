@@ -192,6 +192,29 @@ impl Time {
         n % d == 0
     }
 
+    /// The whole number of `step`s nearest to this time, halves rounded away from zero
+    /// (2.5 steps is 3, -2.5 is -3). `step` must be positive.
+    pub fn round_to_multiple(self, step: Time) -> Result<i64, TimeError> {
+        if !step.is_positive() {
+            return Err(TimeError::ZeroDenominator);
+        }
+        // self / step = n / d with d > 0.
+        let n = i128::from(self.num) * i128::from(step.den);
+        let d = i128::from(self.den) * i128::from(step.num);
+        let half_up = |n: i128| -> Option<i128> {
+            let twice = d.checked_mul(2)?;
+            Some(n.checked_mul(2)?.checked_add(d)?.div_euclid(twice))
+        };
+        let count = if n < 0 {
+            half_up(-n).map(|c| -c)
+        } else {
+            half_up(n)
+        };
+        count
+            .and_then(|c| i64::try_from(c).ok())
+            .ok_or(TimeError::Overflow)
+    }
+
     /// The number of whole `rate` frames at or before this time.
     pub fn frames_floor(self, rate: Rational) -> i64 {
         let n = i128::from(self.num) * i128::from(rate.num);
@@ -350,6 +373,25 @@ mod tests {
         let five = Time::from_frames(5, ntsc).expect("frames");
         assert!(five.is_multiple_of(s));
         assert_eq!(t("-1/60").frames_floor(Rational::new(30, 1)), -1);
+    }
+
+    #[test]
+    fn rounding_to_a_multiple() {
+        let frame = t("1/25");
+        assert_eq!(t("2/25").round_to_multiple(frame), Ok(2));
+        assert_eq!(t("5/50").round_to_multiple(frame), Ok(3));
+        assert_eq!(t("49/1000").round_to_multiple(frame), Ok(1));
+        assert_eq!(t("19/1000").round_to_multiple(frame), Ok(0));
+        assert_eq!(t("-5/50").round_to_multiple(frame), Ok(-3));
+        assert_eq!(t("-49/1000").round_to_multiple(frame), Ok(-1));
+        assert_eq!(
+            t("1").round_to_multiple(Time::ZERO),
+            Err(TimeError::ZeroDenominator)
+        );
+        assert_eq!(
+            t("1").round_to_multiple(t("-1")),
+            Err(TimeError::ZeroDenominator)
+        );
     }
 
     #[test]
