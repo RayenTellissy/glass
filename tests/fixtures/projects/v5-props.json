@@ -1,0 +1,225 @@
+{
+  "format": "glass.project",
+  "schema_version": 5,
+  "project": {
+    "uid": "fixture-props",
+    "name": "Ferry crossing",
+    "next_id": 10,
+    "media": {
+      "refs": [
+        {
+          "id": 1,
+          "content_hash": "1f2e3d",
+          "path": "/footage/ferry.mov"
+        }
+      ]
+    },
+    "sequences": [
+      {
+        "id": 2,
+        "name": "Crossing",
+        "frame_rate": {
+          "num": 25,
+          "den": 1
+        },
+        "sample_rate": 48000,
+        "markers": [],
+        "tracks": [
+          {
+            "id": 3,
+            "kind": "video",
+            "name": "V1",
+            "items": [
+              {
+                "id": 5,
+                "range": {
+                  "start": "0",
+                  "duration": "4"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "1",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 2
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    -120.5,
+                    64.0
+                  ],
+                  "scale": [
+                    1.25,
+                    -1.25
+                  ],
+                  "rotation": 12.5,
+                  "anchor": [
+                    8.0,
+                    -4.0
+                  ]
+                },
+                "crop": {
+                  "left": 32.0,
+                  "top": 0.0,
+                  "right": 32.0,
+                  "bottom": 18.0,
+                  "feather": 6.0
+                },
+                "opacity": 0.75,
+                "blend": "screen",
+                "effects": [
+                  {
+                    "id": 9,
+                    "schema": "acme.glow",
+                    "enabled": false,
+                    "params": {
+                      "radius": {
+                        "float": 8.0
+                      }
+                    }
+                  },
+                  {
+                    "id": 8,
+                    "schema": "lut",
+                    "enabled": true,
+                    "params": {
+                      "enabled": {
+                        "bool": true
+                      },
+                      "file": {
+                        "text": "/luts/ferry.cube"
+                      },
+                      "input": {
+                        "choice": "rec709"
+                      },
+                      "intensity": {
+                        "float": 0.6
+                      }
+                    }
+                  }
+                ],
+                "markers": []
+              },
+              {
+                "id": 6,
+                "range": {
+                  "start": "22/5",
+                  "duration": "1"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "9",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 3,
+                        "den": 2
+                      }
+                    }
+                  ]
+                },
+                "enabled": false,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              }
+            ],
+            "transitions": []
+          },
+          {
+            "id": 4,
+            "kind": "audio",
+            "name": "A1",
+            "items": [
+              {
+                "id": 7,
+                "range": {
+                  "start": "0",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "3/2",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": -6.5,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              }
+            ],
+            "transitions": []
+          }
+        ]
+      }
+    ]
+  }
+}

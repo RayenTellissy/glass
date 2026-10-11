@@ -2,10 +2,10 @@
 //!
 //! A root is flattened into one record per node ([`Node`]): the project header, each
 //! media reference, each sequence and track without its children (plus the order of its
-//! children), each sequence marker, and each item whole (a clip's properties, effect
-//! stack and markers travel with it). A [`Diff`] lists the records added or changed and the
-//! ids removed; applying it to the flat form of the old root gives the flat form of the
-//! new root, which rebuilds into an equal tree.
+//! children), each sequence marker, each transition, and each item whole (a clip's
+//! properties, effect stack and markers travel with it). A [`Diff`] lists the records
+//! added or changed and the ids removed; applying it to the flat form of the old root
+//! gives the flat form of the new root, which rebuilds into an equal tree.
 //!
 //! Items are compared by pointer first (consecutive roots share them), so a diff costs one
 //! pass over the ids plus the nodes that changed.
@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::id::{NodeId, SequenceId, TrackId};
 use crate::marker::Marker;
 use crate::model::{Item, MediaRef, MediaRefs, Project, Sequence, Track};
+use crate::transition::Transition;
 use crate::validate::ValidationError;
 
 /// The id of the project header record; node ids start at 1.
@@ -55,6 +56,12 @@ pub enum Node {
         sequence: SequenceId,
         marker: Arc<Marker>,
     },
+    /// A transition on a track's cut (schema v5; autosave format 5). A track's
+    /// transitions are ordered by id, so they rebuild in record order.
+    Transition {
+        track: TrackId,
+        transition: Arc<Transition>,
+    },
 }
 
 impl Node {
@@ -66,6 +73,7 @@ impl Node {
             Node::Track { track, .. } => track.id.node(),
             Node::Item { item, .. } => item.id.node(),
             Node::Marker { marker, .. } => marker.id.node(),
+            Node::Transition { transition, .. } => transition.id.node(),
         }
     }
 
@@ -86,6 +94,16 @@ impl Node {
                     marker: b,
                 },
             ) => sa == sb && (Arc::ptr_eq(a, b) || a == b),
+            (
+                Node::Transition {
+                    track: ta,
+                    transition: a,
+                },
+                Node::Transition {
+                    track: tb,
+                    transition: b,
+                },
+            ) => ta == tb && (Arc::ptr_eq(a, b) || a == b),
             _ => self == other,
         }
     }
@@ -137,6 +155,7 @@ pub fn flatten(project: &Project) -> Flat {
         for track in &seq.tracks {
             let mut bare = Track::clone(track);
             bare.items = imbl::Vector::new();
+            bare.transitions = imbl::Vector::new();
             flat.insert(
                 track.id.node(),
                 Node::Track {
@@ -150,6 +169,15 @@ pub fn flatten(project: &Project) -> Flat {
                     Node::Item {
                         track: track.id,
                         item: item.clone(),
+                    },
+                );
+            }
+            for transition in &track.transitions {
+                flat.insert(
+                    transition.id.node(),
+                    Node::Transition {
+                        track: track.id,
+                        transition: transition.clone(),
                     },
                 );
             }
@@ -212,6 +240,7 @@ pub fn rebuild(flat: &Flat) -> Result<Project, ValidationError> {
     let mut media = MediaRefs::default();
     let mut items: BTreeMap<TrackId, Vec<Arc<Item>>> = BTreeMap::new();
     let mut markers: BTreeMap<SequenceId, Vec<Arc<Marker>>> = BTreeMap::new();
+    let mut transitions: BTreeMap<TrackId, Vec<Arc<Transition>>> = BTreeMap::new();
     for node in flat.values() {
         match node {
             Node::Media { media: m } => {
@@ -221,6 +250,10 @@ pub fn rebuild(flat: &Flat) -> Result<Project, ValidationError> {
             Node::Marker { sequence, marker } => {
                 markers.entry(*sequence).or_default().push(marker.clone())
             }
+            Node::Transition { track, transition } => transitions
+                .entry(*track)
+                .or_default()
+                .push(transition.clone()),
             _ => {}
         }
     }
@@ -248,6 +281,12 @@ pub fn rebuild(flat: &Flat) -> Result<Project, ValidationError> {
             let mut list = items.remove(track_id).unwrap_or_default();
             list.sort_by_key(|a| a.range.start);
             track.items = list.into_iter().collect();
+            // Flat records iterate in id order, the order a track keeps its transitions.
+            track.transitions = transitions
+                .remove(track_id)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
             seq.tracks.push_back(Arc::new(track));
         }
         project.sequences.push_back(Arc::new(seq));
@@ -255,6 +294,11 @@ pub fn rebuild(flat: &Flat) -> Result<Project, ValidationError> {
     if let Some((track, _)) = items.into_iter().next() {
         return Err(ValidationError::Structure(format!(
             "items on track {track}, which is not in any sequence"
+        )));
+    }
+    if let Some((track, _)) = transitions.into_iter().next() {
+        return Err(ValidationError::Structure(format!(
+            "transitions on track {track}, which is not in any sequence"
         )));
     }
     if let Some((sequence, _)) = markers.into_iter().next() {

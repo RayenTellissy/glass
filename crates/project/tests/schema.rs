@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use project::params::{ParamDef, ParamSchema, ParamValue, Range, effects};
 use project::schema::{self, LoadError, OLDEST_VERSION, SCHEMA_VERSION};
 use project::{
-    BlendMode, Clip, ClipSpec, ColourLabel, Crop, MarkerOwner, MarkerSpec, MediaId, Project,
-    Rational, SpeedKeep, Time, TimeRange, TodoState, TrackKind, Transform,
+    Alignment, BlendMode, Clip, ClipSpec, ColourLabel, Crop, MarkerOwner, MarkerSpec, MediaId,
+    Project, Rational, SpeedKeep, Time, TimeRange, TodoState, TrackKind, Transform, TransitionSpec,
 };
 use serde_json::Value;
 
@@ -207,12 +207,89 @@ fn props() -> Project {
         .expect("slip")
 }
 
+/// The project in every `*-transitions.json` fixture (from v5): two-sided transitions
+/// in each alignment, a fade from nothing at the track's start and one to nothing into a
+/// gap, an audio crossfade, a kind with parameters and an easing.
+fn transitions() -> Project {
+    let p = Project::new("fixture-transitions", "Coastline");
+    let (p, a) = p.add_media("5e6f70", "/footage/coast.mov").expect("media");
+    let (p, seq) = p.add_sequence("Cut", FPS, 48_000).expect("sequence");
+    let (p, v1) = p.add_track(seq, TrackKind::Video, "V1", None).expect("v1");
+    let (p, a1) = p.add_track(seq, TrackKind::Audio, "A1", None).expect("a1");
+    let (p, first) = p
+        .insert_clip(v1, clip(a, Time::ZERO, frames(50), Time::seconds(2)))
+        .expect("clip");
+    let (p, second) = p
+        .insert_clip(v1, clip(a, frames(50), frames(50), Time::seconds(10)))
+        .expect("clip");
+    let (p, third) = p
+        .insert_clip(v1, clip(a, frames(100), frames(25), Time::seconds(20)))
+        .expect("clip");
+    let (p, last) = p
+        .insert_clip(v1, clip(a, frames(150), frames(50), Time::seconds(30)))
+        .expect("clip");
+    let (p, s1) = p
+        .insert_clip(a1, clip(a, Time::ZERO, Time::seconds(2), Time::seconds(2)))
+        .expect("clip");
+    let (p, s2) = p
+        .insert_clip(
+            a1,
+            clip(a, Time::seconds(2), Time::seconds(2), Time::seconds(10)),
+        )
+        .expect("clip");
+    let at = |o, i, n, alignment| TransitionSpec {
+        alignment,
+        ..TransitionSpec::new(o, i, frames(n))
+    };
+    let (p, _) = p
+        .add_transition(at(None, Some(first), 10, Alignment::Start))
+        .expect("fade in");
+    let (p, _) = p
+        .add_transition(at(Some(first), Some(second), 12, Alignment::Centre))
+        .expect("centre");
+    let iris = ParamSchema::new(
+        "iris",
+        "transition.name.iris",
+        vec![ParamDef::float(
+            "softness",
+            "transition.iris.softness",
+            0.2,
+            Range::new(0.0, 1.0),
+        )],
+    );
+    let (p, wipe) = p
+        .add_transition(TransitionSpec {
+            kind: "iris".into(),
+            easing: "ease-in-out".into(),
+            ..at(Some(second), Some(third), 8, Alignment::End)
+        })
+        .expect("end");
+    let p = p
+        .set_transition_param(wipe, &iris, "softness", ParamValue::Float(0.65))
+        .expect("param");
+    let (p, _) = p
+        .add_transition(at(Some(third), None, 20, Alignment::Start))
+        .expect("fade out");
+    let (p, _) = p
+        .add_transition(at(None, Some(last), 5, Alignment::Centre))
+        .expect("fade in from the gap");
+    let (p, _) = p
+        .add_transition(TransitionSpec::new(
+            Some(s1),
+            Some(s2),
+            Time::new(1, 2).expect("time"),
+        ))
+        .expect("audio");
+    p
+}
+
 /// The project each fixture name was saved from.
 fn builder(name: &str) -> Project {
     match name {
         "basic" => basic(),
         "tracks" => tracks(),
         "props" => props(),
+        "transitions" => transitions(),
         other => panic!("no builder for {other} fixtures"),
     }
 }
@@ -269,7 +346,7 @@ fn every_version_has_fixtures_and_their_versions_match_the_names() {
 
 #[test]
 fn the_current_version_fixtures_are_what_save_writes() {
-    for name in ["basic", "tracks", "props"] {
+    for name in ["basic", "tracks", "props", "transitions"] {
         let bytes = schema::save(&builder(name));
         let path = fixtures_dir().join(format!("v{SCHEMA_VERSION}-{name}.json"));
         if std::env::var_os("GLASS_UPDATE_FIXTURES").is_some() {
@@ -372,6 +449,56 @@ fn v3_clips_gain_their_default_properties() {
         assert!(clips >= 2, "{name}");
         assert!(loaded.content_eq(&builder(name)));
     }
+}
+
+#[test]
+fn v4_tracks_gain_empty_transition_lists() {
+    for name in ["basic", "tracks", "props"] {
+        let path = fixtures_dir().join(format!("v4-{name}.json"));
+        let v4: Value = serde_json::from_slice(&read(&path)).expect("JSON");
+        let tracks = v4["project"]["sequences"][0]["tracks"]
+            .as_array()
+            .expect("tracks");
+        assert!(tracks.iter().all(|t| t.get("transitions").is_none()));
+        let migrated = schema::migrate(4, v4["project"].clone()).expect("migrates");
+        for track in migrated["sequences"][0]["tracks"]
+            .as_array()
+            .expect("tracks")
+        {
+            assert_eq!(track["transitions"], Value::Array(Vec::new()), "{name}");
+        }
+        let loaded = schema::load(&read(&path)).expect("loads");
+        assert_eq!(
+            loaded.next_id(),
+            v4["project"]["next_id"].as_u64().expect("next id")
+        );
+        assert!(loaded.content_eq(&builder(name)), "{name}");
+    }
+}
+
+#[test]
+fn the_transitions_fixture_round_trips_every_transition_field() {
+    let p = transitions();
+    let bytes = schema::save(&p);
+    let loaded = schema::load(&bytes).expect("loads");
+    assert!(loaded.content_eq(&p));
+    assert_eq!(schema::save(&loaded), bytes);
+    let seq = &loaded.sequences()[0];
+    assert_eq!(seq.tracks[0].transitions.len(), 5);
+    assert_eq!(seq.tracks[1].transitions.len(), 1);
+    let json: Value = serde_json::from_slice(&bytes).expect("JSON");
+    let wipe = &json["project"]["sequences"][0]["tracks"][0]["transitions"][2];
+    assert_eq!(wipe["kind"], "iris");
+    assert_eq!(wipe["alignment"], "end");
+    assert_eq!(wipe["easing"], "ease-in-out");
+    assert_eq!(wipe["duration"], "8/25");
+    assert_eq!(
+        wipe["params"],
+        serde_json::json!({ "softness": { "float": 0.65 } })
+    );
+    let fade_in = &json["project"]["sequences"][0]["tracks"][0]["transitions"][0];
+    assert_eq!(fade_in["outgoing"], Value::Null);
+    assert_eq!(fade_in["alignment"], "start");
 }
 
 #[test]
