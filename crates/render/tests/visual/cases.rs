@@ -40,6 +40,11 @@ pub fn all() -> Vec<Case> {
             scene: shapes,
         },
         Case {
+            name: "subtitle_burn_in",
+            frames: &[0, 1],
+            scene: subtitle_burn_in,
+        },
+        Case {
             name: "mask_hard",
             frames: &[0],
             scene: mask_hard,
@@ -279,6 +284,25 @@ fn title_over_video(frame: u32) -> Scene {
                 }),
                 Layer::default().with_opacity((0.4 + t / 40.0).min(1.0)),
             ),
+        ],
+    }
+}
+
+/// A burned-in subtitle in the default style over the colour bars: one line on frame 0;
+/// on frame 1 a cue that wraps at the title-safe width, then a forced second line.
+fn subtitle_burn_in(frame: u32) -> Scene {
+    let cue = if frame == 0 {
+        "Burned-in subtitle"
+    } else {
+        "A longer subtitle that wraps inside the title-safe area of the frame\nand a second line"
+    };
+    Scene {
+        layers: vec![
+            (
+                Source::Bars,
+                Layer::default().with_transform(placed([0.0, 0.0], [2.0, 2.0], 0.0, [0.0, 0.0])),
+            ),
+            (Source::Subtitle(cue), Layer::default()),
         ],
     }
 }

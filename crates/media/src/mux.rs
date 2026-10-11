@@ -4,8 +4,9 @@
 //! stream ([`Muxer::add_copy_stream`], stream copy for concatenation and, in Phase 8,
 //! smart export). Stream metadata (timecode), display matrices and container options are
 //! set before [`Muxer::write_header`]; packets are rescaled from their own time base to
-//! the stream's and interleaved by FFmpeg. Phase 8 adds more stream kinds (subtitles,
-//! chapters) and muxer options through the same calls.
+//! the stream's and interleaved by FFmpeg. Text subtitle streams come from the export
+//! session's subtitle encoders. Phase 8 adds more stream kinds (chapters) and muxer
+//! options through the same calls.
 
 use std::path::{Path, PathBuf};
 
@@ -15,6 +16,7 @@ use crate::demux::{Demuxer, Packet};
 use crate::encode::Encoder;
 use crate::error::{MediaError, Result};
 use crate::ffi;
+use crate::subtitle::SubtitleEncoder;
 use crate::time::Rational;
 
 /// An output file being written. Dropping it without [`finish`](Self::finish) leaves an
@@ -100,6 +102,23 @@ impl Muxer {
             stream.set_avg_frame_rate(ffmpeg::Rational::from(rate));
             stream.set_rate(ffmpeg::Rational::from(rate));
         }
+        let index = stream.index();
+        self.time_bases.push(encoder.time_base());
+        Ok(index)
+    }
+
+    /// Adds a text subtitle stream carrying `encoder`'s packets; returns its index.
+    pub(crate) fn add_subtitle_stream(&mut self, encoder: &SubtitleEncoder) -> Result<usize> {
+        let mut stream =
+            self.output
+                .add_stream(encoder.codec())
+                .map_err(|e| MediaError::Write {
+                    path: self.path.clone(),
+                    action: "adding a stream",
+                    source: e.into(),
+                })?;
+        stream.set_parameters(encoder.parameters());
+        stream.set_time_base(ffmpeg::Rational::from(encoder.time_base()));
         let index = stream.index();
         self.time_bases.push(encoder.time_base());
         Ok(index)

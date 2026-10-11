@@ -13,13 +13,14 @@ use crate::error::MediaError;
 use crate::ffi;
 use crate::format::{PixelFormat, SampleFormat, SampleType};
 use crate::mux::Muxer;
+use crate::subtitle::{SubtitleCue, SubtitleEncoder};
 use crate::time::Rational;
 
 use super::gif_writer::GifWriter;
 use super::picture::{Converter, Picture};
 use super::settings::{
     AudioCodec, AudioSettings, Container, EncoderChoice, ExportSettings, HdrMetadata, RateControl,
-    VideoCodec, VideoSettings, is_hardware_encoder, video_encoder_choices,
+    SubtitleSettings, VideoCodec, VideoSettings, is_hardware_encoder, video_encoder_choices,
 };
 use super::{ExportError, Result};
 
@@ -41,6 +42,8 @@ pub struct ExportSummary {
     /// `prores_videotoolbox`; `gif` for GIF).
     pub video_encoder: Option<String>,
     pub audio_encoder: Option<String>,
+    /// Subtitle cues written, over every subtitle stream.
+    pub subtitle_cues: u64,
     /// Video encoders that failed to open or to encode the first frames and were
     /// replaced by the next one, in the order tried.
     pub fallbacks: Vec<EncoderFallback>,
@@ -65,6 +68,7 @@ pub struct ExportSession {
     sink: Sink,
     video: Option<VideoOut>,
     audio: Option<AudioOut>,
+    subtitles: Vec<SubtitleOut>,
     fallbacks: Vec<EncoderFallback>,
 }
 
@@ -130,6 +134,17 @@ struct AudioOut {
     /// Samples waiting for a whole encoder frame, per channel.
     pending: Vec<Vec<f32>>,
     samples: u64,
+}
+
+struct SubtitleOut {
+    encoder: SubtitleEncoder,
+    settings: SubtitleSettings,
+    stream: usize,
+    /// The end of the last cue pushed, in milliseconds.
+    end_ms: i64,
+    cues: u64,
+    /// Packets pushed before the streams were added.
+    waiting: Vec<Packet>,
 }
 
 /// The video encoders to try, or the GIF writer.
@@ -216,6 +231,7 @@ impl ExportSession {
             sink,
             video: None,
             audio: None,
+            subtitles: Vec::new(),
             fallbacks: Vec::new(),
         };
         match session.open_streams(settings, video_plan, global_header) {
@@ -306,6 +322,31 @@ impl ExportSession {
         audio.push(planes, &mut self.sink)
     }
 
+    /// Encodes the next cue of subtitle stream `stream` (an index into
+    /// [`ExportSettings::subtitles`]). Cues of a stream come in time order and may not
+    /// overlap; streams are independent of each other and of the pictures.
+    pub fn push_subtitle(&mut self, stream: usize, cue: &SubtitleCue) -> Result<()> {
+        let Some(out) = self.subtitles.get_mut(stream) else {
+            return Err(ExportError::Input(format!(
+                "this export has no subtitle stream {stream}"
+            )));
+        };
+        if cue.start_ms < out.end_ms.max(0) || cue.end_ms <= cue.start_ms {
+            return Err(ExportError::Input(format!(
+                "subtitle cue {} ms to {} ms after a cue ending at {} ms",
+                cue.start_ms, cue.end_ms, out.end_ms
+            )));
+        }
+        let packet = out.encoder.encode(cue)?;
+        out.end_ms = cue.end_ms;
+        out.cues += 1;
+        match &mut self.sink {
+            Sink::Waiting { .. } => out.waiting.push(packet),
+            sink => write_packet(sink, out.stream, packet)?,
+        }
+        Ok(())
+    }
+
     /// Drains the encoders and closes the file.
     pub fn finish(mut self) -> Result<ExportSummary> {
         let mut samples = 0;
@@ -325,6 +366,7 @@ impl ExportSession {
         self.commit()?;
         let video_encoder = self.video_encoder().map(str::to_string);
         let audio_encoder = self.audio_encoder().map(str::to_string);
+        let subtitle_cues = self.subtitles.iter().map(|s| s.cues).sum();
         if let Some(VideoOut {
             kind: VideoKind::Gif(gif),
             ..
@@ -351,6 +393,7 @@ impl ExportSession {
             samples,
             video_encoder,
             audio_encoder,
+            subtitle_cues,
             fallbacks: self.fallbacks,
         })
     }
@@ -379,6 +422,18 @@ impl ExportSession {
                 return Err(ExportError::Settings("this container has no audio".into()));
             }
             self.audio = Some(open_audio(a, global_header)?);
+        }
+        if let Some(codec) = settings.container.subtitle_codec() {
+            for subtitles in &settings.subtitles {
+                self.subtitles.push(SubtitleOut {
+                    encoder: SubtitleEncoder::open(codec, global_header)?,
+                    settings: subtitles.clone(),
+                    stream: 0,
+                    end_ms: 0,
+                    cues: 0,
+                    waiting: Vec::new(),
+                });
+            }
         }
         if self.video.as_ref().is_none_or(|v| v.trial.is_none()) {
             self.commit()?;
@@ -409,9 +464,22 @@ impl ExportSession {
         if let Some(out) = self.audio.as_mut() {
             out.stream = muxer.add_stream(&out.encoder, None)?;
         }
+        for out in &mut self.subtitles {
+            out.stream = muxer.add_subtitle_stream(&out.encoder)?;
+            muxer.set_stream_metadata(out.stream, "language", &out.settings.language)?;
+            if let Some(title) = &out.settings.title {
+                muxer.set_stream_metadata(out.stream, "title", title)?;
+                muxer.set_stream_metadata(out.stream, "handler_name", title)?;
+            }
+        }
         muxer.write_header()?;
         if let Some(out) = &self.audio {
             for packet in audio {
+                muxer.write_packet(out.stream, packet)?;
+            }
+        }
+        for out in &mut self.subtitles {
+            for packet in out.waiting.drain(..) {
                 muxer.write_packet(out.stream, packet)?;
             }
         }

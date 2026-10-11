@@ -18,6 +18,7 @@ pub mod params;
 pub mod relink;
 pub mod schema;
 pub mod settings;
+pub mod subtitle_export;
 pub mod time;
 pub mod transition;
 pub mod validate;
