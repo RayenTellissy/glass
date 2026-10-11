@@ -1,7 +1,10 @@
 //! Typed errors for edit operations.
 
-use crate::id::{EffectId, ItemId, MarkerId, MediaId, SequenceId, TrackId, TransitionId};
+use crate::id::{
+    BinId, EffectId, ItemId, MarkerId, MediaId, NodeId, SequenceId, TrackId, TransitionId,
+};
 use crate::keyframe::HandleSide;
+use crate::media_pool::PoolError;
 use crate::model::TrackKind;
 use crate::settings::CacheFolder;
 use crate::time::{Rational, Time, TimeError};
@@ -57,6 +60,14 @@ pub enum EditError {
     TrackIndex { index: usize, len: usize },
     #[error("track {0} cannot have an empty name")]
     EmptyTrackName(TrackId),
+    #[error("track {0} is locked")]
+    TrackLocked(TrackId),
+    #[error("a {kind:?} track has no {switch} switch")]
+    NoSuchSwitch {
+        track: TrackId,
+        kind: TrackKind,
+        switch: &'static str,
+    },
     #[error("an item cannot move from a {from:?} track to a {to:?} track")]
     TrackKindMismatch { from: TrackKind, to: TrackKind },
     #[error("source time would go before the start of the media: {0} s")]
@@ -178,6 +189,22 @@ pub enum EditError {
     BreakApartSpeed { item: ItemId, speed: Rational },
     #[error("the sequence has no {kind:?} track number {} for the nested items", index + 1)]
     BreakApartNoTrack { kind: TrackKind, index: usize },
+    #[error("no bin {0}")]
+    UnknownBin(BinId),
+    #[error("the root bin cannot be renamed, moved or removed")]
+    RootBin,
+    #[error("a bin cannot move into itself or one of its own bins")]
+    BinCycle,
+    #[error("id {0} is already in use")]
+    IdInUse(NodeId),
+    #[error("media {media} is used by clip {item}")]
+    MediaInUse { media: MediaId, item: ItemId },
+    #[error("media {0} cannot have an empty name")]
+    EmptyMediaName(MediaId),
+    #[error("a bin cannot have an empty name")]
+    EmptyBinName,
+    #[error("a tag cannot be empty")]
+    EmptyTag,
     #[error("media {0} is relinked twice in one batch")]
     RelinkTwice(MediaId),
     #[error("media {0} cannot be relinked to an empty path")]
@@ -190,4 +217,17 @@ pub enum EditError {
     },
     #[error(transparent)]
     Time(#[from] TimeError),
+}
+
+impl From<PoolError> for EditError {
+    fn from(error: PoolError) -> Self {
+        match error {
+            PoolError::NoSuchBin(bin) => EditError::UnknownBin(bin),
+            PoolError::NoSuchItem(media) => EditError::UnknownMedia(media),
+            PoolError::DuplicateItem(media) => EditError::IdInUse(media.node()),
+            PoolError::DuplicateBin(bin) => EditError::IdInUse(bin.node()),
+            PoolError::RootBin => EditError::RootBin,
+            PoolError::BinCycle => EditError::BinCycle,
+        }
+    }
 }

@@ -25,8 +25,8 @@
 //! [`project::Project::relink_media`].
 //!
 //! Applying is [`apply`]: one `relink_media` edit for the whole batch, committed with
-//! `EditLabel::Relink`; [`mark_relinked`] then brings the sources back online in the
-//! availability map and the media pool.
+//! `EditLabel::Relink` (which also points the media pool items at their new files);
+//! [`mark_relinked`] then brings the sources back online in the availability map.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -37,7 +37,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use media::ContentHash;
-use project::media_pool::{Facts, MediaKind, MediaPool, MediaStatus};
+use project::media_pool::{Facts, MediaKind};
 use project::{EditError, MediaId, Project, Relink, Time};
 
 use super::classify::{FileKind, MediaClass, classify};
@@ -73,37 +73,32 @@ pub struct RelinkTarget {
     pub clips: usize,
 }
 
-/// The offline sources of `project`, in id order, with what the pool knows of them.
-pub fn targets(
-    project: &Project,
-    pool: Option<&MediaPool>,
-    availability: &MediaAvailability,
-) -> Vec<RelinkTarget> {
+/// The offline sources of `project`, in id order, with what its media pool knows of
+/// them.
+pub fn targets(project: &Project, availability: &MediaAvailability) -> Vec<RelinkTarget> {
     availability
         .offline()
         .filter_map(|(id, _)| project.media().get(id))
-        .map(|media| {
-            let path = PathBuf::from(&media.path);
-            let item = pool.and_then(|p| p.item(media.id));
-            let class = item
-                .map(|i| class_of_kind(i.kind))
-                .or_else(|| match classify(&path) {
-                    FileKind::Media(class) => Some(class),
-                    _ => None,
-                });
+        .map(|item| {
+            let path = PathBuf::from(&item.path);
+            let class = Some(class_of_kind(item.kind));
             RelinkTarget {
-                media: media.id,
-                name: item.map_or_else(|| stem(&path), |i| i.name.clone()),
-                content_hash: media.content_hash.clone(),
-                facts: item.map(|i| i.facts.clone()),
-                size_bytes: item.map(|i| i.size_bytes).filter(|s| *s > 0),
+                media: item.id,
+                name: if item.name.is_empty() {
+                    stem(&path)
+                } else {
+                    item.name.clone()
+                },
+                content_hash: item.content_hash.clone(),
+                facts: Some(item.facts.clone()).filter(|f| *f != Facts::default()),
+                size_bytes: Some(item.size_bytes).filter(|s| *s > 0),
                 class,
                 used_until: project
-                    .source_used_until(media.id)
+                    .source_used_until(item.id)
                     .ok()
                     .flatten()
                     .map(Time::as_secs_f64),
-                clips: project.clip_count(media.id),
+                clips: project.clip_count(item.id),
                 path,
             }
         })
@@ -884,26 +879,11 @@ pub fn apply(project: &Project, choices: &[Choice]) -> Result<Project, EditError
     project.relink_media(&relinks)
 }
 
-/// After [`apply`]: the chosen sources are online, and the pool's items point at their
-/// new files.
-pub fn mark_relinked(
-    choices: &[Choice],
-    availability: &mut MediaAvailability,
-    pool: Option<&mut MediaPool>,
-) {
+/// After [`apply`]: the chosen sources are online (the edit already pointed the media
+/// pool's items at their new files).
+pub fn mark_relinked(choices: &[Choice], availability: &mut MediaAvailability) {
     for c in choices {
         availability.set(c.media, Availability::Online);
-    }
-    if let Some(pool) = pool {
-        for c in choices {
-            let _ = pool.update_item(c.media, |item| {
-                item.path = c.candidate.path.clone();
-                if !c.candidate.content_hash.is_empty() {
-                    item.content_hash = Some(c.candidate.content_hash.clone());
-                }
-                item.status = MediaStatus::Online;
-            });
-        }
     }
 }
 

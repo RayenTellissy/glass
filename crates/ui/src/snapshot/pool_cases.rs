@@ -5,9 +5,7 @@
 use std::collections::BTreeSet;
 
 use egui::{Rect, vec2};
-use project::media_pool::{
-    ColourLabel, Facts, MediaItem, MediaKind, MediaPool, MediaStatus, OfflineReason, Query, SortBy,
-};
+use project::media_pool::{ColourLabel, Facts, MediaItem, MediaKind, MediaPool, Query, SortBy};
 use project::{BinId, MediaId};
 
 use crate::panels::media_pool::{
@@ -37,8 +35,9 @@ struct Clip {
     offline: bool,
 }
 
-/// The `Selects` bin of the harbour film, with label names.
-fn sample_pool() -> (MediaPool, Vec<MediaId>) {
+/// The `Selects` bin of the harbour film, with label names, and the clips whose files
+/// are offline (engine state, beside the pool).
+fn sample_pool() -> (MediaPool, Vec<MediaId>, BTreeSet<MediaId>) {
     let mut pool = MediaPool::new(t!("sample.pool.project"));
     for (label, name) in [
         (ColourLabel::Amber, t!("sample.pool.label.selects")),
@@ -167,6 +166,7 @@ fn sample_pool() -> (MediaPool, Vec<MediaId>) {
             offline: true,
         },
     ];
+    let mut offline = BTreeSet::new();
     let ids = clips
         .into_iter()
         .map(|c| {
@@ -191,24 +191,23 @@ fn sample_pool() -> (MediaPool, Vec<MediaId>) {
             item.facts.audio_channels = 2;
             item.facts.sample_rate = 48_000;
             item.label = c.label;
+            let id = pool.add_item(bin, item).expect("bin exists");
             if c.offline {
-                item.status = MediaStatus::Offline {
-                    reason: OfflineReason::Missing,
-                };
+                offline.insert(id);
             }
-            pool.add_item(bin, item).expect("bin exists")
+            id
         })
         .collect();
-    (pool, ids)
+    (pool, ids, offline)
 }
 
-/// Rows for `ids` with the engine's side: proxies, analysis.
-fn rows(pool: &MediaPool, ids: &[MediaId]) -> Vec<ItemRow> {
+/// Rows for `ids` with the engine's side: availability, proxies, analysis.
+fn rows(pool: &MediaPool, ids: &[MediaId], offline: &BTreeSet<MediaId>) -> Vec<ItemRow> {
     ids.iter()
         .filter_map(|id| pool.item(*id))
         .enumerate()
         .map(|(i, item)| {
-            let mut row = ItemRow::from_item(item);
+            let mut row = ItemRow::from_item(item, offline.contains(&item.id));
             match i {
                 0 => row.proxy = ProxyState::Ready,
                 3 => row.proxy = ProxyState::Making(0.31),
@@ -275,8 +274,8 @@ fn panel(ui: &mut egui::Ui, draw: impl FnOnce(&mut egui::Ui, Rect)) {
 /// The docked panel at real size: bins with `Selects` open, eight clips in every state.
 pub(super) fn grid(ui: &mut egui::Ui) {
     panel(ui, |ui, rect| {
-        let (pool, ids) = sample_pool();
-        let items = rows(&pool, &ids);
+        let (pool, ids, offline) = sample_pool();
+        let items = rows(&pool, &ids, &offline);
         let mut view = MediaPoolView {
             view: PoolView::Grid,
             bins: bins(),
@@ -297,10 +296,10 @@ pub(super) fn grid(ui: &mut egui::Ui) {
 /// The same panel widened into the list, searching `harbour` with two filters.
 pub(super) fn list(ui: &mut egui::Ui) {
     panel(ui, |ui, rect| {
-        let (pool, ids) = sample_pool();
+        let (pool, ids, offline) = sample_pool();
         let order = [0, 1, 2, 4, 7, 3];
         let items: Vec<ItemRow> = {
-            let all = rows(&pool, &ids);
+            let all = rows(&pool, &ids, &offline);
             order.iter().map(|i| all[*i].clone()).collect()
         };
         let query = Query {
@@ -330,7 +329,7 @@ pub(super) fn list(ui: &mut egui::Ui) {
 /// The colour label menu with `Amber · Selects` current.
 pub(super) fn label_menu(ui: &mut egui::Ui) {
     panel(ui, |ui, rect| {
-        let (pool, _) = sample_pool();
+        let (pool, _, _) = sample_pool();
         let _ = media_pool::label_menu(
             ui,
             rect.min + vec2(16.0, 16.0),

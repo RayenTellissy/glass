@@ -13,7 +13,7 @@ use engine::media_mgmt::relink::{
 };
 use media::ContentHash;
 use project::history::{EditLabel, History};
-use project::media_pool::{MediaItem, MediaKind, MediaPool};
+use project::media_pool::{MediaItem, MediaKind};
 use project::{ClipSpec, EditError, MediaId, Project, Rational, Time, TimeRange, TrackKind};
 
 const FPS: Rational = Rational::new(25, 1);
@@ -50,30 +50,27 @@ fn copy(from: &Path, to: &Path) {
 /// one clip each.
 struct Imported {
     project: Project,
-    pool: MediaPool,
     ids: Vec<MediaId>,
 }
 
 fn import(files: &[(&Path, f64)]) -> Imported {
     let mut project = Project::new("uid-relink", "Harbour film");
-    let mut pool = MediaPool::new("Harbour film");
     let mut ids = Vec::new();
     let mut entries = Vec::new();
     for (path, _) in files {
-        let hash = ContentHash::of_file(path).expect("hash").to_hex();
-        let (p, id) = project
-            .add_media(hash.clone(), path.to_string_lossy())
-            .expect("media");
-        project = p;
         let mut item = MediaItem::new(
             path.file_stem().expect("stem").to_string_lossy(),
             MediaKind::Video,
-            *path,
+            path.to_string_lossy(),
         );
         item.facts = facts_of(&media::probe(path).expect("probe"));
-        item.content_hash = Some(hash);
+        item.content_hash = ContentHash::of_file(path).expect("hash").to_hex();
         item.size_bytes = std::fs::metadata(path).expect("size").len();
-        pool.insert_item(id, pool.root(), item).expect("pool");
+        let (p, new) = project
+            .import_media(project.media().root(), [item])
+            .expect("media");
+        project = p;
+        let id = new[0];
         ids.push(id);
         entries.push(id);
     }
@@ -97,11 +94,7 @@ fn import(files: &[(&Path, f64)]) -> Imported {
             .0;
         at += len + 10;
     }
-    Imported {
-        project: p,
-        pool,
-        ids,
-    }
+    Imported { project: p, ids }
 }
 
 fn run(request: &SearchRequest) -> SearchResult {
@@ -153,7 +146,7 @@ fn moved_renamed_and_reencoded_files_are_told_apart() {
 
     let availability = check_project(&imported.project, Verify::Quick);
     assert_eq!(availability.offline_count(), 3);
-    let targets = relink::targets(&imported.project, Some(&imported.pool), &availability);
+    let targets = relink::targets(&imported.project, &availability);
     assert_eq!(targets.len(), 3);
     assert_eq!(targets[0].clips, 1);
     assert!((targets[0].used_until.expect("used") - 2.4).abs() < 1e-9);
@@ -245,13 +238,18 @@ fn moved_renamed_and_reencoded_files_are_told_apart() {
     assert!(!after.is_offline(ida) && !after.is_offline(idb));
     assert!(after.is_offline(idc));
     let mut availability = availability;
-    let mut pool = imported.pool.clone();
-    relink::mark_relinked(&choices, &mut availability, Some(&mut pool));
+    relink::mark_relinked(&choices, &mut availability);
     assert_eq!(availability.offline_count(), 1);
+    // The edit pointed the pool item at its new file and kept the rest of it.
+    let item = next.media().get(idb).expect("item");
     assert_eq!(
-        pool.item(idb).expect("item").path,
-        new.join("Card/Card B/gulls_final.mp4")
+        item.path,
+        new.join("Card/Card B/gulls_final.mp4").to_string_lossy()
     );
+    let mut old = project::MediaItem::clone(imported.project.media().get(idb).expect("item"));
+    old.path.clone_from(&item.path);
+    old.content_hash.clone_from(&item.content_hash);
+    assert_eq!(**item, old);
     history.undo();
     assert!(history.current().content_eq(&imported.project));
 
@@ -293,7 +291,7 @@ fn one_found_clip_brings_the_rest_by_the_same_move() {
     std::fs::rename(dir.join("Volumes"), &new).expect("move");
 
     let availability = check_project(&imported.project, Verify::Quick);
-    let targets = relink::targets(&imported.project, Some(&imported.pool), &availability);
+    let targets = relink::targets(&imported.project, &availability);
     // Only Card A is searched: B002 comes back by repeating A014's move.
     let search = RelinkSearch::start(SearchRequest {
         targets: targets.clone(),
@@ -336,7 +334,7 @@ fn a_search_can_be_cancelled() {
     let availability = check_project(&p, Verify::Quick);
     let cancel = AtomicBool::new(true);
     let request = SearchRequest {
-        targets: relink::targets(&p, None, &availability),
+        targets: relink::targets(&p, &availability),
         folders: vec![dir.clone()],
         ..SearchRequest::default()
     };

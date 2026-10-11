@@ -10,13 +10,14 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use project::media_pool::{Facts, Gps, MediaItem, MediaKind, Metadata, ROOT};
 use project::params::{ParamDef, ParamSchema, ParamValue, Range, effects};
 use project::schema::{self, LoadError, OLDEST_VERSION, SCHEMA_VERSION};
 use project::{
     Alignment, BlendMode, CacheFolder, ChannelLayout, Clip, ClipParam, ClipSource, ClipSpec,
     ColourLabel, ColourSpace, Crop, Handle, HandleSide, Interpolation, KeyTarget, MarkerOwner,
     MarkerSpec, MediaId, Project, ProjectSettings, Rational, Resolution, SequenceFormat, SpeedKeep,
-    Time, TimeRange, TodoState, TrackKind, Transform, TransitionSpec,
+    Time, TimeRange, TodoState, TrackHeight, TrackKind, Transform, TransitionSpec,
 };
 use serde_json::Value;
 
@@ -516,6 +517,86 @@ fn nested() -> Project {
     .0
 }
 
+/// The project in every `*-pool.json` fixture (from v9): a media pool with nested bins,
+/// imported items with their facts, metadata, labels, tags and card, a named label, and
+/// tracks with every switch set.
+fn pool() -> Project {
+    let p = Project::new("fixture-pool", "Harbour film");
+    let (p, day1) = p.add_bin(ROOT, "Day 1").expect("bin");
+    let (p, a_cam) = p.add_bin(day1, "A-cam").expect("bin");
+    let mut dusk = MediaItem::new(
+        "Harbour at dusk",
+        MediaKind::Video,
+        "/Volumes/A014/C003.MXF",
+    );
+    dusk.spanned = vec!["/Volumes/A014/C003_01.MXF".into()];
+    dusk.sidecars = vec!["/Volumes/A014/C003M01.XML".into()];
+    dusk.content_hash = "9f8e7d".into();
+    dusk.size_bytes = 4_812_345_678;
+    dusk.card = Some("XDCAM".into());
+    dusk.added_unix = 1_790_000_000;
+    dusk.facts = Facts {
+        duration_s: Some(122.12),
+        width: 3840,
+        height: 2160,
+        frame_rate: Some((24000, 1001)),
+        video_codec: Some("prores".into()),
+        video_profile: Some("HQ".into()),
+        bit_depth: 10,
+        chroma: Some("4:2:2".into()),
+        primaries: Some("bt709".into()),
+        audio_codec: Some("pcm_s24le".into()),
+        audio_channels: 2,
+        sample_rate: 48_000,
+        audio_bit_depth: Some(24),
+        container: Some("mxf".into()),
+        ..Facts::default()
+    };
+    dusk.metadata = Metadata {
+        camera_make: Some("Sony".into()),
+        camera_model: Some("ILME-FX6V".into()),
+        lens: Some("FE 24-70mm F2.8 GM II".into()),
+        focal_length_mm: Some(35.0),
+        f_number: Some(2.8),
+        iso: Some(800),
+        shutter: Some("1/48".into()),
+        timecode: Some("01:02:03:04".into()),
+        reel: Some("A014".into()),
+        gps: Some(Gps {
+            latitude: 60.3913,
+            longitude: 5.3221,
+            altitude_m: Some(12.5),
+        }),
+        created: Some("2026-08-12T19:42:07+02:00".into()),
+    };
+    dusk.label = Some(ColourLabel::Amber);
+    dusk.tags = vec!["Golden hour".into(), "Wide".into()];
+    let mut gulls = MediaItem::new("Gulls", MediaKind::Audio, "/footage/gulls.wav");
+    gulls.content_hash = "1a2b3c".into();
+    let (p, ids) = p.import_media(a_cam, [dusk]).expect("import");
+    let (p, more) = p.import_media(day1, [gulls]).expect("import");
+    let p = p
+        .set_label_name(ColourLabel::Amber, "Selects")
+        .expect("label name");
+    let (p, seq) = p.add_sequence("Main", FPS, 48_000).expect("sequence");
+    let (p, v2) = p.add_track(seq, TrackKind::Video, "V2", None).expect("v2");
+    let (p, v1) = p.add_track(seq, TrackKind::Video, "V1", None).expect("v1");
+    let (p, a1) = p.add_track(seq, TrackKind::Audio, "A1", None).expect("a1");
+    let (p, a2) = p.add_track(seq, TrackKind::Audio, "A2", None).expect("a2");
+    let (p, _) = p
+        .insert_clip(v1, clip(ids[0], Time::ZERO, frames(50), Time::ZERO))
+        .expect("clip");
+    let (p, _) = p
+        .insert_clip(a1, clip(more[0], Time::ZERO, Time::seconds(2), Time::ZERO))
+        .expect("clip");
+    let p = p.set_track_visible(v2, false).expect("hide");
+    let p = p.set_track_height(v2, TrackHeight::Small).expect("height");
+    let p = p.set_track_locked(v1, true).expect("lock");
+    let p = p.set_track_height(v1, TrackHeight::Large).expect("height");
+    let p = p.set_track_muted(a1, true).expect("mute");
+    p.set_track_solo(a2, true).expect("solo")
+}
+
 /// The project each fixture name was saved from.
 fn builder(name: &str) -> Project {
     match name {
@@ -526,6 +607,7 @@ fn builder(name: &str) -> Project {
         "settings" => settings(),
         "keyframes" => keyframes(),
         "nested" => nested(),
+        "pool" => pool(),
         other => panic!("no builder for {other} fixtures"),
     }
 }
@@ -590,6 +672,7 @@ fn the_current_version_fixtures_are_what_save_writes() {
         "settings",
         "keyframes",
         "nested",
+        "pool",
     ] {
         let bytes = schema::save(&builder(name));
         let path = fixtures_dir().join(format!("v{SCHEMA_VERSION}-{name}.json"));
@@ -627,7 +710,7 @@ fn v1_media_list_becomes_media_refs() {
     let path = fixtures_dir().join("v1-basic.json");
     let v1: Value = serde_json::from_slice(&read(&path)).expect("JSON");
     assert!(v1["project"]["media"].is_array());
-    let migrated = schema::migrate(1, v1["project"].clone()).expect("migrates");
+    let migrated = schema::migrate_v1_to_v2(v1["project"].clone()).expect("migrates");
     assert_eq!(migrated["media"]["refs"], v1["project"]["media"]);
 
     let loaded = schema::load(&read(&path)).expect("loads");
@@ -811,6 +894,101 @@ fn v7_sequences_gain_compound_false() {
         }
         assert!(loaded.content_eq(&builder(name)), "{name}");
     }
+}
+
+#[test]
+fn v8_media_becomes_the_pool_and_tracks_gain_their_switches() {
+    for name in [
+        "basic",
+        "tracks",
+        "props",
+        "transitions",
+        "settings",
+        "keyframes",
+        "nested",
+    ] {
+        let path = fixtures_dir().join(format!("v8-{name}.json"));
+        let v8: Value = serde_json::from_slice(&read(&path)).expect("JSON");
+        let refs = v8["project"]["media"]["refs"].as_array().expect("refs");
+        let migrated = schema::migrate(8, v8["project"].clone()).expect("migrates");
+        assert_eq!(
+            migrated["media"]["bins"],
+            serde_json::json!([{ "id": 0, "name": v8["project"]["name"], "parent": null }]),
+            "{name}"
+        );
+        assert_eq!(migrated["media"]["label_names"], serde_json::json!({}));
+        let items = migrated["media"]["items"].as_array().expect("items");
+        assert_eq!(items.len(), refs.len(), "{name}");
+        for (item, old) in items.iter().zip(refs) {
+            for key in ["id", "path", "content_hash"] {
+                assert_eq!(item[key], old[key], "{name}: {key}");
+            }
+            assert_eq!(item["bin"], Value::from(0));
+            assert_eq!(item["tags"], serde_json::json!([]));
+            assert!(item["label"].is_null());
+        }
+
+        let loaded = schema::load(&read(&path)).expect("loads");
+        assert_eq!(
+            loaded.next_id(),
+            v8["project"]["next_id"].as_u64().expect("next id"),
+            "{name}: the root bin takes no id"
+        );
+        for item in loaded.media().items() {
+            let file = item.path.rsplit('/').next().expect("file");
+            let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
+            assert_eq!(item.name, stem, "{name}");
+            assert_eq!(item.kind, MediaKind::guess(&item.path), "{name}");
+            assert_eq!(item.facts, Facts::default());
+            assert!(item.metadata.is_empty());
+        }
+        for track in loaded.sequences().iter().flat_map(|s| s.tracks.iter()) {
+            assert!(!track.muted && !track.solo && track.visible && !track.locked);
+            assert_eq!(track.height, TrackHeight::Medium, "{name}");
+        }
+        assert!(loaded.content_eq(&builder(name)), "{name}");
+    }
+}
+
+#[test]
+fn the_pool_fixture_round_trips_the_pool_and_every_switch() {
+    let path = fixtures_dir().join(format!("v{SCHEMA_VERSION}-pool.json"));
+    let loaded = schema::load(&read(&path)).expect("loads");
+    assert!(loaded.content_eq(&pool()));
+    let pool = loaded.media();
+    let names: Vec<(&str, Option<u64>)> = pool
+        .bins()
+        .map(|b| (b.name.as_str(), b.parent.map(|p| p.0)))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("Harbour film", None),
+            ("Day 1", Some(0)),
+            ("A-cam", Some(1))
+        ]
+    );
+    assert_eq!(pool.label_name(ColourLabel::Amber), Some("Selects"));
+    let dusk = pool.items().next().expect("dusk");
+    assert_eq!(dusk.card.as_deref(), Some("XDCAM"));
+    assert_eq!(dusk.spanned.len(), 1);
+    assert_eq!(dusk.metadata.gps.expect("gps").latitude, 60.3913);
+    assert_eq!(dusk.facts.frame_rate, Some((24000, 1001)));
+    let seq = &loaded.sequences()[0];
+    let switches: Vec<(bool, bool, bool, bool, TrackHeight)> = seq
+        .tracks
+        .iter()
+        .map(|t| (t.muted, t.solo, t.visible, t.locked, t.height))
+        .collect();
+    assert_eq!(
+        switches,
+        [
+            (false, false, false, false, TrackHeight::Small),
+            (false, false, true, true, TrackHeight::Large),
+            (true, false, true, false, TrackHeight::Medium),
+            (false, true, true, false, TrackHeight::Medium),
+        ]
+    );
 }
 
 #[test]

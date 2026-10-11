@@ -1,5 +1,5 @@
-//! Phase 12's Done when, headless: a 16-track mix with buses, sends and automation plays
-//! without dropouts at a 256-frame buffer. The `glass-audio-decode` thread decodes and
+//! Phase 12's Done when, headless: a 16-track mix with buses, sends, automation and
+//! crossfades plays without dropouts at a 256-frame buffer. The `glass-audio-decode` thread decodes and
 //! resamples 16 files ahead of the playhead; this test's thread stands in for the device,
 //! calling the mixing callback every 256 frames at real-time pace for three seconds,
 //! counting underruns, allocations on the callback (a counting global allocator, so this
@@ -14,8 +14,9 @@ use common::timing::{self, Laps, Stat, Stopwatch};
 use engine::audio::OfflineOutput;
 use engine::audio::mixer::{Layout, Mixer, MixerConfig, Route, SendSpec};
 use engine::mix::{AudioPlayback, AudioPlaybackConfig, BusMix, MixSettings};
+use engine::project::audio_transition::{self, EQUAL_POWER, LINEAR, S_CURVE};
 use engine::project::params::ParamValue;
-use engine::project::{ClipParam, Curve, Interpolation, Key, KeyTarget};
+use engine::project::{Alignment, ClipParam, Curve, Interpolation, Key, KeyTarget, TransitionSpec};
 use mix_common::{Place, Tone, build, samples, temp_dir};
 
 /// The counting allocator, counting only on the thread that asks: the only unsafe code of
@@ -97,18 +98,56 @@ fn sixteen_tracks_play_without_dropouts_at_a_256_frame_buffer() {
             path
         })
         .collect();
+    // Tracks 1, 5, 9 and 13 hold the same file cut in two at 2 s, crossfaded below.
+    let cut = |t: usize| t % 4 == 1;
     let places: Vec<Vec<Place>> = (0..TRACKS)
         .map(|t| {
-            vec![Place {
-                media: t,
-                start: 0.0,
-                length: 4.5,
-                source_start: 0.25,
-            }]
+            if cut(t) {
+                vec![
+                    Place {
+                        media: t,
+                        start: 0.0,
+                        length: 2.0,
+                        source_start: 0.25,
+                    },
+                    Place {
+                        media: t,
+                        start: 2.0,
+                        length: 2.5,
+                        source_start: 2.25,
+                    },
+                ]
+            } else {
+                vec![Place {
+                    media: t,
+                    start: 0.0,
+                    length: 4.5,
+                    source_start: 0.25,
+                }]
+            }
         })
         .collect();
     let built = build(&files, &places);
     let mut project = built.project.clone();
+    // 0.1 s crossfades on the cut tracks (equal power, linear, S-curve, equal power) and
+    // 0.1 s fades in from nothing on tracks 2 and 10. Unoptimised test builds decode at
+    // little more than real time, so the extra readers of a crossfade are kept short
+    // enough for the 170 ms feed to absorb.
+    let curves = [EQUAL_POWER, LINEAR, S_CURVE];
+    for t in (1..TRACKS).step_by(4) {
+        let spec = audio_transition::crossfade_spec(
+            Some(built.clips[t][0]),
+            Some(built.clips[t][1]),
+            samples(0.1),
+            curves[t / 4 % 3],
+        );
+        project = project.add_transition(spec).unwrap().0;
+    }
+    for t in [2, 10] {
+        let mut spec = TransitionSpec::new(None, Some(built.clips[t][0]), samples(0.1));
+        spec.alignment = Alignment::Start;
+        project = project.add_transition(spec).unwrap().0;
+    }
     // Clip gain ramps on four clips.
     for t in (0..TRACKS).step_by(4) {
         let target = KeyTarget::Clip {

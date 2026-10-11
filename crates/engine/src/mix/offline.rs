@@ -31,7 +31,7 @@ impl OfflineMix {
     ) -> Result<Self, MixError> {
         let spec = graph_spec(project, sequence, settings, format, MIX_BLOCK)?;
         let graph = Graph::build(&spec)?;
-        let source = SequenceSource::build(project, sequence, format, None)?;
+        let source = SequenceSource::build(project, sequence, format, settings.declick, None)?;
         Ok(Self {
             source,
             graph,
@@ -63,8 +63,9 @@ impl OfflineMix {
         self.source.stats()
     }
 
-    /// Whether any audio clip plays (has media and a supported speed) within mix frames
-    /// `from..to`, whatever the mixer settings.
+    /// Whether any audio clip plays (has media and a supported speed, or is a nested
+    /// sequence with such a clip there) within mix frames `from..to`, transition handles
+    /// included, whatever the mixer settings.
     pub fn plays_between(&self, from: i64, to: i64) -> bool {
         self.source.plays_between(from, to)
     }

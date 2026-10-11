@@ -1,18 +1,18 @@
 //! Relinking: pointing media references at the files they moved to.
 //!
-//! A relink replaces only [`MediaRef`] nodes (path and content hash). Every sequence,
-//! track and clip stays the very same node, so trims, moves and effects made while the
-//! media was offline are kept as they are, and one batch is one undo step
+//! A relink changes only media pool items' path and content hash (their name, bin,
+//! labels and import facts stay). Every sequence, track and clip stays the very same
+//! node, so trims, moves and effects made while the media was offline are kept as they
+//! are, and one batch is one undo step
 //! ([`crate::EditLabel::Relink`]). Finding the new files is the engine's job
 //! (`engine::media_mgmt::relink`); this module only validates and applies the choice.
 //! Clips of nested sequences have no media and are never relinked.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use crate::error::EditError;
 use crate::id::{MediaId, SequenceId};
-use crate::model::{ClipSource, MediaRef, Project};
+use crate::model::{ClipSource, Project};
 use crate::time::Time;
 use crate::transition::needs;
 
@@ -80,9 +80,9 @@ impl Project {
         let mut seen = HashSet::new();
         let mut next = self.clone();
         for relink in relinks {
-            let Some(old) = self.media.get(relink.media) else {
+            if self.media.get(relink.media).is_none() {
                 return Err(EditError::UnknownMedia(relink.media));
-            };
+            }
             if !seen.insert(relink.media) {
                 return Err(EditError::RelinkTwice(relink.media));
             }
@@ -99,14 +99,10 @@ impl Project {
                     found,
                 });
             }
-            next.media.0.insert(
-                relink.media,
-                Arc::new(MediaRef {
-                    id: old.id,
-                    content_hash: relink.content_hash.clone(),
-                    path: relink.path.clone(),
-                }),
-            );
+            next.media.update_item(relink.media, |item| {
+                item.path.clone_from(&relink.path);
+                item.content_hash.clone_from(&relink.content_hash);
+            })?;
         }
         Ok(next)
     }

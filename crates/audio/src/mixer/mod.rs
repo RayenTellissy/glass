@@ -3,8 +3,8 @@
 //! (called directly), with the same code and the same result.
 //!
 //! **Signal flow.** Every track strip takes one feed of its clips' audio, already decoded,
-//! resampled to the graph's rate, mixed to its layout and scaled by clip gain (the engine's
-//! audio decode thread does that). A strip then applies its fader (dB), its pan and its
+//! resampled to the graph's rate, mixed to its layout and scaled by clip gain and fades
+//! (the engine's audio decode thread does that; crossfading clips overlap in the feed). A strip then applies its fader (dB), its pan and its
 //! mute and solo, and adds the result to its output: the master or a bus. Sends add the
 //! strip's signal to buses as well, before the fader (and pan) or after them, each at its
 //! own level. Buses are strips too (fader, pan, mute, output, sends) and run after every
@@ -34,13 +34,18 @@
 //! highest one is kept for the UI ([`MeterBank::clip`]); with [`MasterSpec::soft_clip`] on
 //! (off by default) the output passes a soft clipper that leaves everything up to -1 dBFS
 //! untouched and bends the rest towards full scale.
+//!
+//! **Fades** ([`fade`]): the crossfade and fade curves the engine applies to clips on
+//! their way into a feed (equal power, linear, S-curve), sample by sample.
 
 mod automation;
+pub mod fade;
 mod graph;
 pub mod meter;
 mod realtime;
 
 pub use automation::{Lane, LaneError, Point, Shape};
+pub use fade::FadeCurve;
 pub use graph::Graph;
 pub use meter::{ClipReading, MeterBank, MeterReading};
 pub use realtime::{

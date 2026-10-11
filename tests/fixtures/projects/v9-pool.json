@@ -1,0 +1,329 @@
+{
+  "format": "glass.project",
+  "schema_version": 9,
+  "project": {
+    "uid": "fixture-pool",
+    "name": "Harbour film",
+    "next_id": 12,
+    "settings": {
+      "sequence": {
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 30,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo"
+      },
+      "colour_space": "rec709",
+      "cache_folder": {
+        "relative": ".glass-cache"
+      }
+    },
+    "media": {
+      "bins": [
+        {
+          "id": 0,
+          "name": "Harbour film",
+          "parent": null
+        },
+        {
+          "id": 1,
+          "name": "Day 1",
+          "parent": 0
+        },
+        {
+          "id": 2,
+          "name": "A-cam",
+          "parent": 1
+        }
+      ],
+      "items": [
+        {
+          "id": 3,
+          "bin": 2,
+          "name": "Harbour at dusk",
+          "kind": "video",
+          "path": "/Volumes/A014/C003.MXF",
+          "spanned": [
+            "/Volumes/A014/C003_01.MXF"
+          ],
+          "sidecars": [
+            "/Volumes/A014/C003M01.XML"
+          ],
+          "content_hash": "9f8e7d",
+          "size_bytes": 4812345678,
+          "card": "XDCAM",
+          "added_unix": 1790000000,
+          "facts": {
+            "duration_s": 122.12,
+            "width": 3840,
+            "height": 2160,
+            "frame_rate": [
+              24000,
+              1001
+            ],
+            "video_codec": "prores",
+            "video_profile": "HQ",
+            "bit_depth": 10,
+            "chroma": "4:2:2",
+            "primaries": "bt709",
+            "hdr": null,
+            "audio_codec": "pcm_s24le",
+            "audio_channels": 2,
+            "sample_rate": 48000,
+            "audio_bit_depth": 24,
+            "sequence_frames": null,
+            "container": "mxf"
+          },
+          "metadata": {
+            "camera_make": "Sony",
+            "camera_model": "ILME-FX6V",
+            "lens": "FE 24-70mm F2.8 GM II",
+            "focal_length_mm": 35.0,
+            "f_number": 2.8,
+            "iso": 800,
+            "shutter": "1/48",
+            "timecode": "01:02:03:04",
+            "reel": "A014",
+            "gps": {
+              "latitude": 60.3913,
+              "longitude": 5.3221,
+              "altitude_m": 12.5
+            },
+            "created": "2026-08-12T19:42:07+02:00"
+          },
+          "label": "amber",
+          "tags": [
+            "Golden hour",
+            "Wide"
+          ]
+        },
+        {
+          "id": 4,
+          "bin": 1,
+          "name": "Gulls",
+          "kind": "audio",
+          "path": "/footage/gulls.wav",
+          "spanned": [],
+          "sidecars": [],
+          "content_hash": "1a2b3c",
+          "size_bytes": 0,
+          "card": null,
+          "added_unix": 0,
+          "facts": {
+            "duration_s": null,
+            "width": 0,
+            "height": 0,
+            "frame_rate": null,
+            "video_codec": null,
+            "video_profile": null,
+            "bit_depth": 0,
+            "chroma": null,
+            "primaries": null,
+            "hdr": null,
+            "audio_codec": null,
+            "audio_channels": 0,
+            "sample_rate": 0,
+            "audio_bit_depth": null,
+            "sequence_frames": null,
+            "container": null
+          },
+          "metadata": {
+            "camera_make": null,
+            "camera_model": null,
+            "lens": null,
+            "focal_length_mm": null,
+            "f_number": null,
+            "iso": null,
+            "shutter": null,
+            "timecode": null,
+            "reel": null,
+            "gps": null,
+            "created": null
+          },
+          "label": null,
+          "tags": []
+        }
+      ],
+      "label_names": {
+        "amber": "Selects"
+      }
+    },
+    "sequences": [
+      {
+        "id": 5,
+        "name": "Main",
+        "compound": false,
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 25,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo",
+        "markers": [],
+        "tracks": [
+          {
+            "id": 6,
+            "kind": "video",
+            "name": "V2",
+            "muted": false,
+            "solo": false,
+            "visible": false,
+            "locked": false,
+            "height": "small",
+            "items": [],
+            "transitions": []
+          },
+          {
+            "id": 7,
+            "kind": "video",
+            "name": "V1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": true,
+            "height": "large",
+            "items": [
+              {
+                "id": 10,
+                "range": {
+                  "start": "0",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 3,
+                "source_start": "0",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "keyframes": {},
+                "markers": []
+              }
+            ],
+            "transitions": []
+          },
+          {
+            "id": 8,
+            "kind": "audio",
+            "name": "A1",
+            "muted": true,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
+            "items": [
+              {
+                "id": 11,
+                "range": {
+                  "start": "0",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 4,
+                "source_start": "0",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "keyframes": {},
+                "markers": []
+              }
+            ],
+            "transitions": []
+          },
+          {
+            "id": 9,
+            "kind": "audio",
+            "name": "A2",
+            "muted": false,
+            "solo": true,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
+            "items": [],
+            "transitions": []
+          }
+        ]
+      }
+    ]
+  }
+}

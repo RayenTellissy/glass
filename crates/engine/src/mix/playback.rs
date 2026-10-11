@@ -56,8 +56,8 @@ pub struct FeedStats {
     pub rendered_frames: u64,
     /// Graphs sent to the callback.
     pub swaps: u64,
-    /// Clips that went silent: missing media, nested sequences, unsupported speed,
-    /// unopenable or unreadable files.
+    /// Clips that went silent: missing media, unsupported speed, unopenable or unreadable
+    /// files, nested sequences that cannot be mixed (`SourceStats::silent`).
     pub silent_clips: u64,
 }
 
@@ -105,7 +105,7 @@ impl AudioPlayback {
             sample_rate: mixer.sample_rate,
             layout: mixer.layout,
         };
-        let source = SequenceSource::build(&project, sequence, format, None)?;
+        let source = SequenceSource::build(&project, sequence, format, settings.declick, None)?;
         let meters = Arc::new(ArrayQueue::new(1));
         let stats = Arc::new(SharedStats::default());
         let feed = send_graph(
@@ -165,7 +165,9 @@ impl AudioPlayback {
         let _ = self.tx.send(Message::Update(Box::new((project, settings))));
     }
 
-    /// Changes one strip setting (a fader move, a mute) at once.
+    /// Changes one strip setting (a fader move, a mute) at once. A track's mute and solo
+    /// are project switches: this applies them to the playing graph only, so make the
+    /// edit too and [`update`](Self::update) with it, or the next graph forgets them.
     pub fn set(&self, strip: StripRef, param: Param) {
         let _ = self.tx.send(Message::Set(strip, param));
     }
@@ -299,7 +301,13 @@ impl Feeder {
                 let (project, settings) = *update;
                 let previous =
                     std::mem::replace(&mut self.source, SequenceSource::empty(self.format));
-                match SequenceSource::build(&project, self.sequence, self.format, Some(previous)) {
+                match SequenceSource::build(
+                    &project,
+                    self.sequence,
+                    self.format,
+                    settings.declick,
+                    Some(previous),
+                ) {
                     Ok(source) => {
                         self.source = source;
                         self.project = project;
@@ -308,9 +316,13 @@ impl Feeder {
                     }
                     Err(error) => {
                         // Keep playing the snapshot before (its readers reopen).
-                        if let Ok(source) =
-                            SequenceSource::build(&self.project, self.sequence, self.format, None)
-                        {
+                        if let Ok(source) = SequenceSource::build(
+                            &self.project,
+                            self.sequence,
+                            self.format,
+                            self.settings.declick,
+                            None,
+                        ) {
                             self.source = source;
                         }
                         Err(error)
@@ -326,38 +338,37 @@ impl Feeder {
 
     /// Keeps a setting change for graphs built later.
     fn remember(&mut self, strip: StripRef, param: Param) {
-        let apply =
-            |fader: &mut f64, pan: &mut f64, mute: &mut bool, sends: &mut Vec<_>| match param {
-                Param::Fader(db) => *fader = db,
-                Param::Pan(p) => *pan = p,
-                Param::Mute(m) => *mute = m,
-                Param::Solo(_) => {}
-                Param::SendLevel { send, level_db } => {
-                    if let Some(s) = sends.get_mut(send) {
-                        let s: &mut audio::mixer::SendSpec = s;
-                        s.level_db = level_db;
-                    }
+        let apply = |fader: &mut f64,
+                     pan: &mut f64,
+                     mute: Option<&mut bool>,
+                     sends: &mut Vec<_>| match param {
+            Param::Fader(db) => *fader = db,
+            Param::Pan(p) => *pan = p,
+            Param::Mute(m) => {
+                if let Some(mute) = mute {
+                    *mute = m;
                 }
-            };
+            }
+            Param::Solo(_) => {}
+            Param::SendLevel { send, level_db } => {
+                if let Some(s) = sends.get_mut(send) {
+                    let s: &mut audio::mixer::SendSpec = s;
+                    s.level_db = level_db;
+                }
+            }
+        };
         match strip {
             StripRef::Track(id) => {
+                // Track mute and solo live in the project (see `set`).
                 let track = self.settings.track_mut(TrackId(id));
-                if let Param::Solo(solo) = param {
-                    track.solo = solo;
-                }
-                apply(
-                    &mut track.fader_db,
-                    &mut track.pan,
-                    &mut track.mute,
-                    &mut track.sends,
-                );
+                apply(&mut track.fader_db, &mut track.pan, None, &mut track.sends);
             }
             StripRef::Bus(id) => {
                 if let Some(bus) = self.settings.buses.iter_mut().find(|b| b.id == id) {
                     apply(
                         &mut bus.fader_db,
                         &mut bus.pan,
-                        &mut bus.mute,
+                        Some(&mut bus.mute),
                         &mut bus.sends,
                     );
                 }
@@ -383,8 +394,7 @@ impl Feeder {
             start,
             at,
         )?;
-        let source = self.source.stats();
-        let silent = source.missing_media + source.nested_clips + source.unsupported_speed;
+        let silent = self.source.stats().silent();
         self.stats
             .silent_clips
             .store(silent as u64, Ordering::Relaxed);
@@ -413,12 +423,7 @@ impl Feeder {
                 .feed_position
                 .store(self.feed.position().max(0) as u64, Ordering::Relaxed);
         }
-        let source = self.source.stats();
-        let silent = source.missing_media
-            + source.nested_clips
-            + source.unsupported_speed
-            + source.failed_opens
-            + source.decode_errors;
+        let silent = self.source.stats().silent();
         self.stats
             .silent_clips
             .store(silent as u64, Ordering::Relaxed);
