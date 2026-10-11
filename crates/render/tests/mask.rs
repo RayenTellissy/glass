@@ -6,7 +6,8 @@
 //! Shape coverage in the reference is the exact pixel area of each shape's polygon
 //! (`shape::reference`). Tolerances, per channel: 2e-3 for hard masks (the coverage's
 //! own straight-edge error plus f16 rounding), 4e-3 once feathered (the blur pairs taps
-//! in one bilinear fetch, whose hardware weights are fixed point).
+//! in one bilinear fetch, whose hardware weights are fixed point), 1e-2 for feathers
+//! blurred at lower resolution (0.03 within its scale of the layer's border).
 
 mod common;
 
@@ -21,6 +22,11 @@ use render::wgpu;
 
 const HARD: f64 = 2e-3;
 const FEATHERED: f64 = 4e-3;
+/// Feathers of 12 px and more blur at half or quarter resolution (`mask::plan`).
+const LOW_RESOLUTION: f64 = 1e-2;
+/// Within the blur's scale of the layer's border, where reading the low-resolution blur
+/// back holds its last texel instead of following the ramp.
+const AT_BORDER: f64 = 0.03;
 const SIZE: (u32, u32) = (96, 64);
 /// The layer's premultiplied colour (half transparent), above 1 in red.
 const COLOUR: [f32; 4] = [1.5, 0.25, 0.1, 0.5];
@@ -104,7 +110,8 @@ fn coverage(shape: &Shape) -> Vec<f64> {
         .collect()
 }
 
-/// The reference of `masks` over the layer, checked against the GPU within `tol`.
+/// The reference of `masks` over the layer, checked against the GPU within `tol` (and
+/// [`AT_BORDER`] next to the border when a feather blurs at lower resolution).
 fn check(gpu: &mut Gpu, masks: &[Mask], tol: f64, what: &str) -> Vec<f64> {
     let unions: Vec<Vec<f64>> = masks
         .iter()
@@ -118,19 +125,42 @@ fn check(gpu: &mut Gpu, masks: &[Mask], tol: f64, what: &str) -> Vec<f64> {
         .collect();
     let expected = mask::reference(masks, &unions, SIZE);
     let actual = gpu.render(masks);
+    let band = masks
+        .iter()
+        .map(|m| mask::plan(m.feather_radius()).scale)
+        .max()
+        .filter(|s| *s > 1)
+        .unwrap_or(0) as usize;
+    let (w, h) = (SIZE.0 as usize, SIZE.1 as usize);
+    let at_border = |i: usize| {
+        let (x, y) = (i % w, i / w);
+        x < band || y < band || x + band >= w || y + band >= h
+    };
     let mut worst = (0.0f64, 0);
+    let mut border = 0.0f64;
     for (i, (px, m)) in actual.iter().zip(&expected).enumerate() {
         for (c, want) in px.iter().zip(COLOUR) {
             // f16 output: relative rounding on top of the absolute tolerance.
             let want = f64::from(want) * m;
             let d = (f64::from(*c) - want).abs() - want.abs() * 2f64.powi(-11);
+            if at_border(i) {
+                border = border.max(d);
+                continue;
+            }
             if d > worst.0 {
                 worst = (d, i);
             }
         }
     }
     let (x, y) = (worst.1 % SIZE.0 as usize, worst.1 / SIZE.0 as usize);
-    eprintln!("{what}: max error {:.5} at ({x}, {y})", worst.0);
+    eprintln!(
+        "{what}: max error {:.5} at ({x}, {y}), {border:.5} within {band} px of the border",
+        worst.0
+    );
+    assert!(
+        border <= AT_BORDER,
+        "{what}: off by {border:.5} at the border"
+    );
     assert!(
         worst.0 <= tol,
         "{what}: off by {:.5} at ({x}, {y}): GPU {:?}, mask {}",
@@ -177,11 +207,16 @@ fn a_hard_mask_is_the_shapes_coverage() {
 #[test]
 fn a_feathered_mask_matches_the_reference() {
     let Some(mut gpu) = Gpu::new() else { return };
-    for feather in [0.5, 1.0, 3.0, 7.5, 20.0] {
+    for feather in [0.5, 1.0, 3.0, 7.5, 11.5, 12.0, 20.0, 40.0] {
+        let tol = if feather < 12.0 {
+            FEATHERED
+        } else {
+            LOW_RESOLUTION
+        };
         check(
             &mut gpu,
             &[Mask::new(vec![ellipse(40.0, 32.0, 24.0, 14.0)]).feathered(feather)],
-            FEATHERED,
+            tol,
             &format!("ellipse feathered {feather}"),
         );
     }
@@ -327,33 +362,69 @@ fn feathered_three_shape_mask_gpu_time() {
                 Point::new(w * 0.45, h * 0.3),
             ])),
         ];
-        let masks = [Mask::new(shapes).feathered(20.0)];
-        let layer = common::blank(&gpu.device, wgpu::TextureFormat::Rgba16Float, size)
-            .create_view(&Default::default());
-        let out = common::blank(&gpu.device, wgpu::TextureFormat::Rgba16Float, size);
-        let view = out.create_view(&Default::default());
-        let mut times = Vec::new();
-        for frame in 0..60 {
-            let mut g = Graph::new();
-            let input = g.import("layer", &layer);
-            let masked = mask::add_to_graph(&mut g, &gpu.renderer, input, size, &masks);
-            g.export(masked, &view);
-            g.compile().expect("compiles").execute(
-                &gpu.renderer,
-                &mut gpu.pool,
-                Some(&mut profiler),
-            );
-            let timings = profiler.wait(&gpu.device).expect("timed");
-            if frame >= 10 {
-                times.push(timings.total_ms.expect("total"));
+        let variants = [
+            (
+                "three shapes feathered 20 px",
+                Mask::new(shapes.clone()).feathered(20.0),
+            ),
+            (
+                "three shapes feathered 8 px",
+                Mask::new(shapes.clone()).feathered(8.0),
+            ),
+            ("three shapes hard", Mask::new(shapes.clone())),
+            (
+                "one shape feathered 20 px",
+                Mask::new(shapes[..1].to_vec()).feathered(20.0),
+            ),
+            ("one shape hard", Mask::new(shapes[..1].to_vec())),
+        ];
+        for (what, mask) in variants {
+            let masks = [mask];
+            let layer = common::blank(&gpu.device, wgpu::TextureFormat::Rgba16Float, size)
+                .create_view(&Default::default());
+            let out = common::blank(&gpu.device, wgpu::TextureFormat::Rgba16Float, size);
+            let view = out.create_view(&Default::default());
+            let mut times = Vec::new();
+            let mut passes: Vec<(String, Vec<f64>)> = Vec::new();
+            for frame in 0..60 {
+                let mut g = Graph::new();
+                let input = g.import("layer", &layer);
+                let masked = mask::add_to_graph(&mut g, &gpu.renderer, input, size, &masks);
+                g.export(masked, &view);
+                g.compile().expect("compiles").execute(
+                    &gpu.renderer,
+                    &mut gpu.pool,
+                    Some(&mut profiler),
+                );
+                let timings = profiler.wait(&gpu.device).expect("timed");
+                if frame >= 10 {
+                    times.push(timings.total_ms.expect("total"));
+                    for (i, pass) in timings.passes.iter().enumerate() {
+                        if passes.len() <= i {
+                            passes.push((pass.label.clone(), Vec::new()));
+                        }
+                        passes[i].1.extend(pass.gpu_ms);
+                    }
+                }
             }
+            let each: Vec<String> = passes
+                .iter_mut()
+                .map(|(label, t)| {
+                    t.sort_by(f64::total_cmp);
+                    format!(
+                        "{label} {:.3}",
+                        t.get(t.len() / 2).copied().unwrap_or(f64::NAN)
+                    )
+                })
+                .collect();
+            times.sort_by(f64::total_cmp);
+            let median = times[times.len() / 2];
+            let p99 = times[(times.len() * 99).div_ceil(100) - 1];
+            println!(
+                "{what} at {name}: GPU median {median:.3} ms, p99 \
+             {p99:.3} ms (pass medians, ms: {})",
+                each.join(", ")
+            );
         }
-        times.sort_by(f64::total_cmp);
-        let median = times[times.len() / 2];
-        let p99 = times[(times.len() * 99).div_ceil(100) - 1];
-        println!(
-            "three-shape mask feathered 20 px at {name}: GPU median {median:.3} ms, p99 \
-             {p99:.3} ms"
-        );
     }
 }

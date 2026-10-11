@@ -314,9 +314,10 @@ fn mask_hard(frame: u32) -> Scene {
     masked_bars(frame, vec![Mask::new(vec![mask_rect()])])
 }
 
-/// A rotated ellipse feathered by 8 px (16 on the canvas, the layer being doubled).
+/// A rotated ellipse feathered by 16 px (32 on the canvas, the layer being doubled),
+/// which blurs at half resolution.
 fn mask_feathered(frame: u32) -> Scene {
-    masked_bars(frame, vec![Mask::new(vec![mask_ellipse()]).feathered(8.0)])
+    masked_bars(frame, vec![Mask::new(vec![mask_ellipse()]).feathered(16.0)])
 }
 
 /// The ellipse inverted and slightly feathered: a soft hole showing the gradient.

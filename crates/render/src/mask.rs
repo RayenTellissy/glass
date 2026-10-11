@@ -10,7 +10,8 @@
 //!   whole pixels) and renormalised. It is symmetric, so a straight edge stays at 0.5
 //!   where it was and the ramp runs from about 0 at `feather` outside it to about 1 at
 //!   `feather` inside (0.0013 and 0.9987 before truncation). Pixels beyond the layer
-//!   repeat its border. 0 keeps the hard edge.
+//!   repeat its border. 0 keeps the hard edge. The GPU blurs feathers of 12 px and more
+//!   at half or quarter resolution ([`plan`]), within about 1% of this kernel.
 //! - **Invert** turns coverage `c` into `1 - c`, after the feather.
 //! - **Mode** combines the mask with the masks above it in the list: [`MaskMode::Union`]
 //!   takes the larger value, [`MaskMode::Intersection`] the smaller. The first mask
@@ -25,8 +26,7 @@ use crate::nodes::MaskNode;
 use crate::renderer::Renderer;
 use crate::shape::{CoverageNode, FillRule, Shape};
 
-/// The largest feather, in layer pixels: the blur reads about one texel per pixel of
-/// feather on each pass, so this bounds a pass at a few hundred fetches.
+/// The largest feather, in layer pixels (a quarter-resolution blur of 64 fetches a pass).
 pub const MAX_FEATHER: f32 = 250.0;
 
 /// How a mask combines with the masks above it.
@@ -109,22 +109,83 @@ pub fn kernel_radius(feather: f32) -> u32 {
     feather.max(0.0).ceil() as u32
 }
 
-/// `1 / (2 sigma^2)` of the feather's Gaussian, sigma being a third of the feather.
-pub fn falloff(feather: f32) -> f32 {
-    let sigma = feather.max(1e-6) / 3.0;
-    1.0 / (2.0 * sigma * sigma)
-}
-
-/// The feather's normalised kernel, offsets `-r..=r` with `r` = [`kernel_radius`]; `[1]`
-/// for no feather.
-pub fn kernel(feather: f32) -> Vec<f64> {
-    let r = kernel_radius(feather) as i32;
-    let falloff = f64::from(falloff(feather));
+/// A Gaussian of `sigma` sampled at offsets `-radius..=radius` and normalised.
+fn gaussian(sigma: f64, radius: u32) -> Vec<f64> {
+    let r = radius as i32;
+    let falloff = 1.0 / (2.0 * sigma * sigma);
     let weights: Vec<f64> = (-r..=r)
         .map(|k| (-f64::from(k * k) * falloff).exp())
         .collect();
     let total: f64 = weights.iter().sum();
     weights.into_iter().map(|w| w / total).collect()
+}
+
+/// The feather's normalised kernel, offsets `-r..=r` with `r` = [`kernel_radius`]; `[1]`
+/// for no feather.
+pub fn kernel(feather: f32) -> Vec<f64> {
+    gaussian(f64::from(feather.max(1e-6)) / 3.0, kernel_radius(feather))
+}
+
+/// `kernel` (offsets `-r..=r`) as the GPU reads it: neighbouring taps paired into one
+/// bilinear fetch each, as (offset in texels, weight). A pair's offset sits between its
+/// two texels in proportion to their weights, so the filtered fetch times the sum of the
+/// weights equals the two taps. Empty for a kernel of one tap.
+pub fn paired(kernel: &[f64]) -> Vec<[f32; 2]> {
+    if kernel.len() <= 1 {
+        return Vec::new();
+    }
+    let r = (kernel.len() / 2) as i64;
+    kernel
+        .chunks(2)
+        .zip((-r..=r).step_by(2))
+        .map(|(pair, k)| {
+            let w = pair.iter().sum::<f64>();
+            let second = pair.get(1).copied().unwrap_or(0.0);
+            let offset = if w > 0.0 {
+                k as f64 + second / w
+            } else {
+                k as f64
+            };
+            [offset as f32, w as f32]
+        })
+        .collect()
+}
+
+/// How the GPU blurs one feather.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FeatherPlan {
+    /// The blur runs at 1 / `scale` of the layer's resolution (1, 2 or 4).
+    pub scale: u32,
+    /// Each blur pass's fetches at that resolution ([`paired`]); empty for no feather.
+    pub fetches: Vec<[f32; 2]>,
+}
+
+/// The GPU's plan for `feather`: the exact [`kernel`] below 12 px. From 12 px the blur
+/// runs at half resolution, from 32 px at a quarter: the coverage is averaged over 2 x 2
+/// (4 x 4) pixels, blurred, and read back bilinearly, which together widen the blur by a
+/// variance of `(3 s^2 - 1) / 12` pixels squared at scale `s`; the low-resolution
+/// Gaussian is narrowed by that much, so the result stays within about 1% of the full
+/// kernel while each pass reads 8 (64) times fewer texels.
+pub fn plan(feather: f32) -> FeatherPlan {
+    let scale = match feather {
+        f if f < 12.0 => 1,
+        f if f < 32.0 => 2,
+        _ => 4,
+    };
+    if scale == 1 {
+        return FeatherPlan {
+            scale,
+            fetches: paired(&kernel(feather)),
+        };
+    }
+    let s = f64::from(scale);
+    let sigma = f64::from(feather) / 3.0;
+    let widened = (3.0 * s * s - 1.0) / 12.0;
+    let low = (sigma * sigma - widened).max(0.25).sqrt() / s;
+    FeatherPlan {
+        scale,
+        fetches: paired(&gaussian(low, kernel_radius(feather / scale as f32))),
+    }
 }
 
 /// `coverage` (rows of `size`) feathered: the separable Gaussian along rows, then
@@ -292,8 +353,87 @@ mod tests {
             // At the feather the Gaussian is exp(-4.5) of its peak (three sigma).
             if f.fract() == 0.0 {
                 let ratio = k[0] / k[k.len() / 2];
-                assert!((ratio - (-4.5f64).exp()).abs() < 1e-7, "{f}: {ratio}");
+                assert!((ratio - (-4.5f64).exp()).abs() < 1e-12, "{f}: {ratio}");
             }
+        }
+    }
+
+    #[test]
+    fn paired_fetches_reproduce_the_kernel() {
+        assert!(plan(0.0).fetches.is_empty());
+        for f in [0.5, 1.0, 2.5, 8.0, 11.9, 20.0, MAX_FEATHER] {
+            let k = kernel(f);
+            let pairs = paired(&k);
+            if f < 12.0 {
+                assert_eq!(
+                    plan(f),
+                    FeatherPlan {
+                        scale: 1,
+                        fetches: pairs.clone()
+                    }
+                );
+            }
+            assert_eq!(pairs.len(), k.len().div_ceil(2));
+            assert!(pairs.len() <= 256, "the shader holds 256 fetches");
+            let total: f64 = pairs.iter().map(|p| f64::from(p[1])).sum();
+            assert!((total - 1.0).abs() < 1e-5, "{f}: {total}");
+            // Bilinear fetches at the pairs' offsets weigh any row like the kernel does.
+            let r = k.len() / 2;
+            let row: Vec<f64> = (0..k.len() + 1).map(|i| ((i * 7919) % 13) as f64).collect();
+            let taps: f64 = k.iter().zip(&row).map(|(w, v)| w * v).sum();
+            let fetched: f64 = pairs
+                .iter()
+                .map(|&[o, w]| f64::from(w) * lerp(&row, f64::from(o) + r as f64))
+                .sum();
+            assert!((taps - fetched).abs() < 1e-4, "{f}: {taps} vs {fetched}");
+        }
+    }
+
+    /// `row` read bilinearly at `x` (texel `i` centred on `i`), clamped to its ends.
+    fn lerp(row: &[f64], x: f64) -> f64 {
+        let x = x.clamp(0.0, (row.len() - 1) as f64);
+        let i = (x.floor() as usize).min(row.len() - 2);
+        let t = x - i as f64;
+        row[i] * (1.0 - t) + row[i + 1] * t
+    }
+
+    #[test]
+    fn low_resolution_feathers_stay_close_to_the_full_kernel() {
+        // A step through the GPU's steps along one axis (the blur is separable): 2 x 2
+        // (4 x 4) averages, the narrowed Gaussian at low resolution, bilinear back up.
+        let n = 512;
+        for (f, edge) in [
+            (12.0, 256.0),
+            (20.0, 255.5),
+            (31.9, 256.3),
+            (32.0, 256.0),
+            (90.0, 250.7),
+            (MAX_FEATHER, 256.0),
+        ] {
+            let step: Vec<f64> = (0..n).map(|x| (edge - x as f64).clamp(0.0, 1.0)).collect();
+            let exact = feather(&step, (n as u32, 1), f);
+            let FeatherPlan { scale, fetches } = plan(f);
+            let s = scale as usize;
+            assert!(s > 1 && fetches.len() <= 256);
+            let low: Vec<f64> = step
+                .chunks(s)
+                .map(|c| c.iter().sum::<f64>() / s as f64)
+                .collect();
+            let blurred: Vec<f64> = (0..low.len())
+                .map(|i| {
+                    fetches
+                        .iter()
+                        .map(|&[o, w]| f64::from(w) * lerp(&low, i as f64 + f64::from(o)))
+                        .sum()
+                })
+                .collect();
+            let worst = (0..n)
+                .map(|x| {
+                    let at = (x as f64 + 0.5) / s as f64 - 0.5;
+                    (lerp(&blurred, at) - exact[x]).abs()
+                })
+                .fold(0.0, f64::max);
+            assert!(worst < 0.01, "feather {f} at 1/{s}: off by {worst}");
         }
     }
 

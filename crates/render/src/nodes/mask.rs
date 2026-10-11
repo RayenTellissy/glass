@@ -5,24 +5,25 @@ use crate::renderer::{Effect, Filter, Uniform};
 /// The mask textures' format: coverage 0 to 1 in the red channel.
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R16Float;
 
+/// `vec4` entries of the shader's `taps` array, two fetches each.
+const MAX_ENTRIES: usize = 128;
+
 /// One mask as the node draws it.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct Pass {
     /// Coverage inputs (its shapes), at least 1.
     shapes: usize,
     feather: f32,
+    blur: mask::FeatherPlan,
     invert: bool,
     mode: mask::MaskMode,
 }
 
 impl Pass {
-    fn blurred(&self) -> bool {
-        mask::kernel_radius(self.feather) > 0
-    }
-
-    /// Scratch textures its union and blur need.
+    /// Full-resolution scratch textures its union and blur need.
     fn scratch(&self) -> usize {
-        match (self.shapes, self.blurred()) {
+        let full_blur = self.blur.scale == 1 && !self.blur.fetches.is_empty();
+        match (self.shapes, full_blur) {
             (1, false) => 0,
             (1, true) | (2, false) => 1,
             _ => 2,
@@ -30,14 +31,18 @@ impl Pass {
     }
 }
 
+/// The low-resolution blur scales, each with two textures.
+const SCALES: [u32; 2] = [2, 4];
+
 /// Masks a layer: input 0 is the layer (working space, premultiplied), then the coverage
 /// of every mask's shapes in order (from [`crate::shape::CoverageNode`]s, the layer's
 /// size; one for a mask without shapes). Per mask, the shapes are unioned, feathered
-/// (horizontal pass, then a vertical one that also inverts and combines with the masks
-/// so far) into one of two `R16Float` masks used in turn; the last one multiplies the
-/// layer. Outputs: the masked layer, the combined mask, then scratch (none of them for no
-/// masks, which copies the layer). Build it with
-/// [`mask::add_to_graph`]; the CPU reference is [`mask::reference`].
+/// (a horizontal pass, then a vertical one that also inverts and combines with the masks
+/// so far; a wide feather is blurred at lower resolution, see [`mask::plan`]) into one of
+/// two `R16Float` masks used in turn; the last one multiplies the layer. Outputs: the
+/// masked layer, the combined mask, then scratch (none of them for no masks, which
+/// copies the layer). Build it with [`mask::add_to_graph`]; the CPU reference is
+/// [`mask::reference`].
 #[derive(Clone, Debug)]
 pub struct MaskNode {
     size: (u32, u32),
@@ -54,6 +59,7 @@ impl MaskNode {
                 .map(|m| Pass {
                     shapes: m.shapes.len().max(1),
                     feather: m.feather_radius(),
+                    blur: mask::plan(m.feather_radius()),
                     invert: m.invert,
                     mode: m.mode,
                 })
@@ -72,6 +78,18 @@ impl MaskNode {
 
     fn scratch(&self) -> usize {
         self.passes.iter().map(Pass::scratch).max().unwrap_or(0)
+    }
+
+    /// The low-resolution scales some mask blurs at.
+    fn scales(&self) -> impl Iterator<Item = u32> + '_ {
+        SCALES
+            .into_iter()
+            .filter(|s| self.passes.iter().any(|p| p.blur.scale == *s))
+    }
+
+    /// The size of the blur textures at `scale`.
+    fn low(&self, scale: u32) -> (u32, u32) {
+        (self.size.0.div_ceil(scale), self.size.1.div_ceil(scale))
     }
 }
 
@@ -121,17 +139,19 @@ impl Node for MaskNode {
     }
 
     fn outputs(&self, _inputs: &[TextureDesc]) -> Vec<TextureDesc> {
-        let (w, h) = self.size;
-        let mask = TextureDesc {
-            width: w,
-            height: h,
+        let mask = |(width, height)| TextureDesc {
+            width,
+            height,
             format: FORMAT,
         };
-        let mut out = vec![TextureDesc::working(w, h)];
+        let mut out = vec![TextureDesc::working(self.size.0, self.size.1)];
         out.extend(std::iter::repeat_n(
-            mask,
+            mask(self.size),
             self.accumulators() + self.scratch(),
         ));
+        for scale in self.scales() {
+            out.extend(std::iter::repeat_n(mask(self.low(scale)), 2));
+        }
         out
     }
 
@@ -161,8 +181,13 @@ impl Node for MaskNode {
     ) {
         let (layer, coverages) = (inputs[0], &inputs[1..]);
         let accumulators = &outputs[1..1 + self.accumulators()];
-        let scratch = &outputs[1 + self.accumulators()..];
-        let texel = [1.0 / self.size.0 as f32, 1.0 / self.size.1 as f32];
+        let scratch = &outputs[1 + self.accumulators()..1 + self.accumulators() + self.scratch()];
+        let low: Vec<(u32, &[&wgpu::TextureView])> = self
+            .scales()
+            .zip(outputs[1 + self.accumulators() + self.scratch()..].chunks(2))
+            .collect();
+        let texel = |(w, h): (u32, u32)| [1.0 / w as f32, 1.0 / h as f32];
+        let full = texel(self.size);
         let renderer = cx.renderer;
         let dummy = renderer.dummy_view();
         let mut timestamps = Timestamps::new(cx.timestamps());
@@ -186,16 +211,23 @@ impl Node for MaskNode {
                 timestamps.pass(last),
             );
         };
-        let params = |radius: u32, falloff: f32, invert: bool, combine: u32| {
-            Uniform::new()
-                .u32(radius)
-                .f32(falloff)
-                .u32(u32::from(invert))
-                .u32(combine)
-                .f32(texel[0])
-                .f32(texel[1])
-        };
-        let plain = params(0, 0.0, false, 0);
+        // `fetches` blur taps, the invert flag, the combine code, the scale and the texel.
+        let params =
+            |fetches: &[[f32; 2]], invert: bool, combine: u32, scale: u32, texel: [f32; 2]| {
+                let mut taps = fetches.iter().flatten().copied();
+                (0..4 * MAX_ENTRIES).fold(
+                    Uniform::new()
+                        .u32(fetches.len() as u32)
+                        .u32(u32::from(invert))
+                        .u32(combine)
+                        .u32(scale)
+                        .f32(texel[0])
+                        .f32(texel[1])
+                        .align16(),
+                    |u, _| u.f32(taps.next().unwrap_or(0.0)),
+                )
+            };
+        let plain = params(&[], false, 0, 1, full);
 
         let mut next = 0;
         let mut previous: Option<&wgpu::TextureView> = None;
@@ -218,20 +250,50 @@ impl Node for MaskNode {
                 current = target;
                 free = 1 - free;
             }
-            let radius = mask::kernel_radius(pass.feather);
-            let falloff = mask::falloff(pass.feather);
-            if radius > 0 {
+            let blur = &pass.blur;
+            let mut combine_texel = full;
+            if blur.scale == 1 && !blur.fetches.is_empty() {
                 let target = scratch[free];
-                let blur = params(radius, falloff, false, 0);
+                let h = params(&blur.fetches, false, 0, 1, full);
                 draw(
                     "fs_blur_h",
-                    &blur,
+                    &h,
                     [current, dummy],
                     Filter::Linear,
                     target,
                     false,
                 );
                 current = target;
+            } else if let Some((_, pair)) = low.iter().find(|(s, _)| *s == blur.scale) {
+                let size = self.low(blur.scale);
+                let down = params(&[], false, 0, blur.scale, full);
+                draw(
+                    "fs_down",
+                    &down,
+                    [current, dummy],
+                    Filter::Linear,
+                    pair[0],
+                    false,
+                );
+                let h = params(&blur.fetches, false, 0, blur.scale, texel(size));
+                draw(
+                    "fs_blur_h",
+                    &h,
+                    [pair[0], dummy],
+                    Filter::Linear,
+                    pair[1],
+                    false,
+                );
+                draw(
+                    "fs_blur_v",
+                    &h,
+                    [pair[1], dummy],
+                    Filter::Linear,
+                    pair[0],
+                    false,
+                );
+                current = pair[0];
+                combine_texel = texel((size.0 * blur.scale, size.1 * blur.scale));
             }
             let combine = if previous.is_some() {
                 pass.mode.code()
@@ -240,9 +302,15 @@ impl Node for MaskNode {
             };
             // The last mask lands in output 1.
             let target = accumulators[(self.passes.len() - 1 - i) % accumulators.len()];
+            // At full resolution the vertical blur runs here; at a lower one, the read back.
+            let fetches = if blur.scale == 1 {
+                &blur.fetches[..]
+            } else {
+                &[]
+            };
             draw(
                 "fs_combine",
-                &params(radius, falloff, pass.invert, combine),
+                &params(fetches, pass.invert, combine, blur.scale, combine_texel),
                 [current, previous.unwrap_or(dummy)],
                 Filter::Linear,
                 target,
