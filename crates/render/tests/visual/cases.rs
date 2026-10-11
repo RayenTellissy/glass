@@ -63,6 +63,41 @@ pub fn all() -> Vec<Case> {
             frames: &[12],
             scene: mask_intersection,
         },
+        Case {
+            name: "cross_dissolve",
+            frames: &[0, 12, 24],
+            scene: cross_dissolve,
+        },
+        Case {
+            name: "dip_to_black",
+            frames: &[6, 12, 18],
+            scene: dip_to_black,
+        },
+        Case {
+            name: "dip_to_white",
+            frames: &[6, 12, 18],
+            scene: dip_to_white,
+        },
+        Case {
+            name: "dip_to_colour",
+            frames: &[6, 12, 18],
+            scene: dip_to_colour,
+        },
+        Case {
+            name: "film_dissolve",
+            frames: &[6, 12, 18],
+            scene: film_dissolve,
+        },
+        Case {
+            name: "additive_dissolve",
+            frames: &[6, 12, 18],
+            scene: additive_dissolve,
+        },
+        Case {
+            name: "non_additive_dissolve",
+            frames: &[6, 12, 18],
+            scene: non_additive_dissolve,
+        },
     ]
 }
 
@@ -350,4 +385,60 @@ fn mask_intersection(frame: u32) -> Scene {
                 .with_mode(MaskMode::Intersection),
         ],
     )
+}
+
+/// Cross dissolve from the gradient to the colour bars over 24 frames: frame 0 is the
+/// gradient alone, 12 half way, 24 the bars alone.
+fn cross_dissolve(frame: u32) -> Scene {
+    transition("cross-dissolve", frame)
+}
+
+/// The bundled transition `id` with default parameters from the gradient to the colour
+/// bars over 24 frames.
+fn transition(id: &'static str, frame: u32) -> Scene {
+    Scene {
+        layers: vec![(
+            Source::Transition {
+                id,
+                progress: f64::from(frame) / 24.0,
+            },
+            Layer::default(),
+        )],
+    }
+}
+
+/// Dip to black from the gradient to the colour bars, a quarter, half and three quarters
+/// of the way.
+fn dip_to_black(frame: u32) -> Scene {
+    transition("dip-to-black", frame)
+}
+
+/// Dip to white from the gradient to the colour bars, a quarter, half and three quarters
+/// of the way.
+fn dip_to_white(frame: u32) -> Scene {
+    transition("dip-to-white", frame)
+}
+
+/// Dip to colour (the default red) from the gradient to the colour bars, a quarter, half and three quarters
+/// of the way.
+fn dip_to_colour(frame: u32) -> Scene {
+    transition("dip-to-colour", frame)
+}
+
+/// Film dissolve from the gradient to the colour bars, a quarter, half and three quarters
+/// of the way.
+fn film_dissolve(frame: u32) -> Scene {
+    transition("film-dissolve", frame)
+}
+
+/// Additive dissolve from the gradient to the colour bars, a quarter, half and three quarters
+/// of the way.
+fn additive_dissolve(frame: u32) -> Scene {
+    transition("additive-dissolve", frame)
+}
+
+/// Non-additive dissolve from the gradient to the colour bars, a quarter, half and three quarters
+/// of the way.
+fn non_additive_dissolve(frame: u32) -> Scene {
+    transition("non-additive-dissolve", frame)
 }
