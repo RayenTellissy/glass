@@ -1,0 +1,12 @@
+{
+  "id": "light-leak",
+  "name": "transition.name.light_leak",
+  "category": "stylised",
+  "directions": ["right", "left", "down", "up"],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "seed", "label": "transition.param.seed", "kind": {"int": {"default": 1, "range": {"min": 0, "max": 9999}, "soft": null}}, "unit": "none", "keyframeable": false},
+    {"id": "colour", "label": "transition.param.colour", "kind": {"colour": {"default": [1.0, 0.38, 0.1, 1.0], "alpha": false}}, "unit": "none", "keyframeable": false},
+    {"id": "intensity", "label": "transition.param.intensity", "kind": {"float": {"default": 1.0, "range": {"min": 0.0, "max": 8.0}, "soft": {"min": 0.0, "max": 4.0}, "decimals": 2}}, "unit": "none", "keyframeable": false}
+  ]
+}

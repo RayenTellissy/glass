@@ -175,3 +175,64 @@ fn rotate(v: vec2<f32>, angle: f32) -> vec2<f32> {
 fn jitter(i: f32) -> f32 {
     return fract(52.9829189 * fract(i * 0.06711056)) - 0.5;
 }
+
+// Procedural noise, shared by the stylised transitions. Integer hashing only, so a seed
+// gives the same pattern on every GPU and every run.
+
+// A well mixed 32-bit hash (PCG output permutation).
+fn hash_u32(x: u32) -> u32 {
+    let s = x * 747796405u + 2891336453u;
+    let w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+
+// The seed parameter `x` (a whole number stored as a float) as a hash key.
+fn seed_key(x: f32) -> u32 {
+    return hash_u32(u32(max(round(x), 0.0)) ^ 0x9e3779b9u);
+}
+
+// A value in 0..1 (never 1) for the lattice cell `c` under the key `key`.
+fn hash_cell(c: vec2<i32>, key: u32) -> f32 {
+    let h = hash_u32(bitcast<u32>(c.x) ^ hash_u32(bitcast<u32>(c.y) ^ key));
+    return f32(h >> 8u) / 16777216.0;
+}
+
+// Value noise in 0..1 at `p` (lattice cells of size 1): the cells' hashes blended by a
+// quintic fade, so it is smooth with continuous slopes.
+fn value_noise(p: vec2<f32>, key: u32) -> f32 {
+    let i = vec2<i32>(floor(p));
+    let f = fract(p);
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    let a = hash_cell(i, key);
+    let b = hash_cell(i + vec2<i32>(1, 0), key);
+    let c = hash_cell(i + vec2<i32>(0, 1), key);
+    let d = hash_cell(i + vec2<i32>(1, 1), key);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// `octaves` of value noise, each twice the frequency and half the weight of the one
+// before and keyed apart, normalised to 0..1.
+fn fbm(p: vec2<f32>, key: u32, octaves: u32) -> f32 {
+    var sum = 0.0;
+    var weight = 1.0;
+    var total = 0.0;
+    var q = p;
+    for (var i = 0u; i < octaves; i += 1u) {
+        sum += weight * value_noise(q, hash_u32(key + i));
+        total += weight;
+        weight *= 0.5;
+        // Turned a little each octave so the lattices do not line up.
+        q = vec2<f32>(1.6 * q.x - 1.2 * q.y, 1.2 * q.x + 1.6 * q.y) + 17.0;
+    }
+    return sum / total;
+}
+
+// Coverage of B where `s` is how far a field lies past its threshold (positive on B's
+// side, in the field's own units): a ramp `softness` units wide (in the same units),
+// never narrower than one output pixel (from the field's screen slope), eased to a
+// smoothstep as it widens. Non-decreasing in s; 0 from half the width below and 1 from
+// half the width above. Call it in uniform control flow (it takes derivatives).
+fn field_edge(s: f32, softness: f32) -> f32 {
+    let px = max(fwidth(s), 1e-6);
+    return edge(s / px, max(softness, 0.0) / px);
+}

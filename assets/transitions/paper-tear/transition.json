@@ -1,0 +1,11 @@
+{
+  "id": "paper-tear",
+  "name": "transition.name.paper_tear",
+  "category": "stylised",
+  "directions": ["right", "left", "up", "down", "up_left", "up_right", "down_left", "down_right"],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "seed", "label": "transition.param.seed", "kind": {"int": {"default": 1, "range": {"min": 0, "max": 9999}, "soft": null}}, "unit": "none", "keyframeable": false},
+    {"id": "roughness", "label": "transition.param.roughness", "kind": {"float": {"default": 0.04, "range": {"min": 0.0, "max": 0.2}, "soft": null, "decimals": 1}}, "unit": "percent", "keyframeable": false}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "film-burn",
+  "name": "transition.name.film_burn",
+  "category": "stylised",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "seed", "label": "transition.param.seed", "kind": {"int": {"default": 1, "range": {"min": 0, "max": 9999}, "soft": null}}, "unit": "none", "keyframeable": false},
+    {"id": "glow", "label": "transition.param.glow", "kind": {"float": {"default": 2.0, "range": {"min": 0.0, "max": 8.0}, "soft": {"min": 0.0, "max": 4.0}, "decimals": 2}}, "unit": "none", "keyframeable": false},
+    {"id": "colour", "label": "transition.param.glow_colour", "kind": {"colour": {"default": [1.0, 0.42, 0.08, 1.0], "alpha": false}}, "unit": "none", "keyframeable": false}
+  ]
+}

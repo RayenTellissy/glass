@@ -1,0 +1,10 @@
+{
+  "id": "rgb-split",
+  "name": "transition.name.rgb_split",
+  "category": "stylised",
+  "directions": ["right", "left", "up", "down", "up_left", "up_right", "down_left", "down_right"],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "amount", "label": "transition.param.amount", "kind": {"float": {"default": 0.06, "range": {"min": 0.0, "max": 0.5}, "soft": {"min": 0.0, "max": 0.2}, "decimals": 1}}, "unit": "percent", "keyframeable": false}
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "liquid",
+  "name": "transition.name.liquid",
+  "category": "stylised",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "seed", "label": "transition.param.seed", "kind": {"int": {"default": 1, "range": {"min": 0, "max": 9999}, "soft": null}}, "unit": "none", "keyframeable": false},
+    {"id": "amount", "label": "transition.param.amount", "kind": {"float": {"default": 0.08, "range": {"min": 0.0, "max": 0.5}, "soft": {"min": 0.0, "max": 0.2}, "decimals": 1}}, "unit": "percent", "keyframeable": false}
+  ],
+  "passes": [
+    {"entry": "flow", "scale": 0.25, "min": 64}
+  ]
+}

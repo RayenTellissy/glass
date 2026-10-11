@@ -67,4 +67,6 @@ its extra passes) and must return exactly A at progress 0 and exactly B at progr
 See `transition.wgsl` for the uniform layout and the shared helpers: the
 wipes' edge kernel and composite (`edge`, `wipe`) and the motion transitions' moved
 frames (`frame_a`, `frame_b`, transparent black outside with anti-aliased edges), `over`,
-`rotate` and `jitter`.
+`rotate` and `jitter`, and the stylised transitions' seeded noise (`seed_key`,
+`hash_cell`, `value_noise`, `fbm`: integer hashing, so a seed always gives the same
+pattern) and `field_edge` (the edge kernel over a thresholded field's screen slope).
