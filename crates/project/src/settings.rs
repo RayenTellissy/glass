@@ -80,7 +80,7 @@ impl Resolution {
 
     /// Both sides even and within [`MIN_SIDE`] to [`MAX_SIDE`].
     pub fn check(self) -> Result<(), EditError> {
-        let ok = |side: u32| (MIN_SIDE..=MAX_SIDE).contains(&side) && side % 2 == 0;
+        let ok = |side: u32| (MIN_SIDE..=MAX_SIDE).contains(&side) && side.is_multiple_of(2);
         if ok(self.width) && ok(self.height) {
             Ok(())
         } else {
