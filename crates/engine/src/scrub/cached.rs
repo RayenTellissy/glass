@@ -81,6 +81,20 @@ impl CachedFrames {
         self.read().contains(&frame)
     }
 
+    /// The end of the run of cached frames from `frame` on, at most `limit`: `frame`
+    /// itself when it is not cached.
+    pub fn run_end(&self, frame: i64, limit: i64) -> i64 {
+        let frames = self.read();
+        let mut end = frame;
+        for &f in frames.range(frame..limit) {
+            if f != end {
+                break;
+            }
+            end += 1;
+        }
+        end
+    }
+
     pub fn len(&self) -> usize {
         self.read().len()
     }
@@ -199,5 +213,17 @@ mod tests {
         assert_eq!(cached.try_nearest(7, Direction::Still, 2.0), Err(Busy));
         drop(guard);
         assert_eq!(cached.try_nearest(9, Direction::Still, 2.0), Ok(Some(7)));
+    }
+
+    #[test]
+    fn run_end_stops_at_the_first_gap_or_the_limit() {
+        let cached = CachedFrames::new();
+        for f in [3, 4, 5, 7] {
+            cached.insert(f);
+        }
+        assert_eq!(cached.run_end(3, 100), 6);
+        assert_eq!(cached.run_end(4, 5), 5);
+        assert_eq!(cached.run_end(6, 100), 6);
+        assert_eq!(cached.run_end(7, 100), 8);
     }
 }
