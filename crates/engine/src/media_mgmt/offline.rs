@@ -211,13 +211,13 @@ pub fn offline_clips(project: &Project, availability: &MediaAvailability) -> Vec
     for sequence in project.sequences() {
         for track in &sequence.tracks {
             for item in &track.items {
-                if let Some(clip) = item.clip()
-                    && availability.is_offline(clip.media)
+                if let Some(media) = item.clip().and_then(|c| c.source.media())
+                    && availability.is_offline(media)
                 {
                     out.push(OfflineClip {
                         sequence: sequence.id,
                         item: item.id,
-                        media: clip.media,
+                        media,
                         range: item.range,
                     });
                 }

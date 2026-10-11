@@ -8,8 +8,8 @@ use project::params::{ParamDef, ParamSchema, ParamValue, Range};
 use project::schema::{self, LoadError};
 use project::transition::{DEFAULT_EASING, DEFAULT_KIND};
 use project::{
-    Alignment, ClipSpec, CutSide, EditError, EditLabel, History, ItemId, Project, Rational,
-    Segment, SequenceId, SpeedKeep, Time, TimeRange, TrackId, TrackKind, TransitionId,
+    Alignment, ClipSource, ClipSpec, CutSide, EditError, EditLabel, History, ItemId, Project,
+    Rational, Segment, SequenceId, SpeedKeep, Time, TimeRange, TrackId, TrackKind, TransitionId,
     TransitionSpec, ValidationError,
 };
 use serde_json::Value;
@@ -172,11 +172,11 @@ fn a_centred_transition_sits_across_the_cut_with_the_defaults() {
     let media = p.media().iter().next().expect("media").id;
     assert_eq!(
         needs.outgoing,
-        Some((f.a, media, Time::new(21, 5).expect("t")))
+        Some((f.a, ClipSource::Media(media), Time::new(21, 5).expect("t")))
     );
     assert_eq!(
         needs.incoming,
-        Some((f.b, media, Time::new(4, 5).expect("t")))
+        Some((f.b, ClipSource::Media(media), Time::new(4, 5).expect("t")))
     );
 }
 
@@ -949,7 +949,7 @@ fn tail_handles_are_checked_against_known_media_lengths_and_count_for_relinking(
     let needed = Time::new(22, 5).expect("t");
     assert_eq!(
         p.transition_needs(ab).expect("needs").outgoing,
-        Some((f.a, media, needed))
+        Some((f.a, ClipSource::Media(media), needed))
     );
     p.check_transition_media(ab, |_| Some(needed))
         .expect("exactly enough");

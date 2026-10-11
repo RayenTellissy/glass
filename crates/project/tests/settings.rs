@@ -210,6 +210,43 @@ fn unchanged_settings_return_the_same_root() {
 }
 
 #[test]
+fn rates_are_stored_reduced_so_an_equal_rate_in_another_form_changes_nothing() {
+    let f = fixture();
+    let unreduced = SequenceFormat {
+        frame_rate: Rational::new(50, 2),
+        ..format_of(&f.project, f.seq)
+    };
+    let same = f
+        .project
+        .set_sequence_format(f.seq, unreduced)
+        .expect("same rate");
+    assert!(shares_everything(&same, &f.project));
+    // A real change stores the reduced form; a later equal one is again a no-op.
+    let ntsc = SequenceFormat {
+        frame_rate: Rational::new(60000, 2002),
+        ..format_of(&f.project, f.other)
+    };
+    let q = f.project.set_sequence_format(f.other, ntsc).expect("ntsc");
+    assert_eq!(format_of(&q, f.other).frame_rate, NTSC);
+    assert!(shares_everything(
+        &q.set_sequence_format(f.other, ntsc).expect("same"),
+        &q
+    ));
+    let (q, added) = q.add_sequence_with("Fifty", unreduced).expect("add");
+    assert_eq!(format_of(&q, added).frame_rate, FPS);
+    let settings = ProjectSettings {
+        sequence: unreduced,
+        ..ProjectSettings::default()
+    };
+    let q = q.set_project_settings(settings.clone()).expect("settings");
+    assert_eq!(q.settings().sequence.frame_rate, FPS);
+    assert!(shares_everything(
+        &q.set_project_settings(settings).expect("same"),
+        &q
+    ));
+}
+
+#[test]
 fn invalid_project_settings_are_refused_in_order() {
     let p = Project::new("u", "New");
     let good = ProjectSettings::default();

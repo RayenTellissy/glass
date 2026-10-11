@@ -61,13 +61,15 @@ impl Project {
     }
 
     /// Adds an empty sequence after the existing ones in `format` (the project's default
-    /// is `self.settings().sequence`). The format is checked by [`SequenceFormat::check`].
+    /// is `self.settings().sequence`). The format is checked by [`SequenceFormat::check`]
+    /// and stored with its frame rate in lowest terms.
     pub fn add_sequence_with(
         &self,
         name: impl Into<String>,
         format: SequenceFormat,
     ) -> Result<(Project, SequenceId), EditError> {
         format.check()?;
+        let format = format.reduced();
         let mut next = self.clone();
         let id = SequenceId(next.alloc_id());
         let SequenceFormat {
@@ -80,6 +82,7 @@ impl Project {
         next.sequences.push_back(Arc::new(Sequence {
             id,
             name: name.into(),
+            compound: false,
             resolution,
             frame_rate,
             drop_frame,
@@ -154,6 +157,23 @@ impl Project {
         Ok(next)
     }
 
+    /// Renames a track. The name is trimmed; an empty name is refused, and an unchanged
+    /// one returns the project as it was.
+    pub fn rename_track(&self, track: TrackId, name: &str) -> Result<Project, EditError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(EditError::EmptyTrackName(track));
+        }
+        let mut next = self.clone();
+        let (si, ti) = next.locate_track(track)?;
+        let (_, track) = next.track_at_mut(si, ti);
+        if track.name == name {
+            return Ok(self.clone());
+        }
+        track.name = name.to_string();
+        Ok(next)
+    }
+
     /// Places a clip on a video or audio track, with every property at its default
     /// ([`Clip::new`]). Fails if it would overlap another item.
     pub fn insert_clip(
@@ -191,7 +211,7 @@ impl Project {
         self.insert_item(track, range, ItemKind::Adjustment(Adjustment::default()))
     }
 
-    fn insert_item(
+    pub(crate) fn insert_item(
         &self,
         track: TrackId,
         range: TimeRange,
