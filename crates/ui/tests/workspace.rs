@@ -164,11 +164,12 @@ fn the_edit_workspace_with_200_clips_is_within_budget() {
     let mut pool = MediaPoolView {
         items: (0..60)
             .map(|i| {
-                ItemRow::from_item(&MediaItem::new(
+                let item = MediaItem::new(
                     format!("A{i:03}.mov"),
                     MediaKind::Video,
                     format!("/footage/A{i:03}.mov"),
-                ))
+                );
+                ItemRow::from_item(&item, false)
             })
             .collect(),
         total: 60,

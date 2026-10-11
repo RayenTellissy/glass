@@ -6,8 +6,8 @@
 //! Clips are drawn over the lanes by a [`LaneLayer`] the caller passes (the clip
 //! renderer), so this module only owns the frame around them. A minimal playhead line
 //! runs through the ruler and the lanes; clicking or dragging the ruler seeks. Track
-//! header switches and heights live in [`TimelinePanel::headers`] (Decision 68); renames
-//! and seeks come back as a [`TimelineAction`] for the app to apply.
+//! header switches, heights and renames are project edits (Decision 77): they come back
+//! as a [`TimelineAction`] with seeks, for the app to apply.
 
 use std::sync::Arc;
 
@@ -16,9 +16,7 @@ use project::{Sequence, TrackId};
 
 use super::minimap::{self, MINIMAP_HEIGHT, MinimapContent};
 use super::ruler::{self, RULER_HEIGHT, Timecode};
-use super::track_header::{
-    self, HEADER_WIDTH, Rename, TrackHeaderAction, TrackHeaderState, TrackHeaderView,
-};
+use super::track_header::{self, HEADER_WIDTH, Rename, TrackHeaderAction, TrackHeaderView};
 use super::view::{
     self, Extent, SCROLLBAR_WIDTH, TimelineView, TrackLayout, ZOOM_SLIDER_WIDTH, sequence_duration,
 };
@@ -32,7 +30,6 @@ pub type LaneLayer<'a> = &'a mut dyn FnMut(&mut Ui, Rect, &TimelineView, &TrackL
 #[derive(Clone, Debug)]
 pub struct TimelinePanel {
     pub view: TimelineView,
-    pub headers: TrackHeaderState,
     /// The track edits go to.
     pub targeted: Option<TrackId>,
     renaming: Option<Rename>,
@@ -44,7 +41,6 @@ impl TimelinePanel {
     pub fn new(sequence: &Sequence) -> Self {
         Self {
             view: TimelineView::for_sequence(sequence),
-            headers: TrackHeaderState::default(),
             targeted: None,
             renaming: None,
             minimap: None,
@@ -56,11 +52,9 @@ impl TimelinePanel {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TimelineAction {
     None,
-    /// A header action the panel did not apply itself: a rename (apply with
-    /// `Project::rename_track`). Switches, heights and targeting are already applied.
+    /// A header action that edits the project (rename, switches, height): turn it into
+    /// the edit with `track_header::edit`. Targeting is already applied.
     Header(TrackHeaderAction),
-    /// Mute or solo changed (already applied): the audio mix needs the new switches.
-    MixChanged,
     /// Move the playhead to this frame.
     Seek(i64),
 }
@@ -80,8 +74,7 @@ pub fn timeline_panel(
     ui.painter_at(rect)
         .rect_filled(rect, 0.0, paint.c(Role::Bg1));
 
-    panel.headers.retain(sequence);
-    let rows = panel.headers.rows(sequence, panel.targeted);
+    let rows = track_header::rows(sequence, panel.targeted);
     let layout = TrackLayout::from_rows(&rows);
 
     let tracks_w = (rect.width() - HEADER_WIDTH - SCROLLBAR_WIDTH).max(1.0);
@@ -158,16 +151,7 @@ pub fn timeline_panel(
     match header_action {
         TrackHeaderAction::None => {}
         TrackHeaderAction::Target(track) => panel.targeted = Some(track),
-        TrackHeaderAction::Rename { .. } => action = TimelineAction::Header(header_action),
-        ref switch => {
-            let mix = matches!(
-                switch,
-                TrackHeaderAction::ToggleMute(_) | TrackHeaderAction::ToggleSolo(_)
-            );
-            if panel.headers.apply(switch) && mix {
-                action = TimelineAction::MixChanged;
-            }
-        }
+        edit => action = TimelineAction::Header(edit),
     }
 
     let _ = view::track_scrollbar(ui, bar, &mut panel.view);

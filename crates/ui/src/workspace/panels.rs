@@ -16,7 +16,6 @@ use crate::panels::metadata::{MetadataAction, MetadataView, metadata_panel};
 use crate::panels::placeholder::placeholder_panel;
 use crate::panels::preview::{PreviewAction, PreviewView, preview_panel};
 use crate::panels::timeline::panel::{LaneLayer, TimelineAction, TimelinePanel, timeline_panel};
-use crate::panels::timeline::view::{TimelineView, TrackLayout};
 
 /// The open sequence as the timeline panel draws it.
 pub struct TimelineContent<'a> {
@@ -63,11 +62,10 @@ impl PanelHost for Panels<'_> {
             }
             PanelKind::Timeline => match &mut self.timeline {
                 Some(content) => {
-                    let layer: Option<&mut dyn FnMut(&mut Ui, Rect, &TimelineView, &TrackLayout)> =
-                        match &mut content.layer {
-                            Some(layer) => Some(&mut **layer),
-                            None => None,
-                        };
+                    let layer: Option<LaneLayer<'_>> = match &mut content.layer {
+                        Some(layer) => Some(&mut **layer),
+                        None => None,
+                    };
                     let action = timeline_panel(
                         ui,
                         rect,

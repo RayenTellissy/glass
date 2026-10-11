@@ -24,7 +24,7 @@ use engine::project::{
 };
 use engine::timeline::{DirtyFrames, DirtyRanges, TimelinePlan};
 use ui::panels::timeline::panel::{TimelineAction, TimelinePanel};
-use ui::panels::timeline::track_header::TrackHeaderAction;
+use ui::panels::timeline::track_header;
 use ui::shortcuts::{Chord, Dispatcher, Keymap, KeymapError, Platform, PresetId};
 
 use crate::preview::{AudioOut, Gpu, Preview};
@@ -98,16 +98,16 @@ fn modifiers(chord: Chord) -> egui::Modifiers {
     let m = chord.mods;
     let mut out = egui::Modifiers::NONE;
     if m.cmd {
-        out = out | egui::Modifiers::COMMAND;
+        out |= egui::Modifiers::COMMAND;
     }
     if m.ctrl {
-        out = out | egui::Modifiers::CTRL;
+        out |= egui::Modifiers::CTRL;
     }
     if m.alt {
-        out = out | egui::Modifiers::ALT;
+        out |= egui::Modifiers::ALT;
     }
     if m.shift {
-        out = out | egui::Modifiers::SHIFT;
+        out |= egui::Modifiers::SHIFT;
     }
     out
 }
@@ -304,24 +304,11 @@ impl AppState {
         self.plan.as_ref().map_or(0, |p| p.end())
     }
 
-    /// The mix settings from the track headers' mute and solo (Decision 68).
+    /// The mixer settings the preview plays with. Mute and solo are project track
+    /// switches (Decision 77), which reach the mix with every edit; faders, pans, sends
+    /// and buses have no place in the project yet, so they are the defaults.
     pub fn mix_settings(&self) -> MixSettings {
-        let mut mix = MixSettings::default();
-        let (Some(timeline), Some(seq)) = (
-            &self.timeline,
-            self.sequence.and_then(|s| self.project().sequence(s)),
-        ) else {
-            return mix;
-        };
-        for track in seq.tracks.iter().filter(|t| t.kind == TrackKind::Audio) {
-            let flags = timeline.headers.flags(track.id);
-            if flags.muted || flags.soloed {
-                let entry = mix.track_mut(track.id);
-                entry.mute = flags.muted;
-                entry.solo = flags.soloed;
-            }
-        }
-        mix
+        MixSettings::default()
     }
 
     /// Compiles the open sequence and starts its preview.
@@ -584,24 +571,15 @@ impl AppState {
                 self.pause();
                 self.seek(frame);
             }
-            TimelineAction::MixChanged => {
-                let mix = self.mix_settings();
-                if let Some(preview) = &self.preview {
-                    preview.update_mix(self.history.current(), &mix);
+            TimelineAction::Header(header) => match track_header::edit(self.project(), &header) {
+                None => {}
+                Some(Ok((new, label))) => {
+                    let old = self.project().clone();
+                    self.history.commit(label, new);
+                    self.changed(&old);
                 }
-            }
-            TimelineAction::Header(TrackHeaderAction::Rename { track, name }) => {
-                if let Err(error) =
-                    self.edit(EditLabel::RenameTrack, |p| p.rename_track(track, &name))
-                {
-                    self.message(format!("rename: {error}"));
-                }
-            }
-            TimelineAction::Header(other) => {
-                if let Some(timeline) = &mut self.timeline {
-                    timeline.headers.apply(&other);
-                }
-            }
+                Some(Err(error)) => self.message(format!("track: {error}")),
+            },
         }
     }
 

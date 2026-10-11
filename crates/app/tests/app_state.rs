@@ -82,7 +82,7 @@ fn edits_undo_and_redo_rebuild_the_plan_with_their_dirty_frames() {
     assert_eq!(state.plan_builds(), builds + 1);
     assert_eq!(
         state.last_dirty(),
-        Some(&DirtyFrames::from_ranges([60..90]))
+        Some(&DirtyFrames::from_ranges(std::iter::once(60..90)))
     );
     assert!(state.is_edited());
 
@@ -90,7 +90,7 @@ fn edits_undo_and_redo_rebuild_the_plan_with_their_dirty_frames() {
     assert_eq!(state.plan().expect("plan").end(), 60);
     assert_eq!(
         state.last_dirty(),
-        Some(&DirtyFrames::from_ranges([60..90]))
+        Some(&DirtyFrames::from_ranges(std::iter::once(60..90)))
     );
     assert!(state.redo());
     assert_eq!(state.plan().expect("plan").end(), 90);

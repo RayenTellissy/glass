@@ -475,8 +475,10 @@ mod tests {
 
     #[test]
     fn newer_files_are_refused() {
-        let mut all = Workspaces::default();
-        all.version = FORMAT_VERSION + 1;
+        let all = Workspaces {
+            version: FORMAT_VERSION + 1,
+            ..Workspaces::default()
+        };
         assert!(matches!(
             Workspaces::from_json(&all.to_json()),
             Err(WorkspaceError::Newer(_))
