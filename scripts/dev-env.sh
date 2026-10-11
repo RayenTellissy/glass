@@ -4,6 +4,11 @@
 
 export CARGO_BUILD_JOBS=8
 
+# rustup puts cargo and rustc in ~/.cargo/bin, which only login shells add to PATH.
+if ! command -v cargo >/dev/null 2>&1 && [ -x "$HOME/.cargo/bin/cargo" ]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
 if [ -n "${BASH_SOURCE:-}" ]; then
     _glass_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 elif [ -n "${ZSH_VERSION:-}" ]; then

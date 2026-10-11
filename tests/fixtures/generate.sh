@@ -28,11 +28,12 @@ for arg in "$@"; do
     esac
 done
 
+# FFMPEG_DIR's tools (the pinned build from scripts/dev-env.sh) win over the ones on PATH.
 find_tool() {
-    if command -v "$1" >/dev/null 2>&1; then
-        command -v "$1"
-    elif [ -n "${FFMPEG_DIR:-}" ] && [ -x "$FFMPEG_DIR/bin/$1" ]; then
+    if [ -n "${FFMPEG_DIR:-}" ] && [ -x "$FFMPEG_DIR/bin/$1" ]; then
         echo "$FFMPEG_DIR/bin/$1"
+    elif command -v "$1" >/dev/null 2>&1; then
+        command -v "$1"
     else
         echo "error: $1 not found. Install FFmpeg (brew install ffmpeg) or set FFMPEG_DIR." >&2
         exit 1
@@ -40,6 +41,23 @@ find_tool() {
 }
 FFMPEG="$(find_tool ffmpeg)"
 FFPROBE="$(find_tool ffprobe)"
+
+# Optional encoders (VP9, Opus, AV1, MP3) are not in the pinned build; fixtures that need
+# one this FFmpeg lacks are skipped and left out of the manifest, so their tests skip.
+ENCODERS="$("$FFMPEG" -hide_banner -encoders 2>/dev/null)"
+has_encoders() {
+    local name
+    for name in "$@"; do
+        if ! printf "%s\n" "$ENCODERS" | awk '{ print $2 }' | grep -qx "$name"; then
+            return 1
+        fi
+    done
+}
+MISSING=0
+missing_encoder() {
+    MISSING=$((MISSING + 1))
+    printf "  note  %s skipped: needs %s, not in %s\n" "$1" "$2" "$FFMPEG"
+}
 
 OUT="$(cd "$(dirname "$0")" && pwd)/generated"
 mkdir -p "$OUT"
@@ -161,18 +179,26 @@ make prores422_1080p23976.mov \
     -c:a pcm_s24le -ar 48000
 add_entry prores422_1080p23976.mov video prores 1920 1080 24000/1001 2 yuv422p10le false null pcm_s24le 48000 2
 
-make vp9_720p30.webm \
-    -f lavfi -i "testsrc2=size=1280x720:rate=30:duration=2" "${STEREO_AUDIO[@]}" \
-    -map 0:v -map "[a]" -t 2 \
-    -c:v libvpx-vp9 -deadline realtime -cpu-used 8 -b:v 2M -pix_fmt yuv420p -g 30 \
-    -c:a libopus -b:a 96k
-add_entry vp9_720p30.webm video vp9 1280 720 30/1 2 yuv420p false null opus 48000 2
+if has_encoders libvpx-vp9 libopus; then
+    make vp9_720p30.webm \
+        -f lavfi -i "testsrc2=size=1280x720:rate=30:duration=2" "${STEREO_AUDIO[@]}" \
+        -map 0:v -map "[a]" -t 2 \
+        -c:v libvpx-vp9 -deadline realtime -cpu-used 8 -b:v 2M -pix_fmt yuv420p -g 30 \
+        -c:a libopus -b:a 96k
+    add_entry vp9_720p30.webm video vp9 1280 720 30/1 2 yuv420p false null opus 48000 2
+else
+    missing_encoder vp9_720p30.webm "libvpx-vp9 and libopus"
+fi
 
-SVT_LOG=1 make av1_1080p30.mp4 \
-    -f lavfi -i "testsrc2=size=1920x1080:rate=30:duration=2" \
-    -c:v libsvtav1 -preset 10 -crf 35 -pix_fmt yuv420p -g 30 \
-    -svtav1-params "enable-stat-report=0" -movflags +faststart
-add_entry av1_1080p30.mp4 video av1 1920 1080 30/1 2 yuv420p false null null null null
+if has_encoders libsvtav1; then
+    SVT_LOG=1 make av1_1080p30.mp4 \
+        -f lavfi -i "testsrc2=size=1920x1080:rate=30:duration=2" \
+        -c:v libsvtav1 -preset 10 -crf 35 -pix_fmt yuv420p -g 30 \
+        -svtav1-params "enable-stat-report=0" -movflags +faststart
+    add_entry av1_1080p30.mp4 video av1 1920 1080 30/1 2 yuv420p false null null null null
+else
+    missing_encoder av1_1080p30.mp4 libsvtav1
+fi
 
 # VFR: drop frames 3 to 5 of every 10 and keep the original timestamps, so frame
 # durations alternate between 1/30 s and 4/30 s.
@@ -455,11 +481,15 @@ make sync_h264_aac_44k1.mp4 \
     -c:a aac -b:a 192k -movflags +faststart
 add_entry sync_h264_aac_44k1.mp4 video h264 320 240 30/1 3 yuv420p false null aac 44100 2 0 null null "$SYNC_EXTRA"
 
-make sync_vp9_opus.webm \
-    -f lavfi -i "$SYNC_VIDEO" -f lavfi -i "$(sync_audio 48000)" \
-    -c:v libvpx-vp9 -deadline realtime -cpu-used 8 -b:v 500k -pix_fmt yuv420p -g 30 \
-    -c:a libopus -b:a 128k
-add_entry sync_vp9_opus.webm video vp9 320 240 30/1 3 yuv420p false null opus 48000 2 0 null null "$SYNC_EXTRA"
+if has_encoders libvpx-vp9 libopus; then
+    make sync_vp9_opus.webm \
+        -f lavfi -i "$SYNC_VIDEO" -f lavfi -i "$(sync_audio 48000)" \
+        -c:v libvpx-vp9 -deadline realtime -cpu-used 8 -b:v 500k -pix_fmt yuv420p -g 30 \
+        -c:a libopus -b:a 128k
+    add_entry sync_vp9_opus.webm video vp9 320 240 30/1 3 yuv420p false null opus 48000 2 0 null null "$SYNC_EXTRA"
+else
+    missing_encoder sync_vp9_opus.webm "libvpx-vp9 and libopus"
+fi
 
 make sync_h264_pcm.mov \
     -f lavfi -i "$SYNC_VIDEO" -f lavfi -i "$(sync_audio 48000)" \
@@ -475,10 +505,14 @@ add_entry audio_51_48k.wav audio null null null null 1 null false null pcm_s16le
     '"levels": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]'
 
 # Mono 1 kHz sine (amplitude 1/8) at 44.1 kHz as MP3, whose gapless header FFmpeg honours.
-make audio_44k1_mono.mp3 \
-    -f lavfi -i "sine=frequency=1000:sample_rate=44100:duration=2" -c:a libmp3lame -b:a 192k
-add_entry audio_44k1_mono.mp3 audio null null null null 2 null false null mp3 44100 1 0 null null \
-    '"sine_hz": 1000, "sine_amplitude": 0.125'
+if has_encoders libmp3lame; then
+    make audio_44k1_mono.mp3 \
+        -f lavfi -i "sine=frequency=1000:sample_rate=44100:duration=2" -c:a libmp3lame -b:a 192k
+    add_entry audio_44k1_mono.mp3 audio null null null null 2 null false null mp3 44100 1 0 null null \
+        '"sine_hz": 1000, "sine_amplitude": 0.125'
+else
+    missing_encoder audio_44k1_mono.mp3 libmp3lame
+fi
 
 make audio_48k_stereo.wav \
     -f lavfi -i "$TONE" -f lavfi -i "$NOISE" \
@@ -648,6 +682,9 @@ ELAPSED=$((SECONDS - START_SECONDS))
 TOTAL_KB=$(du -sk "$OUT" | cut -f1)
 echo "Summary: $GENERATED generated, $SKIPPED skipped, ${#MANIFEST_ENTRIES[@]} manifest entries," \
     "$((TOTAL_KB / 1024)) MB total, ${ELAPSED}s"
+if [ "$MISSING" -gt 0 ]; then
+    echo "Missing encoders: $MISSING fixture(s) not made; their tests skip (see the notes above)"
+fi
 
 [ "$VERIFY" -eq 1 ] || exit 0
 
