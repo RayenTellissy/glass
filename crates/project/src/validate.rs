@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use imbl::Vector;
 
+use crate::clip::check_clip;
 use crate::edit::check_item;
 use crate::error::EditError;
 use crate::id::{NodeId, TrackId};
@@ -31,8 +32,9 @@ pub enum ValidationError {
 impl Project {
     /// Checks every invariant the edit operations maintain: unique allocated ids, valid
     /// rates, items of a kind their track accepts, on its grid, sorted and not
-    /// overlapping, clips pointing at known media, markers sorted, not before zero and
-    /// (on sequences) on the frame grid.
+    /// overlapping, clips pointing at known media with their properties in range (a
+    /// constant speed map, finite numbers within their limits, valid effect schema ids),
+    /// markers sorted, not before zero and (on sequences) on the frame grid.
     pub fn validate(&self) -> Result<(), ValidationError> {
         let mut ids = HashSet::new();
         let mut claim = |id: NodeId| -> Result<(), ValidationError> {
@@ -94,6 +96,10 @@ impl Project {
                         ItemKind::Clip(clip) => {
                             if self.media.get(clip.media).is_none() {
                                 return Err(in_track(EditError::UnknownMedia(clip.media)));
+                            }
+                            check_clip(clip).map_err(in_track)?;
+                            for effect in &clip.effects {
+                                claim(effect.id.node())?;
                             }
                             check_markers(&clip.markers, None, &mut claim)?;
                         }
