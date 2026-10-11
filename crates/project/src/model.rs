@@ -205,6 +205,10 @@ impl<'de> Deserialize<'de> for MediaRefs {
 pub struct Sequence {
     pub id: SequenceId,
     pub name: String,
+    /// A compound clip's contents: made from a selection, shown only through the clips
+    /// that nest it, not in the browser's sequence list (schema v8; see
+    /// [`crate::nest`]).
+    pub compound: bool,
     /// The canvas size in pixels (schema v6).
     pub resolution: Resolution,
     /// Frames per second; video, subtitle and adjustment items sit on its frame grid.
@@ -232,6 +236,7 @@ impl Sequence {
         let Sequence {
             id,
             name,
+            compound,
             resolution,
             frame_rate,
             drop_frame,
@@ -242,6 +247,7 @@ impl Sequence {
         } = self;
         *id == other.id
             && *name == other.name
+            && *compound == other.compound
             && *resolution == other.resolution
             && *frame_rate == other.frame_rate
             && *drop_frame == other.drop_frame
@@ -439,12 +445,55 @@ impl Item {
     }
 }
 
-/// A piece of a source file placed on a track, with its properties (schema v4; see
-/// [`crate::clip`] for how they relate and the edits that set them).
+/// What a clip shows: a source file, or another sequence of the project (a nested
+/// sequence; schema v8, see [`crate::nest`]). Serialised flat inside the clip, as
+/// `"media": 3` or `"sequence": 7`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipSource {
+    Media(MediaId),
+    /// The sequence's timeline time is the clip's source time.
+    Sequence(SequenceId),
+}
+
+impl ClipSource {
+    pub fn media(self) -> Option<MediaId> {
+        match self {
+            ClipSource::Media(m) => Some(m),
+            ClipSource::Sequence(_) => None,
+        }
+    }
+
+    pub fn sequence(self) -> Option<SequenceId> {
+        match self {
+            ClipSource::Sequence(s) => Some(s),
+            ClipSource::Media(_) => None,
+        }
+    }
+}
+
+impl From<MediaId> for ClipSource {
+    fn from(media: MediaId) -> Self {
+        ClipSource::Media(media)
+    }
+}
+
+impl From<SequenceId> for ClipSource {
+    fn from(sequence: SequenceId) -> Self {
+        ClipSource::Sequence(sequence)
+    }
+}
+
+/// A piece of a source file, or of a nested sequence, placed on a track, with its
+/// properties (schema v4; see [`crate::clip`] for how they relate and the edits that set
+/// them).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Clip {
-    pub media: MediaId,
-    /// Source time (seconds from the start of the file) shown at the item's start.
+    /// The media or sequence it shows (schema v8; `"media"` or `"sequence"` in files).
+    #[serde(flatten)]
+    pub source: ClipSource,
+    /// Source time (seconds from the start of the file, or of the nested sequence) shown
+    /// at the item's start.
     pub source_start: Time,
     /// How fast the source plays: the source duration is the timeline duration times the
     /// speed.
@@ -473,12 +522,12 @@ pub struct Clip {
 }
 
 impl Clip {
-    /// A clip of `media` from `source_start` with every property at its default: speed 1,
-    /// enabled, 0 dB, centred at 100%, uncropped, opaque, normal blend, no effects, nothing
-    /// animated, no markers.
-    pub fn new(media: MediaId, source_start: Time) -> Self {
+    /// A clip of `source` (a [`MediaId`] or a [`SequenceId`]) from `source_start` with
+    /// every property at its default: speed 1, enabled, 0 dB, centred at 100%, uncropped,
+    /// opaque, normal blend, no effects, nothing animated, no markers.
+    pub fn new(source: impl Into<ClipSource>, source_start: Time) -> Self {
         Self {
-            media,
+            source: source.into(),
             source_start,
             speed: SpeedMap::default(),
             enabled: true,

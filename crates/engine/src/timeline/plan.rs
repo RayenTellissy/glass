@@ -12,8 +12,8 @@ use std::path::PathBuf;
 use media::{Rational as MediaRational, Timestamp};
 use project::params::{ParamValues, effects};
 use project::{
-    BlendMode as ProjectBlend, Crop, EditError, ItemId, Project, SequenceId, Time, TimeError,
-    TrackKind, Transform, TransitionId,
+    BlendMode as ProjectBlend, ClipSource, Crop, EditError, ItemId, Project, SequenceId, Time,
+    TimeError, TrackKind, Transform, TransitionId,
 };
 use render::blend::BlendMode;
 use render::frame_cache::SegmentHash;
@@ -150,6 +150,7 @@ pub struct TimelinePlan {
     /// Runs of frames that composite the same things, in order, with their cache hash.
     spans: Vec<(Range<i64>, SegmentHash)>,
     missing_media: usize,
+    nested_clips: usize,
     skipped_effects: usize,
 }
 
@@ -169,7 +170,8 @@ struct Draft {
 
 impl TimelinePlan {
     /// Compiles the video tracks of `sequence`. Clips that are disabled, whose media the
-    /// project does not list, or that sit on other kinds of tracks are left out; effects
+    /// project does not list, that nest a sequence, or that sit on other kinds of tracks
+    /// are left out; effects
     /// without a renderer (unknown schemas) are skipped and counted.
     pub fn build(project: &Project, sequence: SequenceId) -> Result<Self, PlanError> {
         let seq = project
@@ -183,6 +185,7 @@ impl TimelinePlan {
         let mut raw_transitions: Vec<(usize, TransitionLook, Option<ItemId>, Option<ItemId>)> =
             Vec::new();
         let mut missing_media = 0;
+        let mut nested_clips = 0;
         let mut skipped_effects = 0;
 
         let video: Vec<_> = seq
@@ -199,7 +202,13 @@ impl TimelinePlan {
                 if !clip.enabled {
                     continue;
                 }
-                let Some(media) = project.media().get(clip.media) else {
+                // Nested sequences are not rendered yet: their clips are left out and
+                // counted (`TimelinePlan::nested_clips`).
+                let ClipSource::Media(media_id) = clip.source else {
+                    nested_clips += 1;
+                    continue;
+                };
+                let Some(media) = project.media().get(media_id) else {
                     missing_media += 1;
                     continue;
                 };
@@ -219,7 +228,7 @@ impl TimelinePlan {
                     item: item.id,
                     item_range: range.clone(),
                     timeline: range,
-                    source: SourceRef::new(SourceId(clip.media.0), &media.path),
+                    source: SourceRef::new(SourceId(media_id.0), &media.path),
                     content_hash: media.content_hash.clone(),
                     source_start: clip.source_start,
                     speed: MediaRational::new(speed.num, speed.den),
@@ -364,6 +373,7 @@ impl TimelinePlan {
             tracks,
             spans: Vec::new(),
             missing_media,
+            nested_clips,
             skipped_effects,
         };
         plan.spans = plan.compute_spans();
@@ -425,6 +435,12 @@ impl TimelinePlan {
     /// Clips left out because the project lists no media for them.
     pub fn missing_media(&self) -> usize {
         self.missing_media
+    }
+
+    /// Enabled clips of nested sequences (Decision 69), left out until the renderer
+    /// composites a nested sequence as a layer: they show nothing yet.
+    pub fn nested_clips(&self) -> usize {
+        self.nested_clips
     }
 
     /// Enabled effects left out because this build has no renderer for them.
