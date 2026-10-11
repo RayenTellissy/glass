@@ -84,6 +84,8 @@ pub enum EditError {
     UnknownTransition(TransitionId),
     #[error("transition kind {0:?} is not lowercase ASCII letters, digits and '-'")]
     InvalidTransitionKind(String),
+    #[error("direction {0:?} is not lowercase ASCII letters, digits, '_' and '-'")]
+    InvalidDirection(String),
     #[error("easing {0:?} is not lowercase ASCII letters, digits and '-'")]
     InvalidEasing(String),
     #[error("a transition needs an outgoing clip, an incoming clip or both")]

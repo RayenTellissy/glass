@@ -1154,7 +1154,6 @@ fn a_v3_clip_already_holding_a_v4_property_is_refused_by_the_migration() {
 }
 
 #[test]
-#[ignore = "suspected bug: migrate_v3_to_v4 skips a track that is not an object instead of failing"]
 fn the_v3_migration_refuses_a_track_that_is_not_an_object() {
     for track in [json!(5), json!("V1"), json!([])] {
         let v3 = json!({ "sequences": [{ "tracks": [track] }] });

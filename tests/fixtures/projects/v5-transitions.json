@@ -235,6 +235,7 @@
                 "kind": "cross-dissolve",
                 "duration": "2/5",
                 "alignment": "start",
+                "direction": null,
                 "easing": "linear",
                 "params": {}
               },
@@ -245,6 +246,7 @@
                 "kind": "cross-dissolve",
                 "duration": "12/25",
                 "alignment": "centre",
+                "direction": null,
                 "easing": "linear",
                 "params": {}
               },
@@ -255,6 +257,7 @@
                 "kind": "iris",
                 "duration": "8/25",
                 "alignment": "end",
+                "direction": "up_left",
                 "easing": "ease-in-out",
                 "params": {
                   "softness": {
@@ -269,6 +272,7 @@
                 "kind": "cross-dissolve",
                 "duration": "4/5",
                 "alignment": "start",
+                "direction": null,
                 "easing": "linear",
                 "params": {}
               },
@@ -279,6 +283,7 @@
                 "kind": "cross-dissolve",
                 "duration": "1/5",
                 "alignment": "centre",
+                "direction": null,
                 "easing": "linear",
                 "params": {}
               }
@@ -396,6 +401,7 @@
                 "kind": "cross-dissolve",
                 "duration": "1/2",
                 "alignment": "centre",
+                "direction": null,
                 "easing": "linear",
                 "params": {}
               }

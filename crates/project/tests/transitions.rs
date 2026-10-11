@@ -389,6 +389,13 @@ fn adding_refuses_bad_arguments_and_cuts_in_order() {
     );
     assert_eq!(
         bad(ab.clone(), &|s| {
+            s.direction = Some(String::new());
+            s.easing = "Bad".into();
+        }),
+        Err(EditError::InvalidDirection(String::new()))
+    );
+    assert_eq!(
+        bad(ab.clone(), &|s| {
             s.easing = "ease_in".into();
             s.duration = Time::ZERO;
         }),
@@ -498,6 +505,24 @@ fn every_transition_edit_is_undoable_and_no_ops_share_the_tree() {
     assert_eq!(q.find_transition(t).expect("t").2.easing, "ease-in-out");
     undo_redo(&p, &q, EditLabel::Transition);
 
+    assert_eq!(p.find_transition(t).expect("t").2.direction, None);
+    let q = p
+        .set_transition_direction(t, Some("up_left"))
+        .expect("direction");
+    assert_eq!(
+        q.find_transition(t).expect("t").2.direction.as_deref(),
+        Some("up_left")
+    );
+    undo_redo(&p, &q, EditLabel::Transition);
+    // A new kind keeps the direction.
+    let r = q.set_transition_kind(t, "push").expect("kind");
+    assert_eq!(
+        r.find_transition(t).expect("t").2.direction.as_deref(),
+        Some("up_left")
+    );
+    let r = q.set_transition_direction(t, None).expect("default");
+    assert!(r.content_eq(&p));
+
     let q = p.remove_transition(t).expect("remove");
     assert!(!exists(&q, t));
     assert!(
@@ -513,6 +538,7 @@ fn every_transition_edit_is_undoable_and_no_ops_share_the_tree() {
         p.set_transition_alignment(t, Alignment::Centre),
         p.set_transition_kind(t, DEFAULT_KIND),
         p.set_transition_easing(t, DEFAULT_EASING),
+        p.set_transition_direction(t, None),
     ] {
         let same = same.expect("no-op");
         assert!(same.content_eq(&p));
@@ -552,6 +578,16 @@ fn every_transition_edit_is_undoable_and_no_ops_share_the_tree() {
     );
     assert_eq!(
         p.set_transition_kind(unknown, "iris").map(|_| ()),
+        Err(EditError::UnknownTransition(unknown))
+    );
+    assert_eq!(
+        p.set_transition_direction(unknown, Some("Left"))
+            .map(|_| ()),
+        Err(EditError::InvalidDirection("Left".into()))
+    );
+    assert_eq!(
+        p.set_transition_direction(unknown, Some("left"))
+            .map(|_| ()),
         Err(EditError::UnknownTransition(unknown))
     );
     assert_eq!(
@@ -1026,6 +1062,10 @@ fn loading_refuses_transitions_that_break_the_invariants() {
     assert_eq!(
         invalid(load_with(&p, |t| t[0]["kind"] = "Cross".into())),
         EditError::InvalidTransitionKind("Cross".into())
+    );
+    assert_eq!(
+        invalid(load_with(&p, |t| t[0]["direction"] = "Up Left".into())),
+        EditError::InvalidDirection("Up Left".into())
     );
     assert_eq!(
         invalid(load_with(&p, |t| t[0]["easing"] = "".into())),

@@ -34,8 +34,11 @@
 //!
 //! The transition's `kind` is the id of a transition in the render-side registry
 //! (`assets/transitions/<id>/`), and its `params` follow that transition's parameter
-//! schema; a kind this build does not know is kept as it is. `easing` names the curve the
-//! progress follows (`linear` until the easing editor adds others).
+//! schema; a kind this build does not know is kept as it is. `direction` is one of the
+//! directions the kind offers (`left`, `up_right`; `None` for the kind's default), kept when
+//! the kind changes (the engine falls back to the new kind's default when it does not offer
+//! it). `easing` names the curve the progress follows (`linear`, `ease-in`, `ease-out`,
+//! `ease-in-out`; custom curves arrive with the easing editor).
 //!
 //! [`Track::segment_at`] is the engine's query: what plays on a track at a time, one item
 //! or a transition between two clips with its progress. Pure: `project` starts no threads.
@@ -136,6 +139,9 @@ pub struct Transition {
     /// Positive, a whole number of the track's grid steps.
     pub duration: Time,
     pub alignment: Alignment,
+    /// The render-side direction id (`left`, `down_right`): lowercase ASCII letters, digits,
+    /// `_` and `-`; `None` for the kind's default.
+    pub direction: Option<String>,
     /// The id of the curve progress follows (`linear`), same characters as `kind`.
     pub easing: String,
     /// Values for the kind's parameter schema; an unset parameter reads as its default.
@@ -151,13 +157,14 @@ pub struct TransitionSpec {
     pub kind: String,
     pub duration: Time,
     pub alignment: Alignment,
+    pub direction: Option<String>,
     pub easing: String,
     pub params: ParamValues,
 }
 
 impl TransitionSpec {
-    /// A [`DEFAULT_KIND`] transition, centred, [`DEFAULT_EASING`], every parameter at its
-    /// default.
+    /// A [`DEFAULT_KIND`] transition, centred, in the kind's default direction,
+    /// [`DEFAULT_EASING`], every parameter at its default.
     pub fn new(outgoing: Option<ItemId>, incoming: Option<ItemId>, duration: Time) -> Self {
         Self {
             outgoing,
@@ -165,6 +172,7 @@ impl TransitionSpec {
             kind: DEFAULT_KIND.to_owned(),
             duration,
             alignment: Alignment::Centre,
+            direction: None,
             easing: DEFAULT_EASING.to_owned(),
             params: ParamValues::new(),
         }
@@ -227,6 +235,20 @@ fn check_easing(easing: &str) -> Result<(), EditError> {
         Ok(())
     } else {
         Err(EditError::InvalidEasing(easing.to_owned()))
+    }
+}
+
+fn check_direction(direction: Option<&str>) -> Result<(), EditError> {
+    match direction {
+        Some(d)
+            if d.is_empty()
+                || !d.chars().all(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-'
+                }) =>
+        {
+            Err(EditError::InvalidDirection(d.to_owned()))
+        }
+        _ => Ok(()),
     }
 }
 
@@ -544,6 +566,7 @@ pub(crate) fn check_track(track: &Track, grid: Time) -> Result<(), EditError> {
     let mut cuts = Vec::with_capacity(track.transitions.len());
     for t in &track.transitions {
         check_kind(&t.kind)?;
+        check_direction(t.direction.as_deref())?;
         check_easing(&t.easing)?;
         check_duration(t.duration, grid, track)?;
         cuts.push((resolve(track, &index, t.outgoing, t.incoming)?, t));
@@ -790,7 +813,8 @@ impl Project {
 
     /// Adds a transition on the cut `spec` names. Error order: argument checks
     /// ([`EditError::TransitionNeedsClip`], [`EditError::InvalidTransitionKind`],
-    /// [`EditError::InvalidEasing`], [`EditError::EmptyRange`] for a duration ≤ 0), then
+    /// [`EditError::InvalidDirection`], [`EditError::InvalidEasing`],
+    /// [`EditError::EmptyRange`] for a duration ≤ 0), then
     /// the clips ([`EditError::UnknownItem`], [`EditError::NotAClip`], outgoing first;
     /// [`EditError::NotAdjacent`] for clips on different tracks or not meeting;
     /// [`EditError::CutNotFree`]), then [`EditError::TransitionExists`] for an edge that
@@ -805,6 +829,7 @@ impl Project {
             return Err(EditError::TransitionNeedsClip);
         }
         check_kind(&spec.kind)?;
+        check_direction(spec.direction.as_deref())?;
         check_easing(&spec.easing)?;
         if !spec.duration.is_positive() {
             return Err(EditError::EmptyRange(spec.duration));
@@ -848,6 +873,7 @@ impl Project {
             kind: spec.kind,
             duration: spec.duration,
             alignment: spec.alignment,
+            direction: spec.direction,
             easing: spec.easing,
             params: spec.params,
         };
@@ -896,7 +922,8 @@ impl Project {
     }
 
     /// Changes which transition plays. The parameter values belonged to the old kind, so
-    /// they are cleared (every parameter of the new kind at its default). Error order:
+    /// they are cleared (every parameter of the new kind at its default); the direction is
+    /// kept. Error order:
     /// [`EditError::InvalidTransitionKind`], [`EditError::UnknownTransition`].
     pub fn set_transition_kind(
         &self,
@@ -909,6 +936,20 @@ impl Project {
                 t.kind = kind.to_owned();
                 t.params = ParamValues::new();
             }
+            Ok(())
+        })
+    }
+
+    /// Changes the direction a transition travels in (`None`: the kind's default). Error
+    /// order: [`EditError::InvalidDirection`], [`EditError::UnknownTransition`].
+    pub fn set_transition_direction(
+        &self,
+        transition: TransitionId,
+        direction: Option<&str>,
+    ) -> Result<Project, EditError> {
+        check_direction(direction)?;
+        self.change_transition(transition, false, |t| {
+            t.direction = direction.map(str::to_owned);
             Ok(())
         })
     }

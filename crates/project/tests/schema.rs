@@ -260,6 +260,7 @@ fn transitions() -> Project {
     let (p, wipe) = p
         .add_transition(TransitionSpec {
             kind: "iris".into(),
+            direction: Some("up_left".into()),
             easing: "ease-in-out".into(),
             ..at(Some(second), Some(third), 8, Alignment::End)
         })
@@ -491,6 +492,7 @@ fn the_transitions_fixture_round_trips_every_transition_field() {
     assert_eq!(wipe["kind"], "iris");
     assert_eq!(wipe["alignment"], "end");
     assert_eq!(wipe["easing"], "ease-in-out");
+    assert_eq!(wipe["direction"], "up_left");
     assert_eq!(wipe["duration"], "8/25");
     assert_eq!(
         wipe["params"],
@@ -499,6 +501,7 @@ fn the_transitions_fixture_round_trips_every_transition_field() {
     let fade_in = &json["project"]["sequences"][0]["tracks"][0]["transitions"][0];
     assert_eq!(fade_in["outgoing"], Value::Null);
     assert_eq!(fade_in["alignment"], "start");
+    assert_eq!(fade_in["direction"], Value::Null);
 }
 
 #[test]
