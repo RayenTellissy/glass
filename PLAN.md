@@ -279,7 +279,7 @@ Done when: the v0.1 checklist passes on both platforms and a tagged build ships 
   - [x] PNG and TIFF sequences, GIF
   - [x] Audio: WAV, AAC and FLAC, alone and in video containers
   - [ ] AV1, VP9 and MP3 encoders: in the API, reported unavailable by this build (needs-human: the pinned FFmpeg 9.0.2 build has no AV1, VP9 or MP3 encoder; adding SVT-AV1 or libaom, libvpx and LAME needs new source downloads in `scripts/ffmpeg/versions.env` and a rebuild, Decision 47)
-- [ ] Hardware encode: VideoToolbox, NVENC, QSV, AMF, with software fallback (x264 for H.264, x265 for HEVC)
+- [~] Hardware encode: VideoToolbox, NVENC, QSV, AMF, with software fallback (x264 for H.264, x265 for HEVC)
 - [ ] Presets: YouTube, TikTok, Instagram, X, Vimeo, broadcast, archival
 - [ ] Custom preset editor: bitrate, CRF, two-pass, colour tags, audio settings
 - [ ] Background export queue with progress, pause, cancel, notifications
