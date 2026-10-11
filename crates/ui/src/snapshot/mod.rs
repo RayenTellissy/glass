@@ -15,6 +15,7 @@ mod pool_cases;
 mod relink_cases;
 mod timeline_cases;
 mod track_header_cases;
+mod workspace_cases;
 
 use std::path::Path;
 

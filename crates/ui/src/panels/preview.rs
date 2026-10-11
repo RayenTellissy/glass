@@ -220,17 +220,6 @@ pub fn preview_panel(ui: &mut Ui, rect: Rect, view: &PreviewView) -> PreviewActi
         Role::TextMuted,
         row.width() / 3.0,
     );
-    if view.silent {
-        paint.text(
-            &painter,
-            pos2(right.left() - paint.s().s12, row.center().y),
-            Align2::RIGHT_CENTER,
-            &t!("preview.no_audio"),
-            Type::Caption,
-            Role::TextMuted,
-            row.width() / 4.0,
-        );
-    }
 
     let buttons = [
         (
@@ -262,6 +251,23 @@ pub fn preview_panel(ui: &mut Ui, rect: Rect, view: &PreviewView) -> PreviewActi
     let gap = paint.s().s4;
     let total = buttons.len() as f32 * BUTTON + (buttons.len() - 1) as f32 * gap;
     let mut x = row.center().x - total / 2.0;
+    if view.silent {
+        // Between the transport and the duration, left out when it does not fit.
+        let caption = t!("preview.no_audio");
+        let end = right.left() - paint.s().s12;
+        let room = end - (row.center().x + total / 2.0 + paint.s().s12);
+        if paint.width(&painter, &caption, Type::Caption) <= room {
+            paint.text(
+                &painter,
+                pos2(end, row.center().y),
+                Align2::RIGHT_CENTER,
+                &caption,
+                Type::Caption,
+                Role::TextMuted,
+                room,
+            );
+        }
+    }
     for (which, label, act) in buttons {
         let r = Rect::from_min_size(pos2(x, row.center().y - BUTTON / 2.0), vec2(BUTTON, BUTTON));
         let on = which == Glyph::Pause;

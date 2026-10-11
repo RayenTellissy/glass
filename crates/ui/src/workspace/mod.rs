@@ -109,10 +109,25 @@ impl Preset {
 
 /// One layout: which panels are open, how they are split and tabbed, and the split
 /// fractions.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub struct Workspace {
     pub dock: DockState<PanelKind>,
+}
+
+/// Written without the areas the dock measured on screen: they are recomputed on the
+/// next frame, and an area not measured yet is infinite, which JSON cannot hold.
+impl Serialize for Workspace {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut dock = self.dock.clone();
+        for (_, node) in dock.iter_all_nodes_mut() {
+            node.set_rect(egui::Rect::ZERO);
+            if let egui_dock::Node::Leaf(leaf) = node {
+                leaf.viewport = egui::Rect::ZERO;
+            }
+        }
+        dock.serialize(serializer)
+    }
 }
 
 impl PartialEq for Workspace {

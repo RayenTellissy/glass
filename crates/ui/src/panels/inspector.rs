@@ -38,9 +38,7 @@ pub fn inspector_panel(ui: &mut Ui, rect: Rect) {
         body.width() - 4.0 * pad,
         true,
     );
-    let at = pos2(
-        body.center().x - galley.size().x / 2.0,
-        body.center().y - galley.size().y / 2.0,
-    );
+    // A centred galley is laid out around x = 0, so place its own centre.
+    let at = body.center() - galley.rect.center().to_vec2();
     painter.galley(at, galley, paint.c(Role::TextMuted));
 }
