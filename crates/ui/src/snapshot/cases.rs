@@ -10,7 +10,7 @@ use engine::media_mgmt::{DropSummary, Unreadable};
 use project::media_pool::{Facts, Gps, Metadata};
 use project::params::{ParamDef, ParamSchema, ParamValue, ParamValues, Range, Unit, builtin};
 
-use super::{SnapshotCase, pool_cases, relink_cases};
+use super::{SnapshotCase, pool_cases, relink_cases, track_header_cases as th};
 use crate::dialogs::about::{self, AboutDialog, AboutInfo, Licence, View};
 use crate::dialogs::recovery::{self, RecoveryDialog, RecoveryPrompt, RecoveryState};
 use crate::dialogs::shortcuts::{self, ShortcutsEditor};
@@ -112,6 +112,42 @@ pub(super) fn all() -> Vec<SnapshotCase> {
             module: "panels/media_pool",
             size: pool_cases::MENU_SIZE,
             draw: pool_cases::label_menu,
+        },
+        SnapshotCase {
+            name: "track_headers_default",
+            module: "panels/timeline/track_header",
+            size: th::DEFAULT_SIZE,
+            draw: th::default,
+        },
+        SnapshotCase {
+            name: "track_headers_states",
+            module: "panels/timeline/track_header",
+            size: th::STATES_SIZE,
+            draw: th::states,
+        },
+        SnapshotCase {
+            name: "track_headers_mix",
+            module: "panels/timeline/track_header",
+            size: th::MIX_SIZE,
+            draw: th::mix,
+        },
+        SnapshotCase {
+            name: "track_headers_heights",
+            module: "panels/timeline/track_header",
+            size: th::HEIGHTS_SIZE,
+            draw: th::heights,
+        },
+        SnapshotCase {
+            name: "track_headers_renaming",
+            module: "panels/timeline/track_header",
+            size: th::RENAME_SIZE,
+            draw: th::renaming,
+        },
+        SnapshotCase {
+            name: "track_headers_rtl",
+            module: "panels/timeline/track_header",
+            size: th::DEFAULT_SIZE,
+            draw: th::rtl,
         },
         SnapshotCase {
             name: "widgets_controls",

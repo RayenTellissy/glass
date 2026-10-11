@@ -476,6 +476,13 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Details:** `crates/smoke/src/{main,reference,run}.rs`, `crates/smoke/tests/reference.rs`. No LUT effect: there is no `.cube` fixture yet. Relative media paths are resolved by `smoke` only; the app's project open does not resolve them yet.
 - **Consequences:** The export's audio is silence until the engine mixes audio; then `smoke` should push the mixed A1 track and verify loudness. CI jobs without generated fixtures (Windows) fail `smoke` until they generate them.
 
+## 68. Track header switches and heights are UI state until a schema version stores them
+
+- **Date:** 2026-10-11
+- **Decision:** Mute, solo, lock, visibility and the height preset (Small 28, Medium 48, Large 72 points) live in `ui::panels::timeline::track_header::TrackHeaderState`, keyed by track id, and are not saved in the project file; only the track name is a project edit (`Project::rename_track`, undo label `RenameTrack`, no schema change). Audio tracks show mute and solo, the other kinds a visibility switch; every track has a lock and a height. Any soloed audio track silences the audio tracks that are not soloed (mute still wins over solo), and their mute switch shows that implied state. A locked track refuses mute, solo, visibility and rename, but can still be unlocked and resized.
+- **Reason:** Storing the switches on `project::Track` changes the model, which needs a new schema version, and a schema bump (v7, keyframes) was already in progress on another branch; two concurrent bumps would conflict. The header's actions and state are already typed, so moving them into the project later only changes who applies them.
+- **Details:** `crates/ui/src/panels/timeline/track_header.rs`; tests `crates/ui/tests/track_headers.rs`, `crates/project/tests/sequences.rs` (`tracks_rename_with_trimmed_names_and_undo`); snapshot cases `track_headers_*`.
+- **Consequences:** Switches and heights are lost when the project is closed until a later schema version adds them to tracks (with undo labels for each switch) and `TrackHeaderState` becomes a view over the project. Header actions are not shortcut commands yet.
 ## 64. Timing tests: serial sections, thread CPU time, load-robust statistics by default, the strict ones under `GLASS_STRICT_TIMING=1`
 
 - **Date:** 2026-10-11
