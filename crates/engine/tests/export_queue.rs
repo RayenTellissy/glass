@@ -273,6 +273,7 @@ fn exact_layers(plan: &TimelinePlan, t: i64) -> Vec<Layer<VideoFrame>> {
             source: segment.source.id,
             source_pts: Some(pts),
             frame: Some(Arc::new(frame)),
+            skipped: false,
         });
     }
     layers

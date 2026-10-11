@@ -681,6 +681,7 @@ where
                 source: segment.source.id,
                 source_pts,
                 frame: decoded,
+                skipped: false,
             });
         }
         Some(layers)

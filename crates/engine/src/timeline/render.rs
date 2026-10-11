@@ -45,7 +45,9 @@ use render::transition::{Direction, ParamValue, Transition, TransitionNode, Tran
 use render::upload::{UploadedFrame, upload_frame};
 use render::wgpu;
 
+use super::dirty::DirtyFrames;
 use super::plan::{ClipLook, EffectLook, FrameDesc, TimelinePlan, TrackFrame};
+use super::playback::FrameRender;
 use crate::lookahead::Layer;
 use crate::quality::QualityLevel;
 use crate::scrub::CachedFrames;
@@ -463,6 +465,30 @@ impl TimelineRenderer {
         }
     }
 
+    /// Brings the index in step with `plan`, which replaced the plan it followed, where
+    /// keys may have changed (`dirty`): a frame there stays listed only when the cache
+    /// holds it under its new key, which an undo finds again. Nothing is evicted: frames
+    /// under keys no plan reads any more age out of the cache's LRU order.
+    pub fn reindex_dirty(&mut self, plan: &TimelinePlan, dirty: &DirtyFrames) {
+        if dirty.is_all() {
+            self.reindex(plan);
+            return;
+        }
+        if dirty.is_empty() {
+            return;
+        }
+        let resident: BTreeSet<i64> = self
+            .resident_frames(plan)
+            .into_iter()
+            .filter(|frame| dirty.contains(*frame))
+            .collect();
+        self.cached
+            .retain(|frame| !dirty.contains(*frame) || resident.contains(frame));
+        for frame in resident {
+            self.cached.insert(frame);
+        }
+    }
+
     fn resident_frames(&self, plan: &TimelinePlan) -> BTreeSet<i64> {
         let variant = self.variant(QualityLevel::Full);
         self.cache
@@ -561,6 +587,49 @@ impl TimelineRenderer {
             }
         }
         node
+    }
+}
+
+impl FrameRender for TimelineRenderer {
+    type Frame = VideoFrame;
+    type Picture = wgpu::Texture;
+
+    fn render_frame(
+        &mut self,
+        plan: &TimelinePlan,
+        t: i64,
+        layers: &[Layer<VideoFrame>],
+        quality: QualityLevel,
+    ) -> (wgpu::Texture, bool) {
+        let rendered = self.render(plan, t, layers, quality);
+        if let Some(submission) = rendered.submission {
+            let _ = self.device().poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: None,
+            });
+        }
+        (rendered.texture, rendered.from_cache)
+    }
+
+    fn lookup_frame(
+        &mut self,
+        plan: &TimelinePlan,
+        t: i64,
+        quality: QualityLevel,
+    ) -> Option<wgpu::Texture> {
+        self.lookup(plan, t, quality)
+    }
+
+    fn replan(&mut self, plan: &TimelinePlan, dirty: &DirtyFrames) {
+        self.reindex_dirty(plan, dirty);
+    }
+
+    fn cached_frames(&self) -> CachedFrames {
+        self.cached.clone()
+    }
+
+    fn counters(&self) -> (RenderStats, FrameCacheStats) {
+        (self.stats, self.cache.stats())
     }
 }
 
