@@ -32,7 +32,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 rtrb.workspace = true
 crossbeam-queue.workspace = true
-crossbeam-utils.workspace = true
 thread-id.workspace = true
 
 [dev-dependencies]

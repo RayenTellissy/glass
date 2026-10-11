@@ -17,13 +17,16 @@ pub mod params;
 pub mod relink;
 pub mod schema;
 pub mod time;
+pub mod transition;
 pub mod validate;
 
 pub use clip::{BlendMode, Crop, Effect, SpeedKeep, SpeedKey, SpeedMap, Transform};
 pub use edit::ClipSpec;
 pub use error::EditError;
 pub use history::{EditLabel, History, MemoryStats};
-pub use id::{BinId, EffectId, ItemId, MarkerId, MediaId, NodeId, SequenceId, TrackId};
+pub use id::{
+    BinId, EffectId, ItemId, MarkerId, MediaId, NodeId, SequenceId, TrackId, TransitionId,
+};
 pub use marker::{Marker, MarkerOwner, MarkerSpec, TodoState};
 pub use media_pool::ColourLabel;
 pub use model::{
@@ -33,4 +36,7 @@ pub use model::{
 pub use relink::Relink;
 pub use schema::LoadError;
 pub use time::{Rational, Time, TimeError, TimeRange};
+pub use transition::{
+    Alignment, CutSide, HandleNeeds, Segment, Transition, TransitionAt, TransitionSpec,
+};
 pub use validate::ValidationError;

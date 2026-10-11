@@ -14,6 +14,7 @@ use crate::id::{NodeId, TrackId};
 use crate::marker::{Marker, check_marker, is_sorted};
 use crate::model::{ItemKind, Project};
 use crate::time::Time;
+use crate::transition::check_track;
 
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum ValidationError {
@@ -34,7 +35,9 @@ impl Project {
     /// rates, items of a kind their track accepts, on its grid, sorted and not
     /// overlapping, clips pointing at known media with their properties in range (a
     /// constant speed map, finite numbers within their limits, valid effect schema ids),
-    /// markers sorted, not before zero and (on sequences) on the frame grid.
+    /// markers sorted, not before zero and (on sequences) on the frame grid, and
+    /// transitions ordered by id on cuts that resolve, fitting their clips and head
+    /// handles without overlapping ([`crate::transition`]).
     pub fn validate(&self) -> Result<(), ValidationError> {
         let mut ids = HashSet::new();
         let mut claim = |id: NodeId| -> Result<(), ValidationError> {
@@ -107,6 +110,18 @@ impl Project {
                     }
                     previous = Some(item);
                 }
+                let mut last = None;
+                for transition in &track.transitions {
+                    claim(transition.id.node())?;
+                    if last.is_some_and(|id| id > transition.id) {
+                        return Err(ValidationError::Structure(format!(
+                            "transitions on track {} are not ordered by id",
+                            track.id
+                        )));
+                    }
+                    last = Some(transition.id);
+                }
+                check_track(track, grid).map_err(in_track)?;
             }
         }
         Ok(())

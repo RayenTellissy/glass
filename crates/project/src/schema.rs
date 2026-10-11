@@ -6,7 +6,7 @@
 //! ```json
 //! {
 //!   "format": "glass.project",
-//!   "schema_version": 4,
+//!   "schema_version": 5,
 //!   "project": { "uid": "...", "name": "...", "next_id": 7, "media": {...}, "sequences": [...] }
 //! }
 //! ```
@@ -44,6 +44,8 @@
 //!   at source time 0 for a constant speed), `enabled`, `gain_db`, `transform` (offsets
 //!   from the canvas and layer centres), `crop`, `opacity`, `blend` and `effects` (the
 //!   effect stack, each effect with its own node id).
+//! - v5: tracks carry `transitions` (`crate::transition`), each a node with its own id on
+//!   a cut between two clips, or between a clip and nothing next to a gap.
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -55,7 +57,7 @@ use crate::validate::ValidationError;
 pub const FORMAT: &str = "glass.project";
 
 /// The schema version this build writes, and the newest it reads.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// The oldest schema version this build reads.
 pub const OLDEST_VERSION: u32 = 1;
@@ -64,8 +66,12 @@ pub const OLDEST_VERSION: u32 = 1;
 pub type Migration = fn(Value) -> Result<Value, String>;
 
 /// `MIGRATIONS[i]` takes version `OLDEST_VERSION + i` to the next one.
-pub const MIGRATIONS: [Migration; (SCHEMA_VERSION - OLDEST_VERSION) as usize] =
-    [migrate_v1_to_v2, migrate_v2_to_v3, migrate_v3_to_v4];
+pub const MIGRATIONS: [Migration; (SCHEMA_VERSION - OLDEST_VERSION) as usize] = [
+    migrate_v1_to_v2,
+    migrate_v2_to_v3,
+    migrate_v3_to_v4,
+    migrate_v4_to_v5,
+];
 
 /// Why a project file could not be read. [`LoadError::i18n_key`] names the message to
 /// show.
@@ -225,7 +231,11 @@ pub fn migrate_v2_to_v3(mut project: Value) -> Result<Value, String> {
             .as_array_mut()
             .ok_or_else(|| "tracks is not a list".to_string())?
         {
-            let Some(items) = track.get_mut("items") else {
+            let Some(items) = track
+                .as_object_mut()
+                .ok_or_else(|| "a track is not an object".to_string())?
+                .get_mut("items")
+            else {
                 continue;
             };
             for item in items
@@ -276,7 +286,11 @@ pub fn migrate_v3_to_v4(mut project: Value) -> Result<Value, String> {
             .as_array_mut()
             .ok_or_else(|| "tracks is not a list".to_string())?
         {
-            let Some(items) = track.get_mut("items") else {
+            let Some(items) = track
+                .as_object_mut()
+                .ok_or_else(|| "a track is not an object".to_string())?
+                .get_mut("items")
+            else {
                 continue;
             };
             for item in items
@@ -323,6 +337,40 @@ fn add_clip_properties(clip: &mut Map<String, Value>) -> Result<(), String> {
         clip.insert(key, value);
     }
     Ok(())
+}
+
+/// v4 → v5: every track gets an empty `transitions` list. Nothing else changes, nor does
+/// `next_id`.
+pub fn migrate_v4_to_v5(mut project: Value) -> Result<Value, String> {
+    let root = object(&mut project)?;
+    let Some(sequences) = root.get_mut("sequences") else {
+        return Ok(project);
+    };
+    let sequences = sequences
+        .as_array_mut()
+        .ok_or_else(|| "sequences is not a list".to_string())?;
+    for sequence in sequences {
+        let Some(tracks) = sequence
+            .as_object_mut()
+            .ok_or_else(|| "a sequence is not an object".to_string())?
+            .get_mut("tracks")
+        else {
+            continue;
+        };
+        for track in tracks
+            .as_array_mut()
+            .ok_or_else(|| "tracks is not a list".to_string())?
+        {
+            let track = track
+                .as_object_mut()
+                .ok_or_else(|| "a track is not an object".to_string())?;
+            if track.contains_key("transitions") {
+                return Err("a v4 track already has transitions".to_string());
+            }
+            track.insert("transitions".to_string(), Value::Array(Vec::new()));
+        }
+    }
+    Ok(project)
 }
 
 #[cfg(test)]
@@ -441,6 +489,21 @@ mod tests {
         assert!(migrate_v3_to_v4(json!({ "sequences": {} })).is_err());
         assert!(migrate_v3_to_v4(json!({ "sequences": [1] })).is_err());
         assert!(migrate_v3_to_v4(json!({ "sequences": [{ "tracks": {} }] })).is_err());
+        for track in [json!(5), json!("V1"), json!([])] {
+            let tracks = json!({ "sequences": [{ "tracks": [track] }] });
+            assert_eq!(
+                migrate_v3_to_v4(tracks.clone()),
+                Err("a track is not an object".to_string())
+            );
+            assert_eq!(
+                migrate_v2_to_v3(tracks.clone()),
+                Err("a track is not an object".to_string())
+            );
+            assert_eq!(
+                migrate_v4_to_v5(tracks),
+                Err("a track is not an object".to_string())
+            );
+        }
         assert!(
             migrate_v3_to_v4(json!({ "sequences": [{ "tracks": [{ "items": [2] }] }] })).is_err()
         );
@@ -452,6 +515,52 @@ mod tests {
         assert_eq!(
             migrate_v3_to_v4(json!({ "uid": "u" })).expect("no sequences"),
             json!({ "uid": "u" })
+        );
+    }
+
+    #[test]
+    fn v4_to_v5_gives_tracks_empty_transition_lists() {
+        let v4 = json!({
+            "next_id": 9,
+            "sequences": [
+                {
+                    "id": 2,
+                    "tracks": [
+                        { "id": 3, "kind": "video", "items": [{ "id": 4, "type": "clip" }] },
+                        { "id": 5, "kind": "subtitle", "items": [] }
+                    ]
+                },
+                { "id": 6, "tracks": [] }
+            ]
+        });
+        let v5 = migrate_v4_to_v5(v4.clone()).expect("migrates");
+        let mut expected = v4;
+        for track in expected["sequences"][0]["tracks"]
+            .as_array_mut()
+            .expect("tracks")
+        {
+            track["transitions"] = json!([]);
+        }
+        assert_eq!(v5, expected);
+    }
+
+    #[test]
+    fn v4_to_v5_rejects_malformed_trees() {
+        assert!(migrate_v4_to_v5(json!([])).is_err());
+        assert!(migrate_v4_to_v5(json!({ "sequences": {} })).is_err());
+        assert!(migrate_v4_to_v5(json!({ "sequences": [1] })).is_err());
+        assert!(migrate_v4_to_v5(json!({ "sequences": [{ "tracks": {} }] })).is_err());
+        assert!(migrate_v4_to_v5(json!({ "sequences": [{ "tracks": [3] }] })).is_err());
+        let err = migrate_v4_to_v5(json!({ "sequences": [{ "tracks": [{ "transitions": [] }] }] }))
+            .expect_err("a v4 track has no transitions");
+        assert_eq!(err, "a v4 track already has transitions");
+        assert_eq!(
+            migrate_v4_to_v5(json!({ "uid": "u" })).expect("no sequences"),
+            json!({ "uid": "u" })
+        );
+        assert_eq!(
+            migrate_v4_to_v5(json!({ "sequences": [{ "id": 1 }] })).expect("no tracks"),
+            json!({ "sequences": [{ "id": 1 }] })
         );
     }
 

@@ -20,6 +20,7 @@ use crate::error::EditError;
 use crate::id::{EffectId, ItemId, MarkerId, MediaId, SequenceId, TrackId};
 use crate::marker::Marker;
 use crate::time::{Rational, Time, TimeError, TimeRange};
+use crate::transition::Transition;
 
 /// The document root. Cheap to clone; see the module docs.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -287,6 +288,9 @@ pub struct Track {
     pub kind: TrackKind,
     pub name: String,
     pub items: Vector<Arc<Item>>,
+    /// Transitions on the cuts of this track's clips, ordered by id (schema v5; see
+    /// [`crate::transition`]).
+    pub transitions: Vector<Arc<Transition>>,
 }
 
 impl Track {
@@ -301,11 +305,13 @@ impl Track {
             kind,
             name,
             items,
+            transitions,
         } = self;
         *id == other.id
             && *kind == other.kind
             && *name == other.name
             && all_eq(items, &other.items, |a, b| a == b)
+            && all_eq(transitions, &other.transitions, |a, b| a == b)
     }
 
     pub(crate) fn item_index(&self, id: ItemId) -> Option<usize> {
@@ -438,6 +444,15 @@ impl Clip {
             self.source_start,
             self.speed.source_duration(range.duration)?,
         ))
+    }
+
+    /// The source time an item starting at `item_start` shows at timeline `time`:
+    /// `source_start + (time − item_start) × speed`. Outside the item's range it is a
+    /// handle: before the start for the incoming clip of a transition, past the end for
+    /// the outgoing one.
+    pub fn source_time_at(&self, item_start: Time, time: Time) -> Result<Time, EditError> {
+        let offset = self.speed.source_duration(time.checked_sub(item_start)?)?;
+        Ok(self.source_start.checked_add(offset)?)
     }
 
     pub fn marker(&self, id: MarkerId) -> Option<&Arc<Marker>> {

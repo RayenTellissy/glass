@@ -6,8 +6,9 @@
 use std::path::{Path, PathBuf};
 
 use media::export::{
-    AudioCodec, AudioSettings, ColourTags, Container, ExportError, ExportSession, ExportSettings,
-    ExportSummary, Picture, PicturePlane, ProResProfile, RateControl, VideoCodec, VideoSettings,
+    AudioCodec, AudioSettings, ColourTags, Container, EncoderPreference, ExportError,
+    ExportSession, ExportSettings, ExportSummary, Picture, PicturePlane, ProResProfile,
+    RateControl, VideoCodec, VideoSettings,
 };
 use media::{
     ColourRange, Frame, FrameReader, ImageSequence, MediaInfo, PcmFormat, PixelFormat, Rational,
@@ -123,8 +124,12 @@ fn encode(path: &Path, settings: &ExportSettings, frames: u64, sixteen_bit: bool
     summary
 }
 
+/// Settings on the software encoders, so the checks below see the same encoder on every
+/// machine; the hardware encoders have their own tests.
 fn video_settings(codec: VideoCodec) -> VideoSettings {
-    VideoSettings::new(codec, W, H, FPS)
+    let mut settings = VideoSettings::new(codec, W, H, FPS);
+    settings.encoder_preference = EncoderPreference::Software;
+    settings
 }
 
 /// Decodes every video frame: count, size and the frames' resolved colour.
@@ -273,14 +278,10 @@ fn psnr(a: &[u8], b: &[u8]) -> f64 {
     10.0 * (255.0f64 * 255.0 / mse).log10()
 }
 
-#[test]
-fn h264_at_the_default_crf_is_close_to_the_source() {
-    let dir = scratch("psnr");
-    let path = dir.join("out.mp4");
-    let video = video_settings(VideoCodec::H264);
-    let settings = ExportSettings::new(Container::Mp4).with_video(video);
-    encode(&path, &settings, FRAMES, false);
-    let decoded = decode_video(&path);
+/// Mean and worst-frame RGB PSNR of every decoded frame of `path` against the source
+/// pictures.
+fn psnr_against_source(path: &Path) -> (f64, f64) {
+    let decoded = decode_video(path);
     assert_eq!(decoded.len() as u64, FRAMES);
     let mut worst = f64::INFINITY;
     let mut total = 0.0;
@@ -290,9 +291,155 @@ fn h264_at_the_default_crf_is_close_to_the_source() {
         worst = worst.min(p);
         total += p;
     }
-    let mean = total / decoded.len() as f64;
+    (total / decoded.len() as f64, worst)
+}
+
+#[test]
+fn h264_at_the_default_crf_is_close_to_the_source() {
+    let dir = scratch("psnr");
+    let path = dir.join("out.mp4");
+    let video = video_settings(VideoCodec::H264);
+    let settings = ExportSettings::new(Container::Mp4).with_video(video);
+    encode(&path, &settings, FRAMES, false);
+    let (mean, worst) = psnr_against_source(&path);
     eprintln!("H.264 CRF 23 RGB PSNR: mean {mean:.2} dB, worst frame {worst:.2} dB");
     assert!(worst > 35.0, "worst frame {worst:.2} dB");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn videotoolbox_h264_and_hevc_at_the_default_quality() {
+    let dir = scratch("vt");
+    for (codec, name, encoder) in [
+        (VideoCodec::H264, "h264", "h264_videotoolbox"),
+        (VideoCodec::Hevc, "hevc", "hevc_videotoolbox"),
+    ] {
+        let path = dir.join(format!("{name}.mp4"));
+        // The default preference (Auto) picks the hardware encoder.
+        let video = VideoSettings::new(codec, W, H, FPS);
+        let settings = ExportSettings::new(Container::Mp4)
+            .with_video(video.clone())
+            .with_audio(AudioSettings::new(AudioCodec::Aac, RATE, 2));
+        let summary = encode(&path, &settings, FRAMES, false);
+        assert_eq!(summary.video_encoder.as_deref(), Some(encoder));
+        assert_eq!(summary.fallbacks, []);
+        let info = check_video(&path, name, &video, FRAMES);
+        assert!(
+            (duration_seconds(&info) - 1.0).abs() < 0.05,
+            "{:?}",
+            info.duration
+        );
+        let (stream, v) = info.video().expect("video");
+        assert_eq!(v.pixel_format.map(|p| p.name()), Some("yuv420p"));
+        if codec == VideoCodec::Hevc {
+            assert_eq!(stream.codec.fourcc.as_deref(), Some("hvc1"));
+        }
+        check_audio(&path, "aac", 2);
+        let (mean, worst) = psnr_against_source(&path);
+        eprintln!(
+            "{encoder} default quality: {} bytes, RGB PSNR mean {mean:.2} dB, worst frame {worst:.2} dB",
+            summary.bytes
+        );
+        assert!(worst > 33.0, "{encoder} worst frame {worst:.2} dB");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn videotoolbox_hevc_is_main_10_for_10_bit_settings() {
+    let dir = scratch("vt-main10");
+    let path = dir.join("out.mov");
+    let mut video = VideoSettings::new(VideoCodec::Hevc, W, H, FPS);
+    video.colour = ColourTags::Bt2020Hlg;
+    let settings = ExportSettings::new(Container::Mov).with_video(video.clone());
+    let summary = encode(&path, &settings, FRAMES, true);
+    assert_eq!(summary.video_encoder.as_deref(), Some("hevc_videotoolbox"));
+    let info = check_video(&path, "hevc", &video, FRAMES);
+    let (stream, v) = info.video().expect("video");
+    assert_eq!(stream.codec.profile, Some("Main 10"));
+    assert_eq!(v.pixel_format.map(|p| p.name()), Some("yuv420p10le"));
+    assert_eq!(v.bit_depth, 10);
+    assert_eq!(v.hdr, media::Hdr::Hlg);
+
+    // VideoToolbox encodes 8-bit H.264 only: 10-bit settings go to x264 without trying it.
+    let path = dir.join("h264.mkv");
+    let mut video = VideoSettings::new(VideoCodec::H264, W, H, FPS);
+    video.colour = ColourTags::Bt2020Pq;
+    let settings = ExportSettings::new(Container::Matroska).with_video(video.clone());
+    let summary = encode(&path, &settings, 3, true);
+    assert_eq!(summary.video_encoder.as_deref(), Some("libx264"));
+    assert_eq!(summary.fallbacks, []);
+    check_video(&path, "h264", &video, 3);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Encodes `frames` flat grey pictures at the settings' size.
+fn encode_flat(path: &Path, settings: &ExportSettings, frames: u64) -> ExportSummary {
+    let v = settings.video.as_ref().expect("video");
+    let data = vec![128u8; v.width as usize * v.height as usize * 4];
+    let mut session = ExportSession::create(path, settings).expect("export opens");
+    for _ in 0..frames {
+        let picture = Picture::rgba8(v.width, v.height, &data, v.width as usize * 4);
+        session.push_picture(&picture).expect("picture");
+    }
+    session.finish().expect("export finishes")
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_hardware_encoder_that_will_not_open_falls_back_to_software() {
+    // VideoToolbox H.264 refuses pictures wider than 4096; x264 takes them.
+    let dir = scratch("vt-fallback");
+    let path = dir.join("wide.mp4");
+    let video = VideoSettings::new(VideoCodec::H264, 4160, 64, FPS);
+    let settings = ExportSettings::new(Container::Mp4).with_video(video.clone());
+    let summary = encode_flat(&path, &settings, 5);
+    assert_eq!(summary.video_encoder.as_deref(), Some("libx264"));
+    assert_eq!(summary.fallbacks.len(), 1, "{:?}", summary.fallbacks);
+    assert_eq!(summary.fallbacks[0].encoder, "h264_videotoolbox");
+    assert!(!summary.fallbacks[0].reason.is_empty());
+    check_video(&path, "h264", &video, 5);
+
+    // Hardware only: the export fails instead, and leaves no file.
+    let mut hardware = video.clone();
+    hardware.encoder_preference = EncoderPreference::Hardware;
+    let path = dir.join("hardware.mp4");
+    let settings = ExportSettings::new(Container::Mp4).with_video(hardware);
+    let error = ExportSession::create(&path, &settings).expect_err("no hardware encoder");
+    assert!(matches!(error, ExportError::Media(_)), "{error}");
+    assert!(!path.exists());
+
+    // Named explicitly, the encoder is used as it is, without fallback.
+    let mut named = video;
+    named.encoder = Some("h264_videotoolbox".into());
+    let settings = ExportSettings::new(Container::Mp4).with_video(named);
+    assert!(ExportSession::create(&path, &settings).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn software_preference_never_tries_hardware() {
+    let dir = scratch("software");
+    let path = dir.join("out.mkv");
+    for codec in [VideoCodec::H264, VideoCodec::Hevc] {
+        let settings = ExportSettings::new(Container::Matroska).with_video(video_settings(codec));
+        let summary = encode_flat(&path, &settings, 3);
+        let software = if codec == VideoCodec::H264 {
+            "libx264"
+        } else {
+            "libx265"
+        };
+        assert_eq!(summary.video_encoder.as_deref(), Some(software));
+        assert_eq!(summary.fallbacks, []);
+    }
+    // Codecs without hardware encoders ignore a hardware-only preference.
+    let mut png = VideoSettings::new(VideoCodec::Png, 64, 36, FPS);
+    png.encoder_preference = EncoderPreference::Hardware;
+    let settings = ExportSettings::new(Container::ImageSequence).with_video(png);
+    let summary = encode_flat(&dir.join("f_%03d.png"), &settings, 2);
+    assert_eq!(summary.video_encoder.as_deref(), Some("png"));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -372,7 +519,7 @@ fn prores_through_videotoolbox() {
     ] {
         let dir = scratch("prores-vt");
         let path = dir.join("out.mov");
-        let video = video_settings(VideoCodec::ProRes(profile));
+        let video = VideoSettings::new(VideoCodec::ProRes(profile), W, H, FPS);
         let settings = ExportSettings::new(Container::Mov)
             .with_video(video.clone())
             .with_audio(AudioSettings::new(AudioCodec::Pcm(PcmFormat::S16), RATE, 2));
