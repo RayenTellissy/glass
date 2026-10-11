@@ -227,7 +227,7 @@ Done when: a 1000-clip project round-trips through save and load byte-identicall
 - [x] Keyframe curves per parameter: linear, bezier, hold, with time and value scaling
 - [x] Project settings: resolution, frame rate, colour space, audio rate, cache folder
 - [ ] Copy and paste of clips, attributes, and effects, across projects via the clipboard
-- [ ] Pretty JSON project file with stable key order for clean git diffs
+- [~] Pretty JSON project file with stable key order for clean git diffs
 - [x] `tests/fixtures/reference.proj` filled with a real reference sequence used by `smoke`
 
 ## Phase 6 — Timeline UI (M2)
