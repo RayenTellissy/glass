@@ -384,7 +384,7 @@ fn scan_video(
     let mut first = f64::INFINITY;
     let mut end = f64::NEG_INFINITY;
     loop {
-        if scan.frames % 256 == 0 {
+        if scan.frames.is_multiple_of(256) {
             control.checkpoint().map_err(|_| VerifyError::Stopped)?;
         }
         let packet = match demuxer.read_packet() {
