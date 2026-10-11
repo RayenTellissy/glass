@@ -3,9 +3,11 @@
 //! name, Tab walks a row's switches in order; solo silences the other audio tracks; and
 //! 40 headers draw within the frame budget.
 
+mod support;
+
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
 use project::{Project, Rational, TrackId, TrackKind};
-use ui::frame_time::FrameTimeMonitor;
+use support::FrameBudget;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::panels::timeline::track_header::{
     HEADER_WIDTH, HeightPreset, Part, TrackFlags, TrackHeaderAction, TrackHeaderState,
@@ -278,18 +280,15 @@ fn forty_track_headers_draw_within_budget() {
             .collect(),
         ..TrackHeaderView::default()
     };
-    let mut monitor = FrameTimeMonitor::default();
-    headless
-        .run(30, 240, &mut monitor, |ui, frame| {
-            egui::CentralPanel::default().show(ui, |ui| {
-                // Scroll through the column so rows enter and leave.
-                let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(HEADER_WIDTH, 720.0));
-                view.scroll = (frame % 120) as f32 * 10.0;
-                let _ = track_headers(ui, rect, &mut view);
-            });
-        })
-        .expect("headless frames");
-    let stats = monitor.stats();
+    let stats = FrameBudget::run(&mut headless, 30, 240, |ui, frame| {
+        egui::CentralPanel::default().show(ui, |ui| {
+            // Scroll through the column so rows enter and leave.
+            let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(HEADER_WIDTH, 720.0));
+            view.scroll = (frame % 120) as f32 * 10.0;
+            let _ = track_headers(ui, rect, &mut view);
+        });
+    })
+    .expect("headless frames");
     eprintln!("track headers ({}): {stats}", headless.adapter());
-    headless.assert_p99_within_budget("track headers", &stats);
+    stats.assert_within_budget(&headless, "track headers");
 }
