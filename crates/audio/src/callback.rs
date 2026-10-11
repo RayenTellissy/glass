@@ -1,11 +1,13 @@
 //! The real-time half: the code that runs inside the audio callback, shared by the device
 //! and offline backends, and [`Feeder`], its non-real-time producer.
 //!
-//! Audio travels as interleaved f32 frames through one `rtrb` ring. The callback copies
-//! what the ring holds into the device buffer, fills any shortfall with silence (counting
-//! an underrun while the feeder is feeding), advances the frame counter and, when the
-//! backend has timestamps, updates the drift estimator and publishes its line. It never
-//! allocates, locks, logs or waits.
+//! The callback's audio comes from one of two sources. A plain feed: interleaved f32
+//! frames through one `rtrb` ring, copied into the device buffer, any shortfall filled with
+//! silence (counting an underrun while the feeder is feeding). Or a [`Mixer`]: the mixer
+//! graph mixes the tracks' feed rings (underruns are its feeds running dry while playing).
+//! Either way the callback then advances the frame counter and, when the backend has
+//! timestamps, updates the drift estimator and publishes its line. It never allocates,
+//! locks, logs or waits.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -14,6 +16,10 @@ use rtrb::{Consumer, Producer, RingBuffer};
 
 use crate::clock::Shared;
 use crate::drift::DriftEstimator;
+use crate::mixer::Mixer;
+
+/// Frames the mixer renders per step when the device has other channels than the mix.
+const MIX_SCRATCH_FRAMES: usize = 1024;
 
 /// Timing for one callback, in seconds on the clock's monotonic timeline.
 #[derive(Clone, Copy, Debug)]
@@ -24,11 +30,23 @@ pub(crate) struct Timing {
     pub(crate) latency: f64,
 }
 
+/// Where the callback's audio comes from.
+enum Source {
+    Ring {
+        consumer: Consumer<f32>,
+        feed_channels: usize,
+    },
+    Mixer {
+        mixer: Box<Mixer>,
+        /// Mixer output when the device has another channel count.
+        scratch: Vec<f32>,
+    },
+}
+
 /// The callback's state. Owned by the audio thread once the stream starts.
 pub(crate) struct Callback {
-    consumer: Consumer<f32>,
+    source: Source,
     shared: Arc<Shared>,
-    feed_channels: usize,
     device_channels: usize,
     estimator: DriftEstimator,
     frames: u64,
@@ -44,10 +62,12 @@ pub(crate) fn channel(
     let feed_channels = feed_channels.max(1);
     let (producer, consumer) = RingBuffer::new(ring_frames.max(1) * feed_channels);
     let callback = Callback {
-        consumer,
+        source: Source::Ring {
+            consumer,
+            feed_channels,
+        },
         estimator: DriftEstimator::new(shared.sample_rate),
         shared: Arc::clone(&shared),
-        feed_channels,
         device_channels: device_channels.max(1),
         frames: 0,
     };
@@ -57,6 +77,45 @@ pub(crate) fn channel(
         channels: feed_channels,
     };
     (callback, feeder)
+}
+
+/// The callback state for a mixer source.
+pub(crate) fn mixing(shared: Arc<Shared>, mixer: Mixer, device_channels: usize) -> Callback {
+    let channels = mixer.channels();
+    Callback {
+        source: Source::Mixer {
+            mixer: Box::new(mixer),
+            scratch: vec![0.0; MIX_SCRATCH_FRAMES * channels],
+        },
+        estimator: DriftEstimator::new(shared.sample_rate),
+        shared,
+        device_channels: device_channels.max(1),
+        frames: 0,
+    }
+}
+
+/// Copies `frames` frames of `from` (`from_channels` per frame) into `out`
+/// (`out_channels` per frame): extra source channels are dropped, extra output channels
+/// get silence.
+fn map_channels(
+    from: impl Iterator<Item = f32>,
+    from_channels: usize,
+    out: &mut [f32],
+    out_channels: usize,
+    frames: usize,
+) {
+    let mut samples = from;
+    for frame in out.chunks_exact_mut(out_channels).take(frames) {
+        for c in 0..from_channels {
+            let sample = samples.next().unwrap_or(0.0);
+            if let Some(slot) = frame.get_mut(c) {
+                *slot = sample;
+            }
+        }
+        for slot in frame.iter_mut().skip(from_channels) {
+            *slot = 0.0;
+        }
+    }
 }
 
 impl Callback {
@@ -76,37 +135,60 @@ impl Callback {
                 .store(self.estimator.rate_ratio().to_bits(), Ordering::Relaxed);
         }
 
-        let available = self.consumer.slots() / self.feed_channels;
-        let take = available.min(frames);
-        let mut written = 0;
-        if let Ok(chunk) = self.consumer.read_chunk(take * self.feed_channels) {
-            let (first, second) = chunk.as_slices();
-            if self.feed_channels == self.device_channels {
-                out[..first.len()].copy_from_slice(first);
-                out[first.len()..first.len() + second.len()].copy_from_slice(second);
-            } else {
-                let mut samples = first.iter().chain(second.iter());
-                for frame in out.chunks_exact_mut(self.device_channels).take(take) {
-                    for c in 0..self.feed_channels {
-                        let sample = samples.next().copied().unwrap_or(0.0);
-                        if let Some(slot) = frame.get_mut(c) {
-                            *slot = sample;
-                        }
+        let device_channels = self.device_channels;
+        match &mut self.source {
+            Source::Ring {
+                consumer,
+                feed_channels,
+            } => {
+                let feed_channels = *feed_channels;
+                let available = consumer.slots() / feed_channels;
+                let take = available.min(frames);
+                let mut written = 0;
+                if let Ok(chunk) = consumer.read_chunk(take * feed_channels) {
+                    let (first, second) = chunk.as_slices();
+                    if feed_channels == device_channels {
+                        out[..first.len()].copy_from_slice(first);
+                        out[first.len()..first.len() + second.len()].copy_from_slice(second);
+                    } else {
+                        let samples = first.iter().chain(second.iter()).copied();
+                        map_channels(samples, feed_channels, out, device_channels, take);
                     }
-                    for slot in frame.iter_mut().skip(self.feed_channels) {
-                        *slot = 0.0;
-                    }
+                    chunk.commit_all();
+                    written = take;
+                }
+                out[written * device_channels..].fill(0.0);
+                if written < frames && self.shared.feeding.load(Ordering::Relaxed) {
+                    self.shared.underruns.fetch_add(1, Ordering::Relaxed);
+                    self.shared
+                        .silent_frames
+                        .fetch_add((frames - written) as u64, Ordering::Relaxed);
                 }
             }
-            chunk.commit_all();
-            written = take;
-        }
-        out[written * self.device_channels..].fill(0.0);
-        if written < frames && self.shared.feeding.load(Ordering::Relaxed) {
-            self.shared.underruns.fetch_add(1, Ordering::Relaxed);
-            self.shared
-                .silent_frames
-                .fetch_add((frames - written) as u64, Ordering::Relaxed);
+            Source::Mixer { mixer, scratch } => {
+                let mix_channels = mixer.channels();
+                let mut silent = 0;
+                if mix_channels == device_channels {
+                    silent = mixer.render(&mut out[..frames * device_channels]);
+                } else {
+                    let mut done = 0;
+                    while done < frames {
+                        let n = (frames - done).min(MIX_SCRATCH_FRAMES);
+                        let mixed = &mut scratch[..n * mix_channels];
+                        silent += mixer.render(mixed);
+                        let out = &mut out[done * device_channels..(done + n) * device_channels];
+                        map_channels(mixed.iter().copied(), mix_channels, out, device_channels, n);
+                        done += n;
+                    }
+                }
+                out[frames * device_channels..].fill(0.0);
+                if silent > 0 {
+                    self.shared.underruns.fetch_add(1, Ordering::Relaxed);
+                    self.shared
+                        .silent_frames
+                        .fetch_add(silent as u64, Ordering::Relaxed);
+                }
+            }
         }
 
         self.frames += frames as u64;
