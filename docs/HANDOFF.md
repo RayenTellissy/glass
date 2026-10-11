@@ -9,7 +9,7 @@ State of the work on 2026-10-11, when the session wrapped up with `goal/phase-2`
 | `main` | Phases 0, 1 and 2 merged: `416f085` merges `goal/phase-2` as reviewed at `311f0ee` (the reviewer's full workspace test passed 1101 tests). Everything merged into `goal/phase-2` after `311f0ee` is not on `main` yet. |
 | `goal/phase-2` | Phase 2 (no open tasks, only needs-human ones), Phase 4 (complete), most of Phases 3 and 5, the first Phase 6 panels and the app shell, most of Phase 8, the first Phase 9 transition families, the Phase 12 mixer core and crossfades, and parts of Phases 16 and 17 (below). The integration branch: new task branches start here. Project schema v9, autosave `FORMAT_VERSION` 9. |
 
-**Nothing is in flight.** No task branches or task worktrees remain; every task branch merged into `goal/phase-2` and was deleted. The detached `../glass-integration` checkout used for full checks on the integration branch was removed at the wrap-up; recreate it with `git worktree add --detach ../glass-integration goal/phase-2` when a full check is due. A final review of `9af7eca` was running when this was written; its findings are not in this file (see the snapshot goldens question in section 4).
+**Nothing is in flight.** No task branches or task worktrees remain; every task branch merged into `goal/phase-2` and was deleted. The detached `../glass-integration` checkout used for full checks on the integration branch was removed at the wrap-up; recreate it with `git worktree add --detach ../glass-integration goal/phase-2` when a full check is due. A final review of `9af7eca` was running when this was written; its findings are not in this file (the snapshot goldens question in section 4 has since been resolved).
 
 Phase 2's Done when asks that every fixture decodes to GPU textures and f32 audio through the same API, with hardware decode on both platforms, and that `smoke` plays the reference project. On this Mac every fixture the pinned FFmpeg can generate decodes to textures (`crates/engine/tests/fixture_textures.rs`, 31 picture fixtures), and `smoke` opens `tests/fixtures/reference.proj`, plays 2 s through `engine::timeline::TimelinePlayback`, exports 1 s with the mixed audio through the export path and verifies the file (Decision 66). Six fixtures cannot be generated here (line 144) and Windows and Linux hardware decode need other machines (lines 146 and 147).
 
@@ -221,7 +221,7 @@ Number 76 is unused (it was reserved for the VideoToolbox B-frame fix, which nee
 None of these has its own `PLAN.md` line unless a line is named.
 
 **Open question**
-- Writing the UI snapshot goldens with `GLASS_UPDATE_SNAPSHOTS=1 scripts/cargo-serial test -p ui --test ui_snapshots` rewrites about 16 goldens no task changed (`about`, `params`, `shortcuts_editor` and others). The final review was investigating whether the committed goldens or the renderer drifted. Until that is settled, a task that writes goldens commits only the ones it meant to change and says so in its Progress Log line.
+- Resolved at the wrap-up: writing the snapshot goldens rewrote goldens no task changed (UI `about`, `params`, `shortcuts_editor`; render `blend_modes`, `title_over_video`, `transform_crop_opacity`, `shapes`, `mask_*`), each off by 1 or 2 levels. The renderer had not drifted: goldens written on the M2 round differently on the M5. They were rebaselined on the M5, the current reference machine, so a golden rewrite now means a real change.
 
 **App wiring** (the app shell exists, Decision 79; these are not connected to it yet)
 - `AppState` builds the plan on every edit and calls `set_plan` on the preview's `TimelinePlayback` (Decision 67), but the app starts no `Scrubber` (Decision 53), so there is no scrub path in the app and nothing to restart after an edit.
@@ -315,7 +315,7 @@ None of these has its own `PLAN.md` line unless a line is named.
 
 ## 6. Suggested next work, in order
 
-1. **Bring `main` up to date.** Act on the final review of `9af7eca`, settle the snapshot goldens question (section 4), run the full check on `goal/phase-2` in `../glass-integration`, then merge `goal/phase-2` into `main` again (Decision 12).
+1. **Bring `main` up to date.** Act on the final review of `9af7eca`, run the full check on `goal/phase-2` in `../glass-integration`, then merge `goal/phase-2` into `main` again (Decision 12).
 2. **App wiring** (section 4): the analysis feed and atlas loads for clips, the scrubber, the export queue UI, the update pill, the relink folder picker, shortcuts import and export (line 256).
 3. **Phase 3 remaining** (lines 194 to 198): JKL shuttle, reverse playback and audio scrubbing; loop range, in and out points and play-around; background render of idle regions; clean feed; benchmarks (scrub latency, frame drops, cache hit rate).
 4. **Phase 5 remaining:** adjustment layers (line 230, a schema bump), then copy and paste (line 233, carrying compounds). One schema bump at a time; the mixer settings (line 400) need one too.
