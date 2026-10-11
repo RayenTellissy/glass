@@ -1,9 +1,10 @@
 //! Diffs between two project roots, by node id.
 //!
-//! A root is flattened into one record per node ([`Node`]): the project header, each
-//! media reference, each sequence and track without its children (plus the order of its
-//! children), each sequence marker, each transition, and each item whole (a clip's
-//! properties, effect stack and markers travel with it). A [`Diff`] lists the records
+//! A root is flattened into one record per node ([`Node`]): the project header (with the
+//! project settings), each media reference, each sequence (with its format) and track
+//! without its children (plus the order of its children), each sequence marker, each
+//! transition, and each item whole (a clip's properties, effect stack and markers travel
+//! with it). A [`Diff`] lists the records
 //! added or changed and the ids removed; applying it to the flat form of the old root
 //! gives the flat form of the new root, which rebuilds into an equal tree.
 //!
@@ -18,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::id::{NodeId, SequenceId, TrackId};
 use crate::marker::Marker;
 use crate::model::{Item, MediaRef, MediaRefs, Project, Sequence, Track};
+use crate::settings::ProjectSettings;
 use crate::transition::Transition;
 use crate::validate::ValidationError;
 
@@ -32,6 +34,8 @@ pub enum Node {
         uid: String,
         name: String,
         next_id: u64,
+        /// The project settings (schema v6; autosave format 6).
+        settings: Arc<ProjectSettings>,
         sequences: Vec<SequenceId>,
     },
     Media {
@@ -121,6 +125,7 @@ pub fn flatten(project: &Project) -> Flat {
             uid: project.uid.clone(),
             name: project.name.clone(),
             next_id: project.next_id,
+            settings: project.settings.clone(),
             sequences: project.sequences.iter().map(|s| s.id).collect(),
         },
     );
@@ -232,6 +237,7 @@ pub fn rebuild(flat: &Flat) -> Result<Project, ValidationError> {
         uid,
         name,
         next_id,
+        settings,
         sequences,
     }) = flat.get(&ROOT_ID)
     else {
@@ -262,6 +268,7 @@ pub fn rebuild(flat: &Flat) -> Result<Project, ValidationError> {
         uid: uid.clone(),
         name: name.clone(),
         next_id: *next_id,
+        settings: settings.clone(),
         media,
         sequences: imbl::Vector::new(),
     };

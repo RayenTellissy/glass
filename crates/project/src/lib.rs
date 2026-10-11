@@ -16,6 +16,7 @@ pub mod model;
 pub mod params;
 pub mod relink;
 pub mod schema;
+pub mod settings;
 pub mod time;
 pub mod transition;
 pub mod validate;
@@ -35,6 +36,10 @@ pub use model::{
 };
 pub use relink::Relink;
 pub use schema::LoadError;
+pub use settings::{
+    CacheFolder, ChannelLayout, ColourSpace, ProjectSettings, Resolution, SequenceFormat,
+    WorkingPrimaries,
+};
 pub use time::{Rational, Time, TimeError, TimeRange};
 pub use transition::{
     Alignment, CutSide, HandleNeeds, Segment, Transition, TransitionAt, TransitionSpec,

@@ -40,6 +40,8 @@
     "edit.label.transition_duration": "Change Transition Duration",
     "edit.label.transition_alignment": "Align Transition",
     "edit.label.transition": "Change Transition",
+    "edit.label.project_settings": "Change Project Settings",
+    "edit.label.sequence_settings": "Change Sequence Settings",
     "edit.label.recover": "Restore Autosave",
     "edit.label.relink": "Relink Media",
     "recovery.title": "Restore your work?",

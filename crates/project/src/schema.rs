@@ -6,8 +6,8 @@
 //! ```json
 //! {
 //!   "format": "glass.project",
-//!   "schema_version": 5,
-//!   "project": { "uid": "...", "name": "...", "next_id": 7, "media": {...}, "sequences": [...] }
+//!   "schema_version": 6,
+//!   "project": { "uid": "...", "name": "...", "next_id": 7, "settings": {...}, "media": {...}, "sequences": [...] }
 //! }
 //! ```
 //!
@@ -46,6 +46,9 @@
 //!   effect stack, each effect with its own node id).
 //! - v5: tracks carry `transitions` (`crate::transition`), each a node with its own id on
 //!   a cut between two clips, or between a clip and nothing next to a gap.
+//! - v6: the project carries `settings` (`crate::settings`: the format new sequences
+//!   start with, the colour space and the cache folder), and every sequence its own
+//!   `resolution`, `drop_frame` and `channel_layout` beside its frame and sample rates.
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -57,7 +60,7 @@ use crate::validate::ValidationError;
 pub const FORMAT: &str = "glass.project";
 
 /// The schema version this build writes, and the newest it reads.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// The oldest schema version this build reads.
 pub const OLDEST_VERSION: u32 = 1;
@@ -71,6 +74,7 @@ pub const MIGRATIONS: [Migration; (SCHEMA_VERSION - OLDEST_VERSION) as usize] = 
     migrate_v2_to_v3,
     migrate_v3_to_v4,
     migrate_v4_to_v5,
+    migrate_v5_to_v6,
 ];
 
 /// Why a project file could not be read. [`LoadError::i18n_key`] names the message to
@@ -373,6 +377,56 @@ pub fn migrate_v4_to_v5(mut project: Value) -> Result<Value, String> {
     Ok(project)
 }
 
+/// v5 → v6: the project gets `settings` at their defaults (1920 x 1080 at 30 fps without
+/// drop-frame, 48 kHz stereo for new sequences, Rec.709, the cache folder `.glass-cache`
+/// beside the project file), and every sequence a 1920 x 1080 canvas, drop-frame off and
+/// stereo. Frame and sample rates are kept as they are (validation then checks them), nor
+/// does `next_id` change.
+pub fn migrate_v5_to_v6(mut project: Value) -> Result<Value, String> {
+    let root = object(&mut project)?;
+    if root.contains_key("settings") {
+        return Err("a v5 project already has settings".to_string());
+    }
+    let settings = serde_json::json!({
+        "sequence": {
+            "resolution": { "width": 1920, "height": 1080 },
+            "frame_rate": { "num": 30, "den": 1 },
+            "drop_frame": false,
+            "sample_rate": 48000,
+            "channel_layout": "stereo"
+        },
+        "colour_space": "rec709",
+        "cache_folder": { "relative": ".glass-cache" }
+    });
+    root.insert("settings".to_string(), settings);
+    let Some(sequences) = root.get_mut("sequences") else {
+        return Ok(project);
+    };
+    let sequences = sequences
+        .as_array_mut()
+        .ok_or_else(|| "sequences is not a list".to_string())?;
+    for sequence in sequences {
+        let sequence = sequence
+            .as_object_mut()
+            .ok_or_else(|| "a sequence is not an object".to_string())?;
+        let format = [
+            (
+                "resolution",
+                serde_json::json!({ "width": 1920, "height": 1080 }),
+            ),
+            ("drop_frame", Value::Bool(false)),
+            ("channel_layout", Value::from("stereo")),
+        ];
+        for (key, value) in format {
+            if sequence.contains_key(key) {
+                return Err(format!("a v5 sequence already has {key}"));
+            }
+            sequence.insert(key.to_string(), value);
+        }
+    }
+    Ok(project)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -562,6 +616,60 @@ mod tests {
             migrate_v4_to_v5(json!({ "sequences": [{ "id": 1 }] })).expect("no tracks"),
             json!({ "sequences": [{ "id": 1 }] })
         );
+    }
+
+    #[test]
+    fn v5_to_v6_adds_default_settings_and_sequence_formats() {
+        let v5 = json!({
+            "next_id": 4,
+            "sequences": [
+                { "id": 2, "frame_rate": { "num": 25, "den": 1 }, "sample_rate": 44100, "tracks": [] },
+                { "id": 3, "tracks": [] }
+            ]
+        });
+        let v6 = migrate_v5_to_v6(v5).expect("migrates");
+        assert_eq!(v6["next_id"], json!(4));
+        assert_eq!(v6["settings"]["colour_space"], json!("rec709"));
+        assert_eq!(
+            v6["settings"]["cache_folder"],
+            json!({ "relative": ".glass-cache" })
+        );
+        assert_eq!(
+            v6["settings"]["sequence"]["frame_rate"],
+            json!({ "num": 30, "den": 1 })
+        );
+        for seq in v6["sequences"].as_array().expect("sequences") {
+            assert_eq!(seq["resolution"], json!({ "width": 1920, "height": 1080 }));
+            assert_eq!(seq["drop_frame"], json!(false));
+            assert_eq!(seq["channel_layout"], json!("stereo"));
+        }
+        // The rates stay as they were.
+        assert_eq!(
+            v6["sequences"][0]["frame_rate"],
+            json!({ "num": 25, "den": 1 })
+        );
+        assert_eq!(v6["sequences"][0]["sample_rate"], json!(44100));
+    }
+
+    #[test]
+    fn v5_to_v6_rejects_malformed_trees() {
+        assert!(migrate_v5_to_v6(json!([])).is_err());
+        assert_eq!(
+            migrate_v5_to_v6(json!({ "settings": {} })),
+            Err("a v5 project already has settings".to_string())
+        );
+        assert!(migrate_v5_to_v6(json!({ "sequences": {} })).is_err());
+        assert_eq!(
+            migrate_v5_to_v6(json!({ "sequences": [1] })),
+            Err("a sequence is not an object".to_string())
+        );
+        assert_eq!(
+            migrate_v5_to_v6(json!({ "sequences": [{ "drop_frame": true }] })),
+            Err("a v5 sequence already has drop_frame".to_string())
+        );
+        let bare = migrate_v5_to_v6(json!({ "uid": "u" })).expect("no sequences");
+        assert_eq!(bare["uid"], json!("u"));
+        assert!(bare["settings"].is_object());
     }
 
     #[test]

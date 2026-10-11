@@ -11,6 +11,7 @@ use crate::id::{ItemId, MediaId, SequenceId, TrackId};
 use crate::model::{
     Adjustment, Clip, Item, ItemKind, MediaRef, Project, Sequence, Subtitle, Track, TrackKind,
 };
+use crate::settings::SequenceFormat;
 use crate::time::{Rational, Time, TimeRange};
 use crate::transition::fit_track;
 
@@ -41,29 +42,49 @@ impl Project {
         Ok((next, id))
     }
 
-    /// Adds an empty sequence after the existing ones.
+    /// Adds an empty sequence after the existing ones at `frame_rate` and `sample_rate`,
+    /// with the rest of its format (canvas, channel layout) from the project settings and
+    /// drop-frame off. See [`Project::add_sequence_with`] for the checks.
     pub fn add_sequence(
         &self,
         name: impl Into<String>,
         frame_rate: Rational,
         sample_rate: u32,
     ) -> Result<(Project, SequenceId), EditError> {
-        if !frame_rate.is_positive_rate() {
-            return Err(EditError::InvalidFrameRate {
-                num: frame_rate.num,
-                den: frame_rate.den,
-            });
-        }
-        if sample_rate == 0 {
-            return Err(EditError::InvalidSampleRate(sample_rate));
-        }
+        let format = SequenceFormat {
+            frame_rate,
+            drop_frame: false,
+            sample_rate,
+            ..self.settings.sequence
+        };
+        self.add_sequence_with(name, format)
+    }
+
+    /// Adds an empty sequence after the existing ones in `format` (the project's default
+    /// is `self.settings().sequence`). The format is checked by [`SequenceFormat::check`].
+    pub fn add_sequence_with(
+        &self,
+        name: impl Into<String>,
+        format: SequenceFormat,
+    ) -> Result<(Project, SequenceId), EditError> {
+        format.check()?;
         let mut next = self.clone();
         let id = SequenceId(next.alloc_id());
+        let SequenceFormat {
+            resolution,
+            frame_rate,
+            drop_frame,
+            sample_rate,
+            channel_layout,
+        } = format;
         next.sequences.push_back(Arc::new(Sequence {
             id,
             name: name.into(),
+            resolution,
             frame_rate,
+            drop_frame,
             sample_rate,
+            channel_layout,
             markers: imbl::Vector::new(),
             tracks: imbl::Vector::new(),
         }));

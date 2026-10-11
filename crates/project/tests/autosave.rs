@@ -365,7 +365,7 @@ fn a_format_1_autosave_from_before_schema_v2_is_refused_by_version() {
     );
     fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
 
-    assert_eq!(autosave::FORMAT_VERSION, 5);
+    assert_eq!(autosave::FORMAT_VERSION, 6);
     assert!(matches!(
         autosave::recover(&dir),
         Err(autosave::AutosaveError::Format(1))
@@ -487,6 +487,80 @@ fn a_format_4_autosave_from_before_schema_v5_is_refused_by_version() {
         autosave::recover(&dir),
         Err(autosave::AutosaveError::Format(4))
     ));
+    fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// Autosaves written before project schema v6 (format 5, no project settings and no
+/// sequence formats) are refused by their format version too.
+#[test]
+fn a_format_5_autosave_from_before_schema_v6_is_refused_by_version() {
+    let s = setup();
+    let dir = temp_dir("format-5");
+    let mut writer = AutosaveWriter::open(&dir, &s.project, None, 0, 0).expect("open");
+    writer.tick(&s.project, 1, 10).expect("tick");
+    drop(writer);
+    let snapshot = dir.join("snapshot-00000001.json");
+    let mut old: serde_json::Value =
+        serde_json::from_slice(&fs::read(&snapshot).expect("snapshot")).expect("json");
+    old["autosave_format"] = 5.into();
+    let project = old["project"].as_object_mut().expect("project");
+    project.remove("settings").expect("v6 settings");
+    for seq in project["sequences"].as_array_mut().expect("sequences") {
+        let seq = seq.as_object_mut().expect("sequence");
+        for key in ["resolution", "drop_frame", "channel_layout"] {
+            seq.remove(key).expect("a v6 sequence format field");
+        }
+    }
+    assert!(
+        serde_json::from_value::<Project>(old["project"].clone()).is_err(),
+        "a format 5 project no longer parses"
+    );
+    fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
+    assert!(matches!(
+        autosave::recover(&dir),
+        Err(autosave::AutosaveError::Format(5))
+    ));
+    fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// Project settings and sequence formats travel in the root and sequence records and
+/// recover from the log.
+#[test]
+fn settings_edits_recover_from_the_log() {
+    let s = setup();
+    let dir = temp_dir("settings");
+    let mut writer = AutosaveWriter::open(&dir, &s.project, None, 0, 0).expect("open");
+    let mut settings = s.project.settings().clone();
+    settings.colour_space = project::ColourSpace::Rec2020Hlg;
+    settings.sequence.resolution = project::Resolution::UHD;
+    let p = s
+        .project
+        .set_project_settings(settings.clone())
+        .expect("settings");
+    let seq = p.sequences()[0].id;
+    let format = project::SequenceFormat {
+        resolution: project::Resolution::VERTICAL_HD,
+        channel_layout: project::ChannelLayout::Surround51,
+        ..p.sequences()[0].format()
+    };
+    let p = p.set_sequence_format(seq, format).expect("format");
+    let tick = writer.tick(&p, 2, 10).expect("tick");
+    assert!(
+        matches!(
+            tick,
+            Tick::Appended {
+                upserts: 2,
+                removals: 0,
+                ..
+            }
+        ),
+        "{tick:?}"
+    );
+    drop(writer);
+    let recovered = autosave::recover(&dir).expect("recover");
+    assert!(recovered.project.content_eq(&p));
+    assert_eq!(*recovered.project.settings(), settings);
+    assert_eq!(recovered.project.sequences()[0].format(), format);
     fs::remove_dir_all(&dir).expect("cleanup");
 }
 
