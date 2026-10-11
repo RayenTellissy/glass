@@ -357,15 +357,15 @@ fn a_format_1_autosave_from_before_schema_v2_is_refused_by_version() {
     let mut old: serde_json::Value =
         serde_json::from_slice(&fs::read(&snapshot).expect("snapshot")).expect("json");
     old["autosave_format"] = 1.into();
-    let refs = old["project"]["media"]["refs"].take();
-    old["project"]["media"] = refs;
+    let items = old["project"]["media"]["items"].take();
+    old["project"]["media"] = items;
     assert!(
         serde_json::from_value::<Project>(old["project"].clone()).is_err(),
         "a format 1 project no longer parses"
     );
     fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
 
-    assert_eq!(autosave::FORMAT_VERSION, 8);
+    assert_eq!(autosave::FORMAT_VERSION, 9);
     assert!(matches!(
         autosave::recover(&dir),
         Err(autosave::AutosaveError::Format(1))

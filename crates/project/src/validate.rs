@@ -13,6 +13,7 @@ use crate::error::EditError;
 use crate::id::{NodeId, TrackId};
 use crate::marker::{Marker, check_marker, is_sorted};
 use crate::model::{ClipSource, ItemKind, Project};
+use crate::switches::check_switches;
 use crate::time::Time;
 use crate::transition::check_track;
 
@@ -31,10 +32,14 @@ pub enum ValidationError {
 }
 
 impl Project {
-    /// Checks every invariant the edit operations maintain: unique allocated ids, valid
-    /// project settings and sequence formats ([`crate::settings`]), items of a kind their track accepts, on its grid, sorted and not
-    /// overlapping, clips pointing at known media or sequences with their properties in range (a
-    /// constant speed map, finite numbers within their limits, valid effect schema ids,
+    /// Checks every invariant the edit operations maintain: unique allocated ids (media
+    /// pool bins and items included; the root bin is id 0), a well-formed media pool
+    /// ([`crate::media_pool::MediaPool::check`]), valid project settings and sequence
+    /// formats ([`crate::settings`]), track switches the track's kind has
+    /// ([`crate::switches`]), items of a kind their track accepts, on its grid, sorted
+    /// and not overlapping, clips pointing at known media or sequences with their
+    /// properties in range (a constant speed map, finite numbers within their limits,
+    /// valid effect schema ids,
     /// keyframe curves sorted and finite with valid handles, [`crate::keyframe`]),
     /// markers sorted, not before zero and (on sequences) on the frame grid, and
     /// transitions ordered by id on cuts that resolve, fitting their clips and head
@@ -54,13 +59,13 @@ impl Project {
             }
             Ok(())
         };
-        for (id, media) in self.media.0.iter() {
-            if *id != media.id {
-                return Err(ValidationError::Structure(format!(
-                    "media {} stored under {id}",
-                    media.id
-                )));
+        self.media.check().map_err(ValidationError::Structure)?;
+        for bin in self.media.bins() {
+            if bin.id != self.media.root() {
+                claim(bin.id.node())?;
             }
+        }
+        for media in self.media.items() {
             claim(media.id.node())?;
         }
         self.settings.check()?;
@@ -75,6 +80,7 @@ impl Project {
                     track: track.id,
                     error,
                 };
+                check_switches(track).map_err(in_track)?;
                 let grid = seq.grid(track.kind).map_err(|e| in_track(e.into()))?;
                 let mut previous: Option<&crate::model::Item> = None;
                 for item in &track.items {

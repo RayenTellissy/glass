@@ -25,7 +25,7 @@
 //! schema v2 (`media` as `{"refs": [...]}`), whose snapshots version 1 builds cannot read
 //! and the other way round; version 3 began with schema v3, version 4 with schema v4,
 //! version 5 with schema v5, version 6 with schema v6, version 7 with schema v7, version 8
-//! with schema v8.
+//! with schema v8, version 9 with schema v9.
 //!
 //! A new generation starts every [`SNAPSHOT_EVERY`] records and whenever the project is
 //! saved; the previous generation is kept as a fallback, older ones are deleted.
@@ -58,8 +58,9 @@ pub const SNAPSHOT_EVERY: u64 = 30;
 /// settings in the root record, sequence formats in the sequence records). 7: project
 /// schema v7 (keyframe curves, which travel inside their item's record). 8: project
 /// schema v8 (the `compound` flag in sequence records, clip sources that name a
-/// sequence in item records).
-pub const FORMAT_VERSION: u32 = 8;
+/// sequence in item records). 9: project schema v9 (media pool items in media records,
+/// the pool's bins and label names in the root record, track switches in track records).
+pub const FORMAT_VERSION: u32 = 9;
 
 /// How long the autosave of a session that did not quit normally is kept (the recovery
 /// dialog promises seven days).

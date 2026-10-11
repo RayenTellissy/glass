@@ -1,6 +1,6 @@
 {
   "format": "glass.project",
-  "schema_version": 8,
+  "schema_version": 9,
   "project": {
     "uid": "fixture-key-order",
     "name": "Key order",
@@ -25,13 +25,62 @@
       }
     },
     "media": {
-      "refs": [
+      "bins": [
+        {
+          "id": 0,
+          "name": "Key order",
+          "parent": null
+        }
+      ],
+      "items": [
         {
           "id": 1,
+          "bin": 0,
+          "name": "pier",
+          "kind": "video",
+          "path": "/footage/pier.mov",
+          "spanned": [],
+          "sidecars": [],
           "content_hash": "c0ffee",
-          "path": "/footage/pier.mov"
+          "size_bytes": 0,
+          "card": null,
+          "added_unix": 0,
+          "facts": {
+            "duration_s": null,
+            "width": 0,
+            "height": 0,
+            "frame_rate": null,
+            "video_codec": null,
+            "video_profile": null,
+            "bit_depth": 0,
+            "chroma": null,
+            "primaries": null,
+            "hdr": null,
+            "audio_codec": null,
+            "audio_channels": 0,
+            "sample_rate": 0,
+            "audio_bit_depth": null,
+            "sequence_frames": null,
+            "container": null
+          },
+          "metadata": {
+            "camera_make": null,
+            "camera_model": null,
+            "lens": null,
+            "focal_length_mm": null,
+            "f_number": null,
+            "iso": null,
+            "shutter": null,
+            "timecode": null,
+            "reel": null,
+            "gps": null,
+            "created": null
+          },
+          "label": null,
+          "tags": []
         }
-      ]
+      ],
+      "label_names": {}
     },
     "sequences": [
       {
@@ -66,6 +115,11 @@
             "id": 3,
             "kind": "video",
             "name": "V1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
             "items": [
               {
                 "id": 5,
@@ -397,6 +451,11 @@
             "id": 4,
             "kind": "audio",
             "name": "A1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
             "items": [
               {
                 "id": 7,

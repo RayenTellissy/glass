@@ -1,0 +1,448 @@
+{
+  "format": "glass.project",
+  "schema_version": 9,
+  "project": {
+    "uid": "fixture-keyframes",
+    "name": "Lighthouse",
+    "next_id": 9,
+    "settings": {
+      "sequence": {
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 30,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo"
+      },
+      "colour_space": "rec709",
+      "cache_folder": {
+        "relative": ".glass-cache"
+      }
+    },
+    "media": {
+      "bins": [
+        {
+          "id": 0,
+          "name": "Lighthouse",
+          "parent": null
+        }
+      ],
+      "items": [
+        {
+          "id": 1,
+          "bin": 0,
+          "name": "lighthouse",
+          "kind": "video",
+          "path": "/footage/lighthouse.mov",
+          "spanned": [],
+          "sidecars": [],
+          "content_hash": "7e8f90",
+          "size_bytes": 0,
+          "card": null,
+          "added_unix": 0,
+          "facts": {
+            "duration_s": null,
+            "width": 0,
+            "height": 0,
+            "frame_rate": null,
+            "video_codec": null,
+            "video_profile": null,
+            "bit_depth": 0,
+            "chroma": null,
+            "primaries": null,
+            "hdr": null,
+            "audio_codec": null,
+            "audio_channels": 0,
+            "sample_rate": 0,
+            "audio_bit_depth": null,
+            "sequence_frames": null,
+            "container": null
+          },
+          "metadata": {
+            "camera_make": null,
+            "camera_model": null,
+            "lens": null,
+            "focal_length_mm": null,
+            "f_number": null,
+            "iso": null,
+            "shutter": null,
+            "timecode": null,
+            "reel": null,
+            "gps": null,
+            "created": null
+          },
+          "label": null,
+          "tags": []
+        }
+      ],
+      "label_names": {}
+    },
+    "sequences": [
+      {
+        "id": 2,
+        "name": "Night",
+        "compound": false,
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 25,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo",
+        "markers": [],
+        "tracks": [
+          {
+            "id": 3,
+            "kind": "video",
+            "name": "V1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
+            "items": [
+              {
+                "id": 5,
+                "range": {
+                  "start": "0",
+                  "duration": "4"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "4",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 2
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [
+                  {
+                    "id": 7,
+                    "schema": "lut",
+                    "enabled": true,
+                    "params": {
+                      "enabled": {
+                        "bool": true
+                      },
+                      "file": {
+                        "text": ""
+                      },
+                      "input": {
+                        "choice": "rec709"
+                      },
+                      "intensity": {
+                        "float": 1.0
+                      }
+                    },
+                    "keyframes": {
+                      "intensity": {
+                        "keys": [
+                          {
+                            "time": "4",
+                            "value": {
+                              "float": 1.0
+                            },
+                            "interpolation": {
+                              "bezier": {
+                                "out": {
+                                  "speed": [
+                                    -0.5
+                                  ],
+                                  "influence": 0.75
+                                },
+                                "in": {
+                                  "speed": [
+                                    0.0
+                                  ],
+                                  "influence": 0.1
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "time": "5",
+                            "value": {
+                              "float": 0.3
+                            },
+                            "interpolation": "linear"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "id": 8,
+                    "schema": "acme.tint",
+                    "enabled": true,
+                    "params": {
+                      "colour": {
+                        "colour": [
+                          1.0,
+                          1.0,
+                          1.0,
+                          1.0
+                        ]
+                      }
+                    },
+                    "keyframes": {
+                      "colour": {
+                        "keys": [
+                          {
+                            "time": "4",
+                            "value": {
+                              "colour": [
+                                1.0,
+                                1.0,
+                                1.0,
+                                1.0
+                              ]
+                            },
+                            "interpolation": "linear"
+                          },
+                          {
+                            "time": "6",
+                            "value": {
+                              "colour": [
+                                1.0,
+                                0.5,
+                                0.125,
+                                0.5
+                              ]
+                            },
+                            "interpolation": "linear"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ],
+                "keyframes": {
+                  "crop.feather": {
+                    "keys": [
+                      {
+                        "time": "13/3",
+                        "value": {
+                          "float": 0.0
+                        },
+                        "interpolation": "linear"
+                      }
+                    ]
+                  },
+                  "opacity": {
+                    "keys": [
+                      {
+                        "time": "4",
+                        "value": {
+                          "float": 0.0
+                        },
+                        "interpolation": "linear"
+                      },
+                      {
+                        "time": "9/2",
+                        "value": {
+                          "float": 1.0
+                        },
+                        "interpolation": "hold"
+                      },
+                      {
+                        "time": "11/2",
+                        "value": {
+                          "float": 0.25
+                        },
+                        "interpolation": "linear"
+                      }
+                    ]
+                  },
+                  "position": {
+                    "keys": [
+                      {
+                        "time": "4",
+                        "value": {
+                          "point": [
+                            0.0,
+                            0.0
+                          ]
+                        },
+                        "interpolation": {
+                          "bezier": {
+                            "out": {
+                              "speed": [
+                                0.0,
+                                0.0
+                              ],
+                              "influence": 0.3333333333333333
+                            },
+                            "in": {
+                              "speed": [
+                                -60.0,
+                                12.0
+                              ],
+                              "influence": 0.6
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "time": "6",
+                        "value": {
+                          "point": [
+                            -240.0,
+                            96.5
+                          ]
+                        },
+                        "interpolation": "linear"
+                      }
+                    ]
+                  },
+                  "rotation": {
+                    "keys": [
+                      {
+                        "time": "0",
+                        "value": {
+                          "angle": 0.0
+                        },
+                        "interpolation": "linear"
+                      },
+                      {
+                        "time": "8",
+                        "value": {
+                          "angle": 720.0
+                        },
+                        "interpolation": "linear"
+                      }
+                    ]
+                  }
+                },
+                "markers": []
+              }
+            ],
+            "transitions": []
+          },
+          {
+            "id": 4,
+            "kind": "audio",
+            "name": "A1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
+            "items": [
+              {
+                "id": 6,
+                "range": {
+                  "start": "0",
+                  "duration": "4"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "4",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": -12.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "keyframes": {
+                  "gain_db": {
+                    "keys": [
+                      {
+                        "time": "4",
+                        "value": {
+                          "float": -12.0
+                        },
+                        "interpolation": "linear"
+                      },
+                      {
+                        "time": "7",
+                        "value": {
+                          "float": 0.0
+                        },
+                        "interpolation": "linear"
+                      }
+                    ]
+                  }
+                },
+                "markers": []
+              }
+            ],
+            "transitions": []
+          }
+        ]
+      }
+    ]
+  }
+}
