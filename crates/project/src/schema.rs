@@ -6,7 +6,7 @@
 //! ```json
 //! {
 //!   "format": "glass.project",
-//!   "schema_version": 3,
+//!   "schema_version": 4,
 //!   "project": { "uid": "...", "name": "...", "next_id": 7, "media": {...}, "sequences": [...] }
 //! }
 //! ```
@@ -40,6 +40,10 @@
 //! - v3: sequences and clips carry `markers` (sequence markers in sequence time, clip
 //!   markers in source time); tracks may also be `subtitle` or `adjustment`, holding
 //!   `subtitle` and `adjustment` items. Gaps stay implicit (no gap items).
+//! - v4: clips carry their properties (`crate::clip`): `speed` (a speed map of keys, one
+//!   at source time 0 for a constant speed), `enabled`, `gain_db`, `transform` (offsets
+//!   from the canvas and layer centres), `crop`, `opacity`, `blend` and `effects` (the
+//!   effect stack, each effect with its own node id).
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -51,7 +55,7 @@ use crate::validate::ValidationError;
 pub const FORMAT: &str = "glass.project";
 
 /// The schema version this build writes, and the newest it reads.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// The oldest schema version this build reads.
 pub const OLDEST_VERSION: u32 = 1;
@@ -61,7 +65,7 @@ pub type Migration = fn(Value) -> Result<Value, String>;
 
 /// `MIGRATIONS[i]` takes version `OLDEST_VERSION + i` to the next one.
 pub const MIGRATIONS: [Migration; (SCHEMA_VERSION - OLDEST_VERSION) as usize] =
-    [migrate_v1_to_v2, migrate_v2_to_v3];
+    [migrate_v1_to_v2, migrate_v2_to_v3, migrate_v3_to_v4];
 
 /// Why a project file could not be read. [`LoadError::i18n_key`] names the message to
 /// show.
@@ -249,6 +253,78 @@ fn add_markers(node: &mut Map<String, Value>) -> Result<(), String> {
     Ok(())
 }
 
+/// v3 → v4: every clip gets its properties at their defaults (speed 1, enabled, 0 dB,
+/// centred at 100%, uncropped, opaque, normal blend, no effects). Subtitle and adjustment
+/// items do not change, nor does `next_id` (no effect nodes are created).
+pub fn migrate_v3_to_v4(mut project: Value) -> Result<Value, String> {
+    let root = object(&mut project)?;
+    let Some(sequences) = root.get_mut("sequences") else {
+        return Ok(project);
+    };
+    let sequences = sequences
+        .as_array_mut()
+        .ok_or_else(|| "sequences is not a list".to_string())?;
+    for sequence in sequences {
+        let Some(tracks) = sequence
+            .as_object_mut()
+            .ok_or_else(|| "a sequence is not an object".to_string())?
+            .get_mut("tracks")
+        else {
+            continue;
+        };
+        for track in tracks
+            .as_array_mut()
+            .ok_or_else(|| "tracks is not a list".to_string())?
+        {
+            let Some(items) = track.get_mut("items") else {
+                continue;
+            };
+            for item in items
+                .as_array_mut()
+                .ok_or_else(|| "items is not a list".to_string())?
+            {
+                let item = item
+                    .as_object_mut()
+                    .ok_or_else(|| "an item is not an object".to_string())?;
+                if item.get("type").and_then(Value::as_str) == Some("clip") {
+                    add_clip_properties(item)?;
+                }
+            }
+        }
+    }
+    Ok(project)
+}
+
+/// The v4 clip properties at their defaults, written out so the migration never follows
+/// later model changes.
+fn add_clip_properties(clip: &mut Map<String, Value>) -> Result<(), String> {
+    let properties = serde_json::json!({
+        "speed": { "keys": [{ "source_time": "0", "speed": { "num": 1, "den": 1 } }] },
+        "enabled": true,
+        "gain_db": 0.0,
+        "transform": {
+            "position": [0.0, 0.0],
+            "scale": [1.0, 1.0],
+            "rotation": 0.0,
+            "anchor": [0.0, 0.0]
+        },
+        "crop": { "left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0, "feather": 0.0 },
+        "opacity": 1.0,
+        "blend": "normal",
+        "effects": []
+    });
+    let Value::Object(properties) = properties else {
+        unreachable!("an object literal");
+    };
+    for (key, value) in properties {
+        if clip.contains_key(&key) {
+            return Err(format!("a v3 clip already has {key}"));
+        }
+        clip.insert(key, value);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -308,6 +384,74 @@ mod tests {
                     }]
                 }]
             })
+        );
+    }
+
+    #[test]
+    fn v3_to_v4_gives_clips_their_default_properties() {
+        let v3 = json!({
+            "next_id": 9,
+            "sequences": [{
+                "id": 2,
+                "markers": [],
+                "tracks": [
+                    {
+                        "id": 3,
+                        "kind": "video",
+                        "items": [{ "id": 4, "type": "clip", "media": 1, "markers": [] }]
+                    },
+                    {
+                        "id": 5,
+                        "kind": "subtitle",
+                        "items": [{ "id": 6, "type": "subtitle", "text": "Hi" }]
+                    },
+                    { "id": 7, "kind": "adjustment", "items": [{ "id": 8, "type": "adjustment" }] }
+                ]
+            }]
+        });
+        let v4 = migrate_v3_to_v4(v3.clone()).expect("migrates");
+        let clip = &v4["sequences"][0]["tracks"][0]["items"][0];
+        assert_eq!(
+            clip["speed"],
+            json!({ "keys": [{ "source_time": "0", "speed": { "num": 1, "den": 1 } }] })
+        );
+        assert_eq!(clip["enabled"], json!(true));
+        assert_eq!(clip["gain_db"], json!(0.0));
+        assert_eq!(clip["transform"]["scale"], json!([1.0, 1.0]));
+        assert_eq!(clip["crop"]["feather"], json!(0.0));
+        assert_eq!(clip["opacity"], json!(1.0));
+        assert_eq!(clip["blend"], json!("normal"));
+        assert_eq!(clip["effects"], json!([]));
+        assert_eq!(clip["markers"], json!([]));
+        // Other items and the id counter are untouched.
+        assert_eq!(
+            v4["sequences"][0]["tracks"][1],
+            v3["sequences"][0]["tracks"][1]
+        );
+        assert_eq!(
+            v4["sequences"][0]["tracks"][2],
+            v3["sequences"][0]["tracks"][2]
+        );
+        assert_eq!(v4["next_id"], json!(9));
+    }
+
+    #[test]
+    fn v3_to_v4_rejects_malformed_trees() {
+        assert!(migrate_v3_to_v4(json!([])).is_err());
+        assert!(migrate_v3_to_v4(json!({ "sequences": {} })).is_err());
+        assert!(migrate_v3_to_v4(json!({ "sequences": [1] })).is_err());
+        assert!(migrate_v3_to_v4(json!({ "sequences": [{ "tracks": {} }] })).is_err());
+        assert!(
+            migrate_v3_to_v4(json!({ "sequences": [{ "tracks": [{ "items": [2] }] }] })).is_err()
+        );
+        let err = migrate_v3_to_v4(json!({
+            "sequences": [{ "tracks": [{ "items": [{ "type": "clip", "opacity": 0.5 }] }] }]
+        }))
+        .expect_err("a v3 clip has no opacity");
+        assert_eq!(err, "a v3 clip already has opacity");
+        assert_eq!(
+            migrate_v3_to_v4(json!({ "uid": "u" })).expect("no sequences"),
+            json!({ "uid": "u" })
         );
     }
 

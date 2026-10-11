@@ -2,8 +2,8 @@
 //!
 //! A root is flattened into one record per node ([`Node`]): the project header, each
 //! media reference, each sequence and track without its children (plus the order of its
-//! children), each sequence marker, and each item whole (a clip's markers travel with
-//! it). A [`Diff`] lists the records added or changed and the
+//! children), each sequence marker, and each item whole (a clip's properties, effect
+//! stack and markers travel with it). A [`Diff`] lists the records added or changed and the
 //! ids removed; applying it to the flat form of the old root gives the flat form of the
 //! new root, which rebuilds into an equal tree.
 //!

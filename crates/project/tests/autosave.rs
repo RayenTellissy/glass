@@ -365,7 +365,7 @@ fn a_format_1_autosave_from_before_schema_v2_is_refused_by_version() {
     );
     fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
 
-    assert_eq!(autosave::FORMAT_VERSION, 3);
+    assert_eq!(autosave::FORMAT_VERSION, 4);
     assert!(matches!(
         autosave::recover(&dir),
         Err(autosave::AutosaveError::Format(1))
@@ -405,6 +405,95 @@ fn a_format_2_autosave_from_before_schema_v3_is_refused_by_version() {
         autosave::recover(&dir),
         Err(autosave::AutosaveError::Format(2))
     ));
+    fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// Autosaves written before project schema v4 (format 3, clips without properties) are
+/// refused by their format version too.
+#[test]
+fn a_format_3_autosave_from_before_schema_v4_is_refused_by_version() {
+    let s = setup();
+    let dir = temp_dir("format-3");
+    let (p, _) = s
+        .project
+        .insert_clip(s.v1, clip(s.media, 0, 5))
+        .expect("clip");
+    let mut writer = AutosaveWriter::open(&dir, &p, None, 0, 0).expect("open");
+    writer.tick(&p, 1, 10).expect("tick");
+    drop(writer);
+    let snapshot = dir.join("snapshot-00000001.json");
+    let mut old: serde_json::Value =
+        serde_json::from_slice(&fs::read(&snapshot).expect("snapshot")).expect("json");
+    old["autosave_format"] = 3.into();
+    let item = old["project"]["sequences"][0]["tracks"][0]["items"][0]
+        .as_object_mut()
+        .expect("clip");
+    for key in [
+        "speed",
+        "enabled",
+        "gain_db",
+        "transform",
+        "crop",
+        "opacity",
+        "blend",
+        "effects",
+    ] {
+        item.remove(key).expect("a v4 clip property");
+    }
+    assert!(
+        serde_json::from_value::<Project>(old["project"].clone()).is_err(),
+        "a format 3 project no longer parses"
+    );
+    fs::write(&snapshot, serde_json::to_vec(&old).expect("encode")).expect("write");
+    assert!(matches!(
+        autosave::recover(&dir),
+        Err(autosave::AutosaveError::Format(3))
+    ));
+    fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// Clip properties and effect stacks travel inside their item's record and recover.
+#[test]
+fn clip_property_edits_recover_from_the_log() {
+    let s = setup();
+    let dir = temp_dir("clip-props");
+    let (p, item) = s
+        .project
+        .insert_clip(s.v1, clip(s.media, 0, 50))
+        .expect("clip");
+    let mut writer = AutosaveWriter::open(&dir, &p, None, 0, 0).expect("open");
+    let lut = project::params::effects::lut();
+    let (p, effect) = p.add_effect(item, &lut, None).expect("effect");
+    let p = p
+        .set_effect_param(
+            effect,
+            &lut,
+            "intensity",
+            project::params::ParamValue::Float(0.25),
+        )
+        .expect("param");
+    let p = p
+        .set_clip_speed(item, Rational::new(2, 1), project::SpeedKeep::Source)
+        .expect("speed");
+    let p = p.set_clip_opacity(item, 0.5).expect("opacity");
+    let tick = writer.tick(&p, 4, 10).expect("tick");
+    assert!(
+        matches!(
+            tick,
+            autosave::Tick::Appended {
+                upserts: 2,
+                removals: 0,
+                ..
+            }
+        ),
+        "the root (next id) and the one item: {tick:?}"
+    );
+    let p = p.remove_effect(effect).expect("remove");
+    writer.tick(&p, 1, 20).expect("tick");
+    drop(writer);
+    let recovered = autosave::recover(&dir).expect("recovers");
+    assert!(recovered.project.content_eq(&p));
+    assert_eq!(recovered.info.edits_since_save, 5);
     fs::remove_dir_all(&dir).expect("cleanup");
 }
 
