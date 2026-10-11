@@ -862,9 +862,11 @@ fn mixed_shapes() -> Vec<Shape> {
 /// GPU time of 50 mixed shapes into a 4K layer, timed with timestamps over 60 frames
 /// after a warm-up (the node rebuilt every frame, as the engine will). Prints the median
 /// and p99 GPU time, the CPU time to build the node and the fragments each kind of pass
-/// shades, and holds the median under the whole Phase 4 budget.
+/// shades, and holds the GPU time to the whole Phase 4 budget by the shared timing rules
+/// (`common::timing`).
 #[test]
 fn fifty_shapes_4k_gpu_time() {
+    let _serial = common::timing::serial();
     let Some(mut gpu) = Gpu::new() else { return };
     let mut profiler = GpuProfiler::new(&gpu.device, &gpu.queue, 4);
     if !profiler.enabled() {
@@ -896,17 +898,15 @@ fn fifty_shapes_4k_gpu_time() {
             times.push(timings.total_ms.expect("total"));
         }
     }
-    times.sort_by(f64::total_cmp);
-    build.sort_by(f64::total_cmp);
-    let median = times[times.len() / 2];
-    let p99 = times[(times.len() * 99).div_ceil(100) - 1];
+    let times = common::timing::Samples::new(times);
+    let build = common::timing::Samples::new(build);
     println!(
-        "50 shapes at 4K ({} outlines, {} edges, {} atlas fills): GPU median {median:.3} ms, \
-         p99 {p99:.3} ms; CPU build median {:.3} ms",
+        "50 shapes at 4K ({} outlines, {} edges, {} atlas fills): GPU {times}; CPU build median \
+         {:.3} ms",
         stats.0,
         stats.1,
         stats.2,
-        build[build.len() / 2]
+        build.median()
     );
     println!(
         "fragments: accumulate {:.1} M, paint {:.1} M",
@@ -915,5 +915,5 @@ fn fifty_shapes_4k_gpu_time() {
     );
     let pixels = common::read(&gpu.device, &gpu.queue, &out);
     assert!(pixels.iter().filter(|p| p[3] > 0.0).count() > 3840 * 2160 / 10);
-    assert!(median < 8.0, "median {median} ms");
+    common::timing::assert_gpu_within("50 shapes at 4K", &times, 8.0);
 }

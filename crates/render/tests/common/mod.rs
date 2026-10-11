@@ -3,6 +3,8 @@
 
 #![allow(dead_code)]
 
+pub mod timing;
+
 use render::wgpu;
 
 pub fn device() -> Option<(wgpu::Device, wgpu::Queue)> {

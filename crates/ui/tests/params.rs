@@ -2,11 +2,13 @@
 //! header switch emit, driven through a plain `egui::Context` with synthetic input, and
 //! an inspector column of about 30 parameters within the frame budget.
 
+mod support;
+
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, pos2, vec2};
 use project::params::{
     ParamDef, ParamSchema, ParamValue, ParamValues, Range, Unit, builtin, effects,
 };
-use ui::frame_time::FrameTimeMonitor;
+use support::FrameBudget;
 use ui::headless::{HeadlessUi, Viewport};
 use ui::params::{KeyframeInfo, KeyframeMark, ParamEvent, Section, apply};
 use ui::theme::{self, ThemeKind};
@@ -527,16 +529,13 @@ fn inspector_column_p99_is_within_budget() {
     schemas.push(every_kind);
     let params: usize = schemas.iter().map(|s| s.params.len()).sum();
     assert!(params >= 28, "{params} parameters");
-    let mut monitor = FrameTimeMonitor::default();
-    headless
-        .run(30, 240, &mut monitor, |ui, frame| {
-            inspector_column(ui, frame, &schemas)
-        })
-        .expect("headless frames");
-    let stats = monitor.stats();
+    let stats = FrameBudget::run(&mut headless, 30, 240, |ui, frame| {
+        inspector_column(ui, frame, &schemas)
+    })
+    .expect("headless frames");
     eprintln!(
         "params frame budget, {params} parameters ({}): {stats}",
         headless.adapter()
     );
-    headless.assert_p99_within_budget("params frame budget", &stats);
+    stats.assert_within_budget(&headless, "params frame budget");
 }

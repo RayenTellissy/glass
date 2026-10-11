@@ -328,24 +328,36 @@ fn decoder_modes() -> [(&'static str, MediaDecoderOptions); 3] {
     ]
 }
 
+/// Lateness is wall-clock time, held to the budget (no late frame) by the shared timing
+/// rules (`common::timing`): every frame under `GLASS_STRICT_TIMING=1`, the median
+/// otherwise.
 #[test]
 fn three_cuts_across_two_files_play_with_no_late_frames_at_1080p() {
     let Some((a, b)) = fixtures() else {
         return;
     };
+    let _serial = common::timing::serial();
     let depth = engine::lookahead::default_depth(1920, 1080, 8);
-    let mut default_late = None;
+    let mut default_lateness = None;
     for (name, options) in decoder_modes() {
         let (timing, stats) = play_cuts(&[&a, &b], &CUTS_1080P, depth, options);
         report(&format!("1080p, depth {depth}, {name}"), &timing, &stats);
         assert_eq!(stats.decode_errors, 0);
-        default_late.get_or_insert(timing.late);
+        default_lateness.get_or_insert(timing.lateness);
     }
     // Only the default is held to the budget; the others are context for it.
-    assert_eq!(
-        default_late,
-        Some(0),
-        "late frames with the default decoder"
+    let lateness = common::timing::Samples::new(
+        default_lateness
+            .expect("a decoder mode")
+            .iter()
+            .map(|s| s * 1000.0)
+            .collect(),
+    );
+    common::timing::assert_wall_within(
+        "frame lateness with the default decoder",
+        &lateness,
+        common::timing::Stat::Max,
+        0.0,
     );
 }
 
@@ -361,6 +373,7 @@ fn cuts_inside_a_4k_file_report_their_timing() {
         fps: 30,
         time_base: Rational::new(1, 15360),
     };
+    let _serial = common::timing::serial();
     let depth = engine::lookahead::default_depth(3840, 2160, 8);
     for (name, options) in decoder_modes() {
         let (timing, stats) = play_cuts(&[&fixture], &CUTS_4K, depth, options);
