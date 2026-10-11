@@ -17,8 +17,9 @@
 //! clip's media from past its end. The project knows where media starts (source time 0) but
 //! not how long a file is, so edits and [`Project::validate`] check head handles only;
 //! [`Project::check_transition_media`] checks tail handles against lengths the caller
-//! knows (the media pool's facts), and [`Project::source_used_until`] counts them, so
-//! relinking refuses a file too short for them.
+//! knows (the media pool's facts) or, for a nested sequence, against the sequence's own
+//! length, and [`Project::source_used_until`] counts them, so relinking refuses a file too
+//! short for them.
 //!
 //! Edits on a transition ([`Project::add_transition`],
 //! [`Project::set_transition_duration`], [`Project::set_transition_alignment`]) refuse a
@@ -51,7 +52,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::EditError;
 use crate::id::{ItemId, MediaId, TrackId, TransitionId};
-use crate::model::{Item, Project, Sequence, Track};
+use crate::model::{ClipSource, Item, Project, Sequence, Track};
 use crate::params::{ParamSchema, ParamValue, ParamValues};
 use crate::time::{Time, TimeRange};
 
@@ -203,15 +204,16 @@ pub struct TransitionAt<'a> {
     pub progress: f64,
 }
 
-/// What a transition needs of its clips' media.
+/// What a transition needs of its clips' sources (media or nested sequences).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HandleNeeds {
-    /// The outgoing clip, its media and the source time it is shown up to (exclusive): its
-    /// own source end plus the part after the cut times its speed.
-    pub outgoing: Option<(ItemId, MediaId, Time)>,
-    /// The incoming clip, its media and the source time it is shown from: its source start
-    /// less the part before the cut times its speed (never negative in a valid tree).
-    pub incoming: Option<(ItemId, MediaId, Time)>,
+    /// The outgoing clip, its source and the source time it is shown up to (exclusive):
+    /// its own source end plus the part after the cut times its speed.
+    pub outgoing: Option<(ItemId, ClipSource, Time)>,
+    /// The incoming clip, its source and the source time it is shown from: its source
+    /// start less the part before the cut times its speed (never negative in a valid
+    /// tree).
+    pub incoming: Option<(ItemId, ClipSource, Time)>,
 }
 
 /// An id a project stores for a render-side asset: lowercase ASCII letters, digits and `-`.
@@ -770,11 +772,13 @@ impl Project {
         needs(track, seq.grid(track.kind)?, t)
     }
 
-    /// Checks the outgoing clip's tail handle against its media's length, where `length`
-    /// knows it (the media pool's facts; `None` skips the check, as for stills). The head
-    /// handle is always checked by the edits. Fails with [`EditError::TransitionHandle`],
-    /// in timeline time: the part after the cut against the media left past the clip's
-    /// end over its speed.
+    /// Checks the outgoing clip's tail handle against its source's length: for media, the
+    /// length `length` knows (the media pool's facts; `None` skips the check, as for
+    /// stills); for a nested sequence, the sequence's own length
+    /// ([`Project::sequence_duration`], never asked of `length`). The head handle is
+    /// always checked by the edits. Fails with [`EditError::TransitionHandle`], in
+    /// timeline time: the part after the cut against the source left past the clip's end
+    /// over its speed.
     pub fn check_transition_media(
         &self,
         transition: TransitionId,
@@ -793,7 +797,11 @@ impl Project {
             return Ok(());
         }
         let clip = item.clip().ok_or(EditError::NotAClip(item.id))?;
-        let Some(len) = length(clip.media) else {
+        let len = match clip.source {
+            ClipSource::Media(media) => length(media),
+            ClipSource::Sequence(sequence) => Some(self.sequence_duration(sequence)?),
+        };
+        let Some(len) = len else {
             return Ok(());
         };
         let speed = clip.speed.speed()?;
@@ -1054,7 +1062,7 @@ pub(crate) fn needs(
             let clip = item.clip().ok_or(EditError::NotAClip(item.id))?;
             let end = clip.source_range(item.range)?.end()?;
             let extra = clip.speed.source_duration(after)?;
-            Some((item.id, clip.media, end.checked_add(extra)?))
+            Some((item.id, clip.source, end.checked_add(extra)?))
         }
         None => None,
     };
@@ -1062,7 +1070,7 @@ pub(crate) fn needs(
         Some(item) => {
             let clip = item.clip().ok_or(EditError::NotAClip(item.id))?;
             let extra = clip.speed.source_duration(before)?;
-            Some((item.id, clip.media, clip.source_start.checked_sub(extra)?))
+            Some((item.id, clip.source, clip.source_start.checked_sub(extra)?))
         }
         None => None,
     };

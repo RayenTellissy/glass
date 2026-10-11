@@ -10,11 +10,14 @@ pub mod logging;
 pub mod lookahead;
 pub mod media_check;
 pub mod media_mgmt;
-pub mod playback;
 pub mod quality;
 pub mod scrub;
 pub mod threads;
 pub mod timeline;
+
+// The crates the engine's API is made of, for binaries that depend on the engine alone
+// (`smoke`, Decision 66).
+pub use {audio, media, project, render};
 
 /// Names of the optional codec and AI features compiled into this build.
 pub fn enabled_features() -> Vec<&'static str> {

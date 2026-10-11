@@ -53,6 +53,7 @@ pub enum EditLabel {
     ChangeMarker,
     DeleteMarker,
     ChangeTrackKind,
+    RenameTrack,
     AddTransition,
     RemoveTransition,
     TransitionDuration,
@@ -62,10 +63,15 @@ pub enum EditLabel {
     SequenceSettings,
     Recover,
     Relink,
+    Nest,
+    BreakApart,
+    ReplaceSource,
+    DuplicateCompound,
+    RemoveSequence,
 }
 
 impl EditLabel {
-    pub const ALL: [EditLabel; 40] = [
+    pub const ALL: [EditLabel; 46] = [
         EditLabel::AddMedia,
         EditLabel::AddSequence,
         EditLabel::AddTrack,
@@ -97,6 +103,7 @@ impl EditLabel {
         EditLabel::ChangeMarker,
         EditLabel::DeleteMarker,
         EditLabel::ChangeTrackKind,
+        EditLabel::RenameTrack,
         EditLabel::AddTransition,
         EditLabel::RemoveTransition,
         EditLabel::TransitionDuration,
@@ -106,6 +113,11 @@ impl EditLabel {
         EditLabel::SequenceSettings,
         EditLabel::Recover,
         EditLabel::Relink,
+        EditLabel::Nest,
+        EditLabel::BreakApart,
+        EditLabel::ReplaceSource,
+        EditLabel::DuplicateCompound,
+        EditLabel::RemoveSequence,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -141,6 +153,7 @@ impl EditLabel {
             EditLabel::ChangeMarker => "edit.label.change_marker",
             EditLabel::DeleteMarker => "edit.label.delete_marker",
             EditLabel::ChangeTrackKind => "edit.label.change_track_kind",
+            EditLabel::RenameTrack => "edit.label.rename_track",
             EditLabel::AddTransition => "edit.label.add_transition",
             EditLabel::RemoveTransition => "edit.label.remove_transition",
             EditLabel::TransitionDuration => "edit.label.transition_duration",
@@ -150,6 +163,11 @@ impl EditLabel {
             EditLabel::SequenceSettings => "edit.label.sequence_settings",
             EditLabel::Recover => "edit.label.recover",
             EditLabel::Relink => "edit.label.relink",
+            EditLabel::Nest => "edit.label.nest",
+            EditLabel::BreakApart => "edit.label.break_apart",
+            EditLabel::ReplaceSource => "edit.label.replace_source",
+            EditLabel::DuplicateCompound => "edit.label.duplicate_compound",
+            EditLabel::RemoveSequence => "edit.label.remove_sequence",
         }
     }
 }

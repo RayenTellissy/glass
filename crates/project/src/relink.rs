@@ -5,13 +5,14 @@
 //! media was offline are kept as they are, and one batch is one undo step
 //! ([`crate::EditLabel::Relink`]). Finding the new files is the engine's job
 //! (`engine::media_mgmt::relink`); this module only validates and applies the choice.
+//! Clips of nested sequences have no media and are never relinked.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::error::EditError;
-use crate::id::MediaId;
-use crate::model::{MediaRef, Project};
+use crate::id::{MediaId, SequenceId};
+use crate::model::{ClipSource, MediaRef, Project};
 use crate::time::Time;
 use crate::transition::needs;
 
@@ -39,7 +40,7 @@ impl Project {
             for track in &sequence.tracks {
                 for item in &track.items {
                     if let Some(clip) = item.clip()
-                        && clip.media == media
+                        && clip.source == ClipSource::Media(media)
                     {
                         extend(clip.source_range(item.range)?.end()?);
                     }
@@ -50,7 +51,7 @@ impl Project {
                 let grid = sequence.grid(track.kind)?;
                 for transition in &track.transitions {
                     if let Some((_, m, e)) = needs(track, grid, transition)?.outgoing
-                        && m == media
+                        && m == ClipSource::Media(media)
                     {
                         extend(e);
                     }
@@ -60,14 +61,16 @@ impl Project {
         Ok(end)
     }
 
-    /// How many clips use `media`: the "in 3 edits" the relink dialog shows.
+    /// How many times clips of `media` play in the browser's sequences (every sequence
+    /// but compounds' contents): the "in 3 edits" the relink dialog shows. Nested
+    /// sequences count through every clip that nests them, so a clip inside a compound
+    /// counts once per clip of that compound, and a clip in a sequence nested in another
+    /// counts in both. A compound no clip nests counts nowhere.
     pub fn clip_count(&self, media: MediaId) -> usize {
-        self.sequences
-            .iter()
-            .flat_map(|s| s.tracks.iter())
-            .flat_map(|t| t.items.iter())
-            .filter(|i| i.clip().is_some_and(|c| c.media == media))
-            .count()
+        let mut memo = HashMap::new();
+        self.browser_sequences()
+            .map(|s| uses(self, s.id, media, &mut memo))
+            .sum()
     }
 
     /// Points each reference in `relinks` at its new file, all or nothing. Refuses an
@@ -107,6 +110,36 @@ impl Project {
         }
         Ok(next)
     }
+}
+
+/// How many clips of `media` sequence `id` plays, through its nested sequences;
+/// memoised per sequence. A cycle (never in a valid tree) counts as nothing.
+fn uses(
+    project: &Project,
+    id: SequenceId,
+    media: MediaId,
+    memo: &mut HashMap<SequenceId, usize>,
+) -> usize {
+    if let Some(&n) = memo.get(&id) {
+        return n;
+    }
+    memo.insert(id, 0);
+    let mut n = 0;
+    if let Some(seq) = project.sequence(id) {
+        for clip in seq
+            .tracks
+            .iter()
+            .flat_map(|t| t.items.iter())
+            .filter_map(|i| i.clip())
+        {
+            n += match clip.source {
+                ClipSource::Media(m) => usize::from(m == media),
+                ClipSource::Sequence(s) => uses(project, s, media, memo),
+            };
+        }
+    }
+    memo.insert(id, n);
+    n
 }
 
 /// How much shorter than the used source range a new file may probe and still be

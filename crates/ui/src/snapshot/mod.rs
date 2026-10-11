@@ -12,6 +12,8 @@ pub mod compare;
 pub mod fonts;
 mod pool_cases;
 mod relink_cases;
+mod timeline_cases;
+mod track_header_cases;
 
 use std::path::Path;
 

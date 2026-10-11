@@ -609,6 +609,15 @@ pub enum Icon {
     Image,
     Import,
     More,
+    /// A closed padlock (a locked track).
+    Lock,
+    /// An open padlock.
+    Unlock,
+    Eye,
+    /// The eye struck through (a hidden track).
+    EyeOff,
+    /// Two bars with a double arrow between them (track height).
+    Height,
 }
 
 fn arc(center: Pos2, r: f32, from_deg: f32, to_deg: f32) -> Vec<Pos2> {
@@ -755,6 +764,42 @@ pub fn icon(painter: &Painter, rect: Rect, icon: Icon, color: Color32, stroke_24
             .iter()
             .map(|x| Shape::circle_stroke(p(*x, 12.0), 1.0 * s, stroke))
             .collect(),
+        Icon::Lock | Icon::Unlock => {
+            let to = if icon == Icon::Lock { 360.0 } else { 325.0 };
+            let mut shackle = vec![p(8.0, 11.0)];
+            shackle.extend(arc(p(12.0, 7.0), 4.0 * s, 180.0, to));
+            if icon == Icon::Lock {
+                shackle.push(p(16.0, 11.0));
+            }
+            vec![
+                Shape::rect_stroke(
+                    Rect::from_min_max(p(5.0, 11.0), p(19.0, 21.0)),
+                    CornerRadius::same((2.0 * s) as u8),
+                    stroke,
+                    StrokeKind::Middle,
+                ),
+                line(shackle),
+            ]
+        }
+        Icon::Eye | Icon::EyeOff => {
+            // The almond is two arcs through (2, 12), the lid's apex and (22, 12).
+            let mut v = vec![
+                line(arc(p(12.0, 15.64), 10.64 * s, 200.0, 340.0)),
+                line(arc(p(12.0, 8.36), 10.64 * s, 20.0, 160.0)),
+                Shape::circle_stroke(p(12.0, 12.0), 3.0 * s, stroke),
+            ];
+            if icon == Icon::EyeOff {
+                v.push(line(vec![p(3.0, 3.0), p(21.0, 21.0)]));
+            }
+            v
+        }
+        Icon::Height => vec![
+            line(vec![p(5.0, 3.0), p(19.0, 3.0)]),
+            line(vec![p(5.0, 21.0), p(19.0, 21.0)]),
+            line(vec![p(12.0, 7.0), p(12.0, 17.0)]),
+            line(vec![p(9.0, 10.0), p(12.0, 7.0), p(15.0, 10.0)]),
+            line(vec![p(9.0, 14.0), p(12.0, 17.0), p(15.0, 14.0)]),
+        ],
     };
     painter.extend(shapes);
 }

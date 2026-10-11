@@ -14,7 +14,8 @@ bench = false
 [dependencies]
 imbl.workspace = true
 serde = { workspace = true, features = ["rc"] }
-serde_json.workspace = true
+# Exact float parsing, so a saved project loads and saves again to the same bytes.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror.workspace = true
 
 [dev-dependencies]

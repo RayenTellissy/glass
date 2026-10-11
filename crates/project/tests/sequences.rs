@@ -196,6 +196,38 @@ fn track_kinds_change_only_when_every_item_fits() {
 }
 
 #[test]
+fn tracks_rename_with_trimmed_names_and_undo() {
+    let f = fixture();
+    let mut history = History::new(f.project.clone());
+    let renamed = f
+        .project
+        .rename_track(f.video, "  Interviews ")
+        .expect("rename");
+    assert_eq!(renamed.find_track(f.video).expect("t").1.name, "Interviews");
+    renamed.validate().expect("valid");
+    history.commit(EditLabel::RenameTrack, renamed.clone());
+    assert_eq!(history.undo_label(), Some(EditLabel::RenameTrack));
+    let undone = history.undo().expect("undo");
+    assert_eq!(undone.find_track(f.video).expect("t").1.name, "V1");
+
+    // Unchanged names give the same project; empty names and unknown tracks are refused.
+    assert!(
+        renamed
+            .rename_track(f.video, "Interviews")
+            .expect("same")
+            .content_eq(&renamed)
+    );
+    assert_eq!(
+        f.project.rename_track(f.video, "   "),
+        Err(EditError::EmptyTrackName(f.video))
+    );
+    assert_eq!(
+        f.project.rename_track(TrackId(999), "X"),
+        Err(EditError::UnknownTrack(TrackId(999)))
+    );
+}
+
+#[test]
 fn gaps_are_the_empty_space_between_items() {
     let f = fixture();
     let track = |p: &Project| p.find_track(f.video).expect("v").1.clone();

@@ -12,8 +12,8 @@ use std::path::PathBuf;
 use media::{Rational as MediaRational, Timestamp};
 use project::params::{ParamValues, effects};
 use project::{
-    BlendMode as ProjectBlend, Crop, EditError, ItemId, Project, SequenceId, Time, TimeError,
-    TrackKind, Transform, TransitionId,
+    BlendMode as ProjectBlend, ClipSource, Crop, EditError, ItemId, Project, SequenceId, Time,
+    TimeError, TrackKind, Transform, TransitionId,
 };
 use render::blend::BlendMode;
 use render::frame_cache::SegmentHash;
@@ -150,6 +150,7 @@ pub struct TimelinePlan {
     /// Runs of frames that composite the same things, in order, with their cache hash.
     spans: Vec<(Range<i64>, SegmentHash)>,
     missing_media: usize,
+    nested_clips: usize,
     skipped_effects: usize,
 }
 
@@ -169,7 +170,8 @@ struct Draft {
 
 impl TimelinePlan {
     /// Compiles the video tracks of `sequence`. Clips that are disabled, whose media the
-    /// project does not list, or that sit on other kinds of tracks are left out; effects
+    /// project does not list, that nest a sequence, or that sit on other kinds of tracks
+    /// are left out; effects
     /// without a renderer (unknown schemas) are skipped and counted.
     pub fn build(project: &Project, sequence: SequenceId) -> Result<Self, PlanError> {
         let seq = project
@@ -183,6 +185,7 @@ impl TimelinePlan {
         let mut raw_transitions: Vec<(usize, TransitionLook, Option<ItemId>, Option<ItemId>)> =
             Vec::new();
         let mut missing_media = 0;
+        let mut nested_clips = 0;
         let mut skipped_effects = 0;
 
         let video: Vec<_> = seq
@@ -199,7 +202,13 @@ impl TimelinePlan {
                 if !clip.enabled {
                     continue;
                 }
-                let Some(media) = project.media().get(clip.media) else {
+                // Nested sequences are not rendered yet: their clips are left out and
+                // counted (`TimelinePlan::nested_clips`).
+                let ClipSource::Media(media_id) = clip.source else {
+                    nested_clips += 1;
+                    continue;
+                };
+                let Some(media) = project.media().get(media_id) else {
                     missing_media += 1;
                     continue;
                 };
@@ -219,7 +228,7 @@ impl TimelinePlan {
                     item: item.id,
                     item_range: range.clone(),
                     timeline: range,
-                    source: SourceRef::new(SourceId(clip.media.0), &media.path),
+                    source: SourceRef::new(SourceId(media_id.0), &media.path),
                     content_hash: media.content_hash.clone(),
                     source_start: clip.source_start,
                     speed: MediaRational::new(speed.num, speed.den),
@@ -291,8 +300,20 @@ impl TimelinePlan {
             h.add(&(d.source_start.num(), d.source_start.den()));
             h.add(&(d.speed.num, d.speed.den));
             let hash = h.finish();
+            // What a frame shows of the clip: the file and the source time at timeline
+            // zero, so trimming either end or stretching over a transition's handle
+            // keeps the frames the clip still shows.
+            let at_zero = d.source_start.checked_sub(
+                Time::from_frames(d.timeline.start, rate)?
+                    .mul_ratio(i64::from(d.speed.num), i64::from(d.speed.den))?,
+            )?;
+            let mut p = Hash128::new("picture");
+            p.add(&d.source.path);
+            p.add(&d.content_hash);
+            p.add(&(at_zero.num(), at_zero.den()));
+            p.add(&(d.speed.num, d.speed.den));
             index_of.insert(d.item, i);
-            look_hashes.push(look_hash(hash, &d.look));
+            look_hashes.push(look_hash(p.finish(), &d.look));
             looks.push(d.look);
             item_ranges.push((d.rank, d.item_range));
             segments.push(PlanSegment {
@@ -364,6 +385,7 @@ impl TimelinePlan {
             tracks,
             spans: Vec::new(),
             missing_media,
+            nested_clips,
             skipped_effects,
         };
         plan.spans = plan.compute_spans();
@@ -425,6 +447,12 @@ impl TimelinePlan {
     /// Clips left out because the project lists no media for them.
     pub fn missing_media(&self) -> usize {
         self.missing_media
+    }
+
+    /// Enabled clips of nested sequences (Decision 69), left out until the renderer
+    /// composites a nested sequence as a layer: they show nothing yet.
+    pub fn nested_clips(&self) -> usize {
+        self.nested_clips
     }
 
     /// Enabled effects left out because this build has no renderer for them.
@@ -529,10 +557,10 @@ impl TimelinePlan {
     }
 }
 
-/// A clip's look hashed with its decode segment.
-fn look_hash(segment: SegmentHash, look: &ClipLook) -> SegmentHash {
+/// A clip's look hashed with what it shows of its source.
+fn look_hash(picture: SegmentHash, look: &ClipLook) -> SegmentHash {
     let mut h = Hash128::new("look");
-    h.add(&segment.0);
+    h.add(&picture.0);
     let t = &look.transform;
     for v in t.position.iter().chain(&t.scale).chain(&t.anchor) {
         h.add_f64(*v);
@@ -837,6 +865,40 @@ mod tests {
             before.span_hash(41),
             "C on and off differ"
         );
+    }
+
+    #[test]
+    fn trims_keep_the_hashes_of_the_frames_a_clip_still_shows() {
+        let f = fixture();
+        let before = TimelinePlan::build(&f.project, f.seq).unwrap();
+        let changed = |after: &TimelinePlan| -> Vec<i64> {
+            (0..90)
+                .filter(|&t| before.span_hash(t) != after.span_hash(t))
+                .collect()
+        };
+        // C on V2 covers 10..40 over A: trimming its tail to 30 changes 30..40 only, and
+        // its head to 20 (the source start moving with it) changes 10..20 only.
+        let tail = f.project.trim_item(f.c, range(10, 30)).unwrap();
+        let tail = TimelinePlan::build(&tail, f.seq).unwrap();
+        assert_eq!(changed(&tail), (30..40).collect::<Vec<_>>());
+        let head = f.project.trim_item(f.c, range(20, 40)).unwrap();
+        let head = TimelinePlan::build(&head, f.seq).unwrap();
+        assert_eq!(changed(&head), (10..20).collect::<Vec<_>>());
+        // Slipping C shows other source frames everywhere it plays.
+        let slipped = f.project.slip_clip(f.c, at(3)).unwrap();
+        let slipped = TimelinePlan::build(&slipped, f.seq).unwrap();
+        assert_eq!(changed(&slipped), (10..40).collect::<Vec<_>>());
+        // Lengthening the dissolve stretches A's and B's decode segments, yet only the
+        // frames it covers change.
+        let longer = f
+            .project
+            .set_transition_duration(
+                f.project.sequence(f.seq).unwrap().tracks[1].transitions[0].id,
+                at(20),
+            )
+            .unwrap();
+        let longer = TimelinePlan::build(&longer, f.seq).unwrap();
+        assert_eq!(changed(&longer), (40..60).collect::<Vec<_>>());
     }
 
     fn video_track(f: &Fixture, index: usize) -> project::TrackId {

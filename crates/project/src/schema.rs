@@ -6,7 +6,7 @@
 //! ```json
 //! {
 //!   "format": "glass.project",
-//!   "schema_version": 7,
+//!   "schema_version": 8,
 //!   "project": { "uid": "...", "name": "...", "next_id": 7, "settings": {...}, "media": {...}, "sequences": [...] }
 //! }
 //! ```
@@ -28,9 +28,26 @@
 //! build next to the existing `v<N>` ones (which stay, unchanged, as prior-version
 //! fixtures).
 //!
-//! Key order is stable: the envelope and every node serialise as structs (fields in
-//! declaration order) and every collection is ordered (by position, or by id for media),
-//! so saving the same tree twice gives the same bytes.
+//! [`save`] writes one canonical form, so a project file diffs cleanly in git and a
+//! saved file loads and saves again to the same bytes:
+//!
+//! - pretty JSON: a 2-space indent, one key or array element per line, `\n` line ends
+//!   and one trailing newline;
+//! - the envelope and every node serialise as structs, fields in declaration order (the
+//!   order in the model's source; Decision 45 lists the item, clip and track orders);
+//! - every map has its keys in ascending byte order: clip `keyframes` by property id
+//!   (not [`crate::keyframe::ClipParam`]'s declaration order), effect `keyframes` and
+//!   `params` by parameter id;
+//! - lists keep model order (sequences, tracks, items, transitions, markers by position,
+//!   media references by id); ids are numbers, times reduced fractions;
+//! - floats in their shortest form that parses back to the same value (`serde_json`'s
+//!   `float_roundtrip` feature makes the parse exact);
+//! - nothing from the machine or the clock: no timestamps, and no hash-ordered
+//!   collection reaches the output.
+//!
+//! [`load`] reads any layout and key order (compact files, files written by other
+//! tools), and saving such a file writes the canonical form. The form is formatting
+//! only, so it did not change [`SCHEMA_VERSION`] (Decision 74).
 //!
 //! Versions:
 //!
@@ -52,6 +69,9 @@
 //! - v7: clips and effects carry `keyframes` (`crate::keyframe`): curves of keys in source
 //!   time by animated parameter, under the clip property's id (`"opacity"`,
 //!   `"crop.left"`) or the effect parameter's id.
+//! - v8: sequences carry `compound` (a compound clip's contents, hidden from the browser),
+//!   and a clip names its source as `"media": <id>` as before or `"sequence": <id>` for a
+//!   nested sequence (`crate::nest`).
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -63,7 +83,7 @@ use crate::validate::ValidationError;
 pub const FORMAT: &str = "glass.project";
 
 /// The schema version this build writes, and the newest it reads.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// The oldest schema version this build reads.
 pub const OLDEST_VERSION: u32 = 1;
@@ -79,6 +99,7 @@ pub const MIGRATIONS: [Migration; (SCHEMA_VERSION - OLDEST_VERSION) as usize] = 
     migrate_v4_to_v5,
     migrate_v5_to_v6,
     migrate_v6_to_v7,
+    migrate_v7_to_v8,
 ];
 
 /// Why a project file could not be read. [`LoadError::i18n_key`] names the message to
@@ -498,6 +519,29 @@ fn add_keyframes(node: &mut Map<String, Value>, what: &str) -> Result<(), String
     Ok(())
 }
 
+/// v7 → v8: every sequence gets `"compound": false` (v7 has no compound clips). Clips
+/// keep their `media` field, which v8 reads as a media source. Nothing else changes, nor
+/// does `next_id`.
+pub fn migrate_v7_to_v8(mut project: Value) -> Result<Value, String> {
+    let root = object(&mut project)?;
+    let Some(sequences) = root.get_mut("sequences") else {
+        return Ok(project);
+    };
+    let sequences = sequences
+        .as_array_mut()
+        .ok_or_else(|| "sequences is not a list".to_string())?;
+    for sequence in sequences {
+        let sequence = sequence
+            .as_object_mut()
+            .ok_or_else(|| "a sequence is not an object".to_string())?;
+        if sequence.contains_key("compound") {
+            return Err("a v7 sequence already has compound".to_string());
+        }
+        sequence.insert("compound".to_string(), Value::Bool(false));
+    }
+    Ok(project)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -808,6 +852,51 @@ mod tests {
         );
         assert_eq!(
             migrate_v6_to_v7(json!({ "uid": "u" })).expect("no sequences"),
+            json!({ "uid": "u" })
+        );
+    }
+
+    #[test]
+    fn v7_to_v8_marks_every_sequence_not_compound() {
+        let v7 = json!({
+            "next_id": 9,
+            "sequences": [
+                {
+                    "id": 2,
+                    "tracks": [{
+                        "id": 3,
+                        "kind": "video",
+                        "items": [{ "id": 4, "type": "clip", "media": 1 }]
+                    }]
+                },
+                { "id": 5 }
+            ]
+        });
+        let v8 = migrate_v7_to_v8(v7.clone()).expect("migrates");
+        let mut expected = v7;
+        for seq in expected["sequences"].as_array_mut().expect("sequences") {
+            seq["compound"] = json!(false);
+        }
+        assert_eq!(v8, expected);
+    }
+
+    #[test]
+    fn v7_to_v8_rejects_malformed_trees() {
+        assert!(migrate_v7_to_v8(json!([])).is_err());
+        assert_eq!(
+            migrate_v7_to_v8(json!({ "sequences": {} })),
+            Err("sequences is not a list".to_string())
+        );
+        assert_eq!(
+            migrate_v7_to_v8(json!({ "sequences": [1] })),
+            Err("a sequence is not an object".to_string())
+        );
+        assert_eq!(
+            migrate_v7_to_v8(json!({ "sequences": [{ "compound": true }] })),
+            Err("a v7 sequence already has compound".to_string())
+        );
+        assert_eq!(
+            migrate_v7_to_v8(json!({ "uid": "u" })).expect("no sequences"),
             json!({ "uid": "u" })
         );
     }

@@ -1,17 +1,25 @@
-//! Headless check binary: opens the reference project, plays a short range and exports
-//! a short range without a window, then exits 0. It starts as a stub and grows with
-//! each phase.
+//! Headless check binary: opens the reference project (`tests/fixtures/reference.proj`),
+//! plays 2 s of it and exports 1 s without a window, verifies the export, then exits 0.
+//!
+//! `smoke --write-reference [path]` writes the reference project instead (to
+//! `tests/fixtures/reference.proj` by default), from the generator in `reference.rs`.
+//!
+//! Without a GPU adapter play and export are skipped with a message, unless
+//! `GLASS_REQUIRE_GPU=1`; missing fixtures always fail.
 
-use std::path::{Path, PathBuf};
+mod reference;
+mod run;
+
+use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::time::Instant;
 
 use engine::logging::{self, LogFilter};
+use engine::timeline::TimelinePlan;
 
-const STEPS: &[&str] = &[
-    "open tests/fixtures/reference.proj",
-    "play 2 s headless",
-    "export 1 s",
-];
+/// Timeline frames played: 2 s at the reference's 30 fps.
+const PLAY_FRAMES: i64 = 2 * reference::FPS;
 
 fn main() -> ExitCode {
     let ring = match logging::init() {
@@ -21,6 +29,28 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--write-reference") {
+        let path = args
+            .get(1)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| reference::repo_root().join(reference::FILE));
+        return match reference::write(&path) {
+            Ok(()) => {
+                println!("smoke: wrote {}", path.display());
+                ExitCode::SUCCESS
+            }
+            Err(message) => {
+                eprintln!("smoke: {message}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if let Some(arg) = args.first() {
+        eprintln!("smoke: unknown argument {arg}; usage: smoke [--write-reference [path]]");
+        return ExitCode::FAILURE;
+    }
+
     tracing::info!("smoke started");
     // GLASS_LOG may silence info; the ring is only checked when the event passed the filter.
     if tracing::enabled!(tracing::Level::INFO) && ring.snapshot(&LogFilter::default()).is_empty() {
@@ -28,85 +58,63 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    if let Err(message) = decode_check() {
-        eprintln!("smoke: {message}");
-        return ExitCode::FAILURE;
+    match check() {
+        Ok(()) => {
+            println!("smoke: ok");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("smoke: FAILED: {message}");
+            ExitCode::FAILURE
+        }
     }
-
-    println!("smoke: still to come:");
-    for step in STEPS {
-        println!("  - {step}");
-    }
-    println!("smoke: ok");
-    ExitCode::SUCCESS
 }
 
-/// The H.264 fixture from `tests/fixtures/generate.sh`; `GLASS_FIXTURES` points elsewhere.
-fn fixture_path() -> PathBuf {
-    std::env::var_os("GLASS_FIXTURES")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/generated")
-        })
-        .join("h264_1080p30.mp4")
-}
-
-/// Probes the H.264 fixture and decodes its first 2 s of video and audio.
-fn decode_check() -> Result<(), String> {
-    const SECONDS: f64 = 2.0;
-    let path = fixture_path();
-    if !path.is_file() {
-        println!(
-            "smoke: decode check skipped, {} missing (run tests/fixtures/generate.sh)",
-            path.display()
-        );
-        return Ok(());
-    }
-    let check = engine::media_check::probe_and_decode(&path, SECONDS).map_err(|e| e.to_string())?;
-    let Some((stream, video)) = check.info.video() else {
-        return Err(format!("{}: probe found no video", path.display()));
-    };
-    let rate = video.frame_rate.and_then(|r| r.to_f64()).unwrap_or(0.0);
-    let expected = (rate * SECONDS).round() as u64;
-    if check.video_frames != expected {
-        return Err(format!(
-            "decoded {} video frames in {SECONDS} s, expected {expected}",
-            check.video_frames
-        ));
-    }
-    if check.first_video_pts.map(|t| t.seconds()) != Some(0.0) {
-        return Err(format!("first video frame at {:?}", check.first_video_pts));
-    }
-    let audio_seconds = check.audio_samples as f64 / f64::from(engine::media_check::AUDIO_RATE);
-    if check.info.audio().is_some() && (audio_seconds - SECONDS).abs() > 1e-9 {
-        return Err(format!(
-            "decoded {audio_seconds} s of audio at {} Hz, expected {SECONDS} s",
-            engine::media_check::AUDIO_RATE
-        ));
-    }
-    if check.info.audio().is_some() && check.audio_peak <= 0.0 {
-        return Err("the decoded audio is silent".to_string());
-    }
+fn check() -> Result<(), String> {
+    let started = Instant::now();
+    let path = reference::repo_root().join(reference::FILE);
+    let opened = reference::open(&path)?;
+    let plan = TimelinePlan::build(&opened.project, opened.sequence).map_err(|e| e.to_string())?;
+    let sequence = opened
+        .project
+        .sequence(opened.sequence)
+        .ok_or("the sequence vanished")?;
+    let clips = sequence.tracks.iter().map(|t| t.items.len()).sum::<usize>();
+    let transitions = sequence
+        .tracks
+        .iter()
+        .map(|t| t.transitions.len())
+        .sum::<usize>();
+    let (w, h) = plan.canvas();
     println!(
-        "smoke: decoded {} {}x{} {} frames and {:.2} s of audio (f32 stereo at {} Hz) from {} in {} ms",
-        check.video_frames,
-        video.width,
-        video.height,
-        stream.codec.name,
-        audio_seconds,
-        engine::media_check::AUDIO_RATE,
-        path.file_name()
-            .map_or_else(Default::default, |n| n.to_string_lossy()),
-        check.elapsed.as_millis()
+        "smoke: opened {} in {:.0} ms: {w}x{h} at {} fps, {} frames, {} tracks, {clips} clips, \
+         {transitions} transitions, {} markers, {} decode segments",
+        reference::FILE,
+        started.elapsed().as_secs_f64() * 1000.0,
+        plan.rate().to_f64().unwrap_or(0.0),
+        plan.end(),
+        sequence.tracks.len(),
+        sequence.markers.len(),
+        plan.segments().segments().len(),
     );
-    match &check.video_decode_path {
-        Some(engine::media_check::DecodePath::Hardware { api }) => {
-            println!("smoke: video decoded in hardware ({})", api.name());
-        }
-        Some(engine::media_check::DecodePath::Software { reason }) => {
-            println!("smoke: video decoded in software: {}", reason.message());
-        }
-        None => {}
+    if plan.missing_media() > 0 || plan.skipped_effects() > 0 {
+        return Err(format!(
+            "the plan left out {} clips without media and {} effects",
+            plan.missing_media(),
+            plan.skipped_effects()
+        ));
     }
+
+    let Some(gpu) = run::gpu() else {
+        if std::env::var_os("GLASS_REQUIRE_GPU").is_some_and(|v| v == "1") {
+            return Err("no GPU adapter with 16-bit normalised textures".to_owned());
+        }
+        println!("smoke: SKIPPED play and export: no GPU adapter with 16-bit normalised textures");
+        return Ok(());
+    };
+    let plan = Arc::new(plan);
+    run::play(&gpu, &plan, PLAY_FRAMES)?;
+    run::export(&gpu, &plan, reference::EXPORT)?;
+    println!("smoke: total {:.2} s", started.elapsed().as_secs_f64());
     Ok(())
 }

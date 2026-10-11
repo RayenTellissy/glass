@@ -10,7 +10,9 @@ use engine::media_mgmt::{DropSummary, Unreadable};
 use project::media_pool::{Facts, Gps, Metadata};
 use project::params::{ParamDef, ParamSchema, ParamValue, ParamValues, Range, Unit, builtin};
 
-use super::{SnapshotCase, pool_cases, relink_cases};
+use super::{
+    SnapshotCase, pool_cases, relink_cases, timeline_cases as tl, track_header_cases as th,
+};
 use crate::dialogs::about::{self, AboutDialog, AboutInfo, Licence, View};
 use crate::dialogs::recovery::{self, RecoveryDialog, RecoveryPrompt, RecoveryState};
 use crate::dialogs::shortcuts::{self, ShortcutsEditor};
@@ -112,6 +114,90 @@ pub(super) fn all() -> Vec<SnapshotCase> {
             module: "panels/media_pool",
             size: pool_cases::MENU_SIZE,
             draw: pool_cases::label_menu,
+        },
+        SnapshotCase {
+            name: "track_headers_default",
+            module: "panels/timeline/track_header",
+            size: th::DEFAULT_SIZE,
+            draw: th::default,
+        },
+        SnapshotCase {
+            name: "track_headers_states",
+            module: "panels/timeline/track_header",
+            size: th::STATES_SIZE,
+            draw: th::states,
+        },
+        SnapshotCase {
+            name: "track_headers_mix",
+            module: "panels/timeline/track_header",
+            size: th::MIX_SIZE,
+            draw: th::mix,
+        },
+        SnapshotCase {
+            name: "track_headers_heights",
+            module: "panels/timeline/track_header",
+            size: th::HEIGHTS_SIZE,
+            draw: th::heights,
+        },
+        SnapshotCase {
+            name: "track_headers_renaming",
+            module: "panels/timeline/track_header",
+            size: th::RENAME_SIZE,
+            draw: th::renaming,
+        },
+        SnapshotCase {
+            name: "track_headers_rtl",
+            module: "panels/timeline/track_header",
+            size: th::DEFAULT_SIZE,
+            draw: th::rtl,
+        },
+        SnapshotCase {
+            name: "timeline_ruler_frames",
+            module: "panels/timeline/ruler",
+            size: tl::RULER_SIZE,
+            draw: tl::ruler_frames,
+        },
+        SnapshotCase {
+            name: "timeline_ruler_seconds",
+            module: "panels/timeline/ruler",
+            size: tl::RULER_SIZE,
+            draw: tl::ruler_seconds,
+        },
+        SnapshotCase {
+            name: "timeline_ruler_minutes",
+            module: "panels/timeline/ruler",
+            size: tl::RULER_SIZE,
+            draw: tl::ruler_minutes,
+        },
+        SnapshotCase {
+            name: "timeline_ruler_drop_frame",
+            module: "panels/timeline/ruler",
+            size: tl::RULER_SIZE,
+            draw: tl::ruler_drop_frame,
+        },
+        SnapshotCase {
+            name: "timeline_minimap",
+            module: "panels/timeline/minimap",
+            size: tl::MINIMAP_SIZE,
+            draw: tl::minimap_sample,
+        },
+        SnapshotCase {
+            name: "timeline_minimap_empty",
+            module: "panels/timeline/minimap",
+            size: tl::MINIMAP_SIZE,
+            draw: tl::minimap_empty,
+        },
+        SnapshotCase {
+            name: "timeline_minimap_long",
+            module: "panels/timeline/minimap",
+            size: tl::MINIMAP_SIZE,
+            draw: tl::minimap_long,
+        },
+        SnapshotCase {
+            name: "timeline_view",
+            module: "panels/timeline/view",
+            size: tl::VIEW_SIZE,
+            draw: tl::view,
         },
         SnapshotCase {
             name: "widgets_controls",
