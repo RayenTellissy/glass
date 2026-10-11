@@ -222,7 +222,7 @@ Done when: a 1000-clip project round-trips through save and load byte-identicall
 - [x] Sequences, tracks (video, audio, subtitle, adjustment), clips, gaps, markers
 - [x] Clip properties: source range, timeline range, speed map, effect stack, transform, audio gain, enabled flag
 - [x] Transitions as first-class items between two clips with alignment (centre, start, end)
-- [ ] Nested sequences and compound clips
+- [~] Nested sequences and compound clips
 - [ ] Adjustment layers
 - [x] Keyframe curves per parameter: linear, bezier, hold, with time and value scaling
 - [x] Project settings: resolution, frame rate, colour space, audio rate, cache folder
