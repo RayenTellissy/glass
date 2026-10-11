@@ -185,7 +185,7 @@ Done when: the stress project (Phase 16) plays at full rate on both platforms, s
 - [x] Look-ahead decode across cuts and transitions, configurable depth
 - [x] Rendered-frame cache keyed by (segment hash, frame index), LRU in VRAM with RAM spill and a configurable ceiling
 - [ ] Dirty-range invalidation: any edit invalidates only affected segments, verified by a test that counts re-renders
-- [ ] Adaptive quality: drop preview resolution before dropping frames, restore when idle
+- [~] Adaptive quality: drop preview resolution before dropping frames, restore when idle
 - [ ] Scrub mode: nearest cached frame immediately, exact frame when the pointer pauses for 40 ms
 - [ ] JKL shuttle, reverse playback, audio scrubbing
 - [ ] Loop range, in and out points, play-around with configurable pre-roll
