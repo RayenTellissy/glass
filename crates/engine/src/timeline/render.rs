@@ -9,11 +9,16 @@
 //!   transition:  A: outgoing clip placed alone on a transparent canvas ─┐
 //!                B: incoming clip placed alone on a transparent canvas ─┴→ TransitionNode
 //!                → layer (canvas-sized, normal blend)
+//!   nested:      the nested sequence's frame composited the same way at its canvas (times
+//!                the preview scale) → the clip's effects → layer placed like a clip;
+//!                or, placed as it is on an equal canvas, its layers straight in this
+//!                stack when they all blend normally
 //!   all layers → composite stack (bilinear cap at reduced quality) → output (8-bit sRGB,
 //!   dithered with the frame number as seed) → the cached and presented texture
 //! ```
 //!
-//! The canvas is the sequence's (from the renderer's config), scaled by the
+//! Clip looks are taken at the frame ([`TimelinePlan::look_at`]), so keyframed values
+//! animate. The canvas is the sequence's (from the renderer's config), scaled by the
 //! [`QualityLevel`]: layer transforms are mapped into the preview canvas, so a half
 //! preview composites at half size. Frames are cached under [`TimelinePlan::span_hash`]
 //! and the timeline frame, with the preview size and quality in the variant;
@@ -26,6 +31,8 @@ use std::sync::Arc;
 
 use media::{Primaries, VideoFrame};
 use project::params::{ParamDef, ParamSchema, ParamValue as ProjectValue};
+use project::{Crop as ProjectCrop, Transform};
+use render::blend::BlendMode;
 use render::colour::WorkingSpace;
 use render::crop::Crop;
 use render::frame_cache::{FrameCache, FrameCacheConfig, FrameCacheStats, FrameKey, RenderVariant};
@@ -347,7 +354,7 @@ impl TimelineRenderer {
         let device = self.renderer.device().clone();
         let queue = self.renderer.queue().clone();
 
-        // Everything the graph borrows is made first: pictures, LUT nodes, transitions.
+        // The graph borrows the pictures (a nested sequence's included), so they come first.
         let mut pictures: Vec<(usize, Picture)> = Vec::new();
         for s in desc.segments(plan) {
             let hash = plan.segment(s).hash;
@@ -378,18 +385,6 @@ impl TimelineRenderer {
                 Err(()) => self.stats.upload_errors += 1,
             }
         }
-        let mut effects: HashMap<usize, Vec<LutNode>> = HashMap::new();
-        for (s, _) in &pictures {
-            let nodes = self.effect_nodes(plan.look(*s));
-            effects.insert(*s, nodes);
-        }
-        let mut transitions: HashMap<usize, TransitionNode> = HashMap::new();
-        for track in &desc.tracks {
-            if let TrackFrame::Transition { transition, linear } = *track {
-                let node = self.transition_node(plan, transition, linear);
-                transitions.insert(transition, node);
-            }
-        }
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("timeline frame"),
             size: wgpu::Extent3d {
@@ -409,29 +404,15 @@ impl TimelineRenderer {
         let target_view = target.create_view(&Default::default());
 
         let mut graph = Graph::new();
-        let place = Placement {
-            pictures: &pictures,
+        let level = Level {
             plan,
             canvas: self.canvas,
-            working: self.working,
-            to_preview,
+            to_target: to_preview,
+            size,
+            map: None,
         };
-        let mut stack = Vec::with_capacity(desc.tracks.len());
-        for track in &desc.tracks {
-            match *track {
-                TrackFrame::Clip(s) => stack.extend(place.clip(&mut graph, &mut effects, s)),
-                TrackFrame::Transition { transition, .. } => {
-                    let t = plan.transition(transition);
-                    let a = place.alone(&mut graph, &mut effects, t.outgoing, size, cap);
-                    let b = place.alone(&mut graph, &mut effects, t.incoming, size, cap);
-                    if let Some(node) = transitions.remove(&transition) {
-                        let mixed = graph.add(node, &[a, b]).out(0);
-                        stack.push((mixed, CompositeLayer::default()));
-                    }
-                }
-            }
-        }
-        let picture = composite_stack_capped(&mut graph, size, None, stack, cap)
+        let picture = self
+            .composite(&mut graph, &pictures, &level, desc, cap)
             .unwrap_or_else(|| empty(&mut graph, size));
         let picture = match spec.burn_in {
             Some((atlas, text)) => subtitle::add_burn_in(&mut graph, picture, atlas, text, size),
@@ -511,6 +492,179 @@ impl TimelineRenderer {
         self.released = released;
         let resident = self.resident_frames(plan);
         self.cached.retain(|frame| resident.contains(frame));
+    }
+
+    /// The composite of `desc` (a frame of `level`'s plan) on `level`'s target; `None`
+    /// when it shows nothing.
+    fn composite<'p>(
+        &mut self,
+        graph: &mut Graph<'p>,
+        pictures: &'p [(usize, Picture)],
+        level: &Level<'_>,
+        desc: &FrameDesc,
+        cap: Resample,
+    ) -> Option<Port> {
+        let stack = self.stack(graph, pictures, level, desc, cap);
+        composite_stack_capped(graph, level.size, None, stack, cap)
+    }
+
+    /// The composite layers of `desc`, bottom track first.
+    fn stack<'p>(
+        &mut self,
+        graph: &mut Graph<'p>,
+        pictures: &'p [(usize, Picture)],
+        level: &Level<'_>,
+        desc: &FrameDesc,
+        cap: Resample,
+    ) -> Vec<(Port, CompositeLayer)> {
+        let t = desc.frame;
+        let mut stack = Vec::with_capacity(desc.tracks.len());
+        for track in &desc.tracks {
+            match *track {
+                TrackFrame::Clip(s) => stack.extend(self.clip(graph, pictures, level, s, t)),
+                TrackFrame::Transition { transition, linear } => {
+                    let tr = level.plan.transition(transition);
+                    let (out, out_nested) = (tr.outgoing, tr.outgoing_nested);
+                    let (inc, inc_nested) = (tr.incoming, tr.incoming_nested);
+                    let a = self.alone(graph, pictures, level, (out, out_nested), t, cap);
+                    let b = self.alone(graph, pictures, level, (inc, inc_nested), t, cap);
+                    let node = self.transition_node(level.plan, transition, linear);
+                    let mixed = graph.add(node, &[a, b]).out(0);
+                    stack.push((mixed, CompositeLayer::default()));
+                }
+                TrackFrame::Nested { nested, frame } => {
+                    stack.extend(self.nested(graph, pictures, level, nested, frame, t, cap));
+                }
+            }
+        }
+        stack
+    }
+
+    /// Segment `s`'s picture through its effects, and its composite layer, with its look
+    /// at frame `t`; `None` when it has no picture.
+    fn clip<'p>(
+        &mut self,
+        graph: &mut Graph<'p>,
+        pictures: &'p [(usize, Picture)],
+        level: &Level<'_>,
+        s: usize,
+        t: i64,
+    ) -> Option<(Port, CompositeLayer)> {
+        let index = level.picture(s)?;
+        let (_, picture) = pictures.iter().find(|(p, _)| *p == index)?;
+        let look = level.plan.look_at(s, t);
+        let mut port = graph.add(picture.node(self.working), &[]).out(0);
+        for lut in self.effect_nodes(&look) {
+            port = graph.add(lut, &[port]).out(0);
+        }
+        let layer = clip_layer(
+            &look,
+            picture.size(),
+            level.canvas,
+            &level.to_target,
+            (1.0, 1.0),
+        );
+        Some((port, layer))
+    }
+
+    /// One side of a transition (a clip's segment, or a clip of a sequence) placed alone
+    /// on a transparent canvas of the level's size; transparent when there is nothing.
+    fn alone<'p>(
+        &mut self,
+        graph: &mut Graph<'p>,
+        pictures: &'p [(usize, Picture)],
+        level: &Level<'_>,
+        (segment, nested): (Option<usize>, Option<usize>),
+        t: i64,
+        cap: Resample,
+    ) -> Port {
+        let layers = match (segment, nested) {
+            (Some(s), _) => self
+                .clip(graph, pictures, level, s, t)
+                .into_iter()
+                .collect(),
+            (None, Some(k)) => match level.plan.nested(k).frame_at(t) {
+                Some(frame) => self.nested(graph, pictures, level, k, frame, t, cap),
+                None => Vec::new(),
+            },
+            (None, None) => Vec::new(),
+        };
+        composite_stack_capped(graph, level.size, None, layers, cap)
+            .unwrap_or_else(|| empty(graph, level.size))
+    }
+
+    /// Nested clip `k` of `level`'s plan showing its sequence's frame `frame`, with its
+    /// look at frame `t`: the nested composite as one layer placed like a clip whose
+    /// picture is the nested canvas, or, for a clip placed as it is on an equal canvas,
+    /// the nested layers themselves when they all blend normally (exactly what the same
+    /// clips placed here composite).
+    #[allow(clippy::too_many_arguments)]
+    fn nested<'p>(
+        &mut self,
+        graph: &mut Graph<'p>,
+        pictures: &'p [(usize, Picture)],
+        level: &Level<'_>,
+        k: usize,
+        frame: i64,
+        t: i64,
+        cap: Resample,
+    ) -> Vec<(Port, CompositeLayer)> {
+        let nested = level.plan.nested(k);
+        let plan = nested.plan();
+        let desc = plan.frame(frame);
+        let map = (0..plan.segments().segments().len())
+            .map(|j| nested.segment(j).and_then(|s| level.picture(s)))
+            .collect();
+        let look = nested.look_at(t);
+        let canvas = (plan.canvas().0.max(1), plan.canvas().1.max(1));
+        if canvas == level.canvas && placed_as_is(&look) {
+            let inner = Level {
+                plan,
+                canvas,
+                to_target: level.to_target,
+                size: level.size,
+                map: Some(map),
+            };
+            let layers = self.stack(graph, pictures, &inner, &desc, cap);
+            if layers.iter().all(|(_, l)| l.blend == BlendMode::Normal) {
+                return layers;
+            }
+            return composite_stack_capped(graph, level.size, None, layers, cap)
+                .map(|port| (port, CompositeLayer::default()))
+                .into_iter()
+                .collect();
+        }
+        // The nested canvas at this level's scale.
+        let m = &level.to_target;
+        let scale = (m.a.hypot(m.b), m.c.hypot(m.d));
+        let size = (
+            (f64::from(canvas.0) * scale.0).round().max(1.0) as u32,
+            (f64::from(canvas.1) * scale.1).round().max(1.0) as u32,
+        );
+        let texels = (
+            f64::from(size.0) / f64::from(canvas.0),
+            f64::from(size.1) / f64::from(canvas.1),
+        );
+        let inner = Level {
+            plan,
+            canvas,
+            to_target: Affine2::scale(texels.0, texels.1),
+            size,
+            map: Some(map),
+        };
+        let Some(mut port) = self.composite(graph, pictures, &inner, &desc, cap) else {
+            return Vec::new();
+        };
+        for lut in self.effect_nodes(&look) {
+            port = graph.add(lut, &[port]).out(0);
+        }
+        let to_target = level
+            .to_target
+            .then_apply(&Affine2::scale(1.0 / texels.0, 1.0 / texels.1));
+        vec![(
+            port,
+            clip_layer(&look, canvas, level.canvas, &to_target, texels),
+        )]
     }
 
     fn effect_nodes(&mut self, look: &ClipLook) -> Vec<LutNode> {
@@ -657,52 +811,37 @@ struct Target<'a> {
     burn_in: Option<(&'a GlyphAtlas, &'a PreparedText)>,
 }
 
-/// What placing a clip's picture needs.
-struct Placement<'p> {
-    pictures: &'p [(usize, Picture)],
-    plan: &'p TimelinePlan,
+/// One sequence being composited: a plan at one of its frames, into a target.
+struct Level<'a> {
+    plan: &'a TimelinePlan,
+    /// The sequence's canvas in pixels.
     canvas: (u32, u32),
-    working: WorkingSpace,
-    to_preview: Affine2,
+    /// Canvas pixels to target pixels.
+    to_target: Affine2,
+    /// The target in pixels.
+    size: (u32, u32),
+    /// The decoded picture (an index into the frame's pictures) of each of the plan's
+    /// segments; `None` for the plan the frame is of, whose segments are the pictures'.
+    map: Option<Vec<Option<usize>>>,
 }
 
-impl<'p> Placement<'p> {
-    /// Segment `s`'s picture through its effects, and its composite layer; `None` when
-    /// it has no picture.
-    fn clip(
-        &self,
-        graph: &mut Graph<'p>,
-        effects: &mut HashMap<usize, Vec<LutNode>>,
-        s: usize,
-    ) -> Option<(Port, CompositeLayer)> {
-        let (_, picture) = self.pictures.iter().find(|(p, _)| *p == s)?;
-        let mut port = graph.add(picture.node(self.working), &[]).out(0);
-        for lut in effects.remove(&s).unwrap_or_default() {
-            port = graph.add(lut, &[port]).out(0);
+impl Level<'_> {
+    fn picture(&self, segment: usize) -> Option<usize> {
+        match &self.map {
+            None => Some(segment),
+            Some(map) => map.get(segment).copied().flatten(),
         }
-        let layer = clip_layer(
-            self.plan.look(s),
-            picture.size(),
-            self.canvas,
-            &self.to_preview,
-        );
-        Some((port, layer))
     }
+}
 
-    /// Segment `s`'s clip placed alone on a transparent canvas of `size` (a side of a
-    /// transition); transparent when there is no clip or no picture.
-    fn alone(
-        &self,
-        graph: &mut Graph<'p>,
-        effects: &mut HashMap<usize, Vec<LutNode>>,
-        s: Option<usize>,
-        size: (u32, u32),
-        cap: Resample,
-    ) -> Port {
-        s.and_then(|s| self.clip(graph, effects, s))
-            .and_then(|layer| composite_stack_capped(graph, size, None, vec![layer], cap))
-            .unwrap_or_else(|| empty(graph, size))
-    }
+/// A look that places its picture as it is: centred, unscaled, unrotated, uncropped,
+/// opaque, normal blend, no effects.
+fn placed_as_is(look: &ClipLook) -> bool {
+    look.transform == Transform::IDENTITY
+        && look.crop == ProjectCrop::NONE
+        && look.opacity == 1.0
+        && look.blend == BlendMode::Normal
+        && look.effects.is_empty()
 }
 
 /// A transparent canvas.
@@ -713,13 +852,15 @@ fn empty(graph: &mut Graph<'_>, size: (u32, u32)) -> Port {
 }
 
 /// The composite layer of a clip whose picture is `layer` pixels: the project transform
-/// (offsets from the canvas and layer centres) on the full canvas, mapped into the
-/// preview canvas.
+/// (offsets from the canvas and layer centres) on the full canvas, mapped by `to_target`
+/// (layer to canvas, canvas to target pixels), with the crop in the picture's texels
+/// (`texels` per layer pixel).
 fn clip_layer(
     look: &ClipLook,
     layer: (u32, u32),
     canvas: (u32, u32),
-    to_preview: &Affine2,
+    to_target: &Affine2,
+    texels: (f64, f64),
 ) -> CompositeLayer {
     let t = &look.transform;
     let matrix = Transform2D {
@@ -731,15 +872,15 @@ fn clip_layer(
     .matrix();
     let c = &look.crop;
     CompositeLayer::blended(look.blend)
-        .with_transform(to_preview.then_apply(&matrix))
+        .with_transform(to_target.then_apply(&matrix))
         .with_resample(Resample::Bicubic)
         .with_opacity(look.opacity as f32)
         .with_crop(Crop {
-            left: c.left,
-            top: c.top,
-            right: c.right,
-            bottom: c.bottom,
-            feather: c.feather,
+            left: c.left * texels.0,
+            top: c.top * texels.1,
+            right: c.right * texels.0,
+            bottom: c.bottom * texels.1,
+            feather: c.feather * (texels.0 + texels.1) / 2.0,
         })
 }
 

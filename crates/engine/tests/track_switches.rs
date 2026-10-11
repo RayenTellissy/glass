@@ -87,6 +87,7 @@ fn layers(plan: &TimelinePlan, frame: i64) -> Vec<ItemId> {
         .map(|t| match *t {
             TrackFrame::Clip(segment) => plan.look(segment).item,
             TrackFrame::Transition { .. } => panic!("no transitions here"),
+            TrackFrame::Nested { .. } => panic!("no nested sequences here"),
         })
         .collect()
 }
