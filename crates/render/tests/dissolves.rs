@@ -388,7 +388,11 @@ fn the_film_and_additive_dissolves_differ_from_the_cross_dissolve_as_intended() 
         &grey,
         TransitionNode::new(transition("additive-dissolve"), 0.5, Easing::Linear),
     )[0];
-    assert_eq!(additive, [1.0, 3.0, f16(f16(0.1) + 0.4), 1.0], "HDR kept, not pushed");
+    assert_eq!(
+        additive,
+        [1.0, 3.0, f16(f16(0.1) + 0.4), 1.0],
+        "HDR kept, not pushed"
+    );
 }
 
 /// GPU time of one 4K pass of each dissolve over noise, median of 30 frames from the pass
