@@ -721,6 +721,28 @@ fn a_nested_sequence_plays_its_own_mix() {
     });
     assert!(error <= 1e-6, "outer: worst error {error:e}");
 
+    // The nested sequence's own track switches apply: muting its noise track leaves the
+    // tones, in the inner mix and through the nesting alike.
+    let muted = project.set_track_muted(built.tracks[1], true).unwrap();
+    let inner_muted = mix(&muted, inner, n(3.0));
+    let error = worst(&inner_muted, |k, c| {
+        f64::from(inner_mix[k as usize * 2 + c])
+    });
+    assert!(error > 0.05, "muting the noise changed nothing ({error})");
+    let parent_muted = mix(&muted, parent, n(3.0));
+    let error = worst(&parent_muted, |k, c| {
+        if !(n(0.5)..n(2.2)).contains(&k) {
+            return 0.0;
+        }
+        let gain = db(-3.0) * fade(EQUAL_POWER, n(2.0), n(2.2), k, Easing::Linear).0;
+        let j = k - n(0.5) + n(0.25);
+        f64::from(inner_muted[j as usize * 2 + c]) * gain
+    });
+    assert!(
+        error <= 1e-6,
+        "parent with a muted inner track: worst error {error:e}"
+    );
+
     let offline = OfflineMix::new(&project, outer, &MixSettings::default(), stereo(), 0).unwrap();
     let stats = offline.stats();
     assert_eq!(stats.nested_clips, 2, "{stats:?}");

@@ -8,9 +8,10 @@
 //! with its own reader and fade, and their sum is the track's feed. A clip of a nested
 //! sequence (Decision 69) plays that sequence's own mix as its source: the nested
 //! sequence's clips are rendered here by a nested [`SequenceSource`] at the clip's reader
-//! rate and summed over its tracks (every nested track at its defaults: unity fader,
-//! centred, which passes each feed unchanged, Decision 73), with the parent clip's source
-//! time as the nested timeline's time; nested sequences nest further the same way.
+//! rate and summed over its audible tracks (its own mute and solo switches, Decision 77;
+//! every other mixer setting at its default: unity fader, centred, which passes each feed
+//! unchanged, Decision 73), with the parent clip's source time as the nested timeline's
+//! time; nested sequences nest further the same way.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -154,6 +155,8 @@ pub(crate) struct SequenceSource {
     format: MixFormat,
     media_layout: media::ChannelLayout,
     tracks: Vec<Vec<ClipSource>>,
+    /// Per track: heard by its mute and solo switches (read when this source is nested).
+    audible: Vec<bool>,
     scratch: Vec<f32>,
     stats: SourceStats,
 }
@@ -208,6 +211,8 @@ impl SequenceSource {
         stack.push(sequence);
         let mut stats = SourceStats::default();
         let mut tracks = Vec::new();
+        let any_solo = seq.any_solo();
+        let audible = audio_tracks(seq).map(|t| t.audible(any_solo)).collect();
         for track in audio_tracks(seq) {
             let edges = track_edges(track, grid, rate, declick);
             let mut clips = Vec::new();
@@ -320,6 +325,7 @@ impl SequenceSource {
                 audio::mixer::Layout::Surround51 => media::ChannelLayout::Surround51,
             },
             tracks,
+            audible,
             scratch: vec![0.0; SCRATCH_FRAMES * format.channels()],
             stats,
         })
@@ -331,6 +337,7 @@ impl SequenceSource {
             format,
             media_layout: media::ChannelLayout::Stereo,
             tracks: Vec::new(),
+            audible: Vec::new(),
             scratch: Vec::new(),
             stats: SourceStats::default(),
         }
@@ -527,9 +534,10 @@ fn read_clip(
                 return true;
             }
             source.render(want, n, &mut buffer[..n * width]);
-            // Every nested track at its defaults: the mix is the sum of their feeds.
+            // Every audible nested track at its defaults: the mix is the sum of their feeds.
             for (k, frame) in buffer[..n * width].chunks_exact(width).enumerate() {
-                for track in frame.chunks_exact(channels) {
+                let tracks = frame.chunks_exact(channels).zip(&source.audible);
+                for (track, _) in tracks.filter(|(_, heard)| **heard) {
                     for (c, &s) in track.iter().enumerate() {
                         scratch[c * SCRATCH_FRAMES + k] += s;
                     }
