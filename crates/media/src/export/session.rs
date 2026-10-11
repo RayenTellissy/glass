@@ -18,8 +18,8 @@ use crate::time::Rational;
 use super::gif_writer::GifWriter;
 use super::picture::{Converter, Picture};
 use super::settings::{
-    AudioCodec, AudioSettings, Container, EncoderChoice, ExportSettings, RateControl, VideoCodec,
-    VideoSettings, is_hardware_encoder, video_encoder_choices,
+    AudioCodec, AudioSettings, Container, EncoderChoice, ExportSettings, HdrMetadata, RateControl,
+    VideoCodec, VideoSettings, is_hardware_encoder, video_encoder_choices,
 };
 use super::{ExportError, Result};
 
@@ -106,6 +106,8 @@ struct VideoOut {
     frame_rate: Rational,
     /// HEVC in MP4 or MOV, tagged `hvc1`.
     hvc1: bool,
+    /// Written as the stream's side data when the streams are added.
+    hdr_metadata: Option<HdrMetadata>,
     /// Set while a hardware encoder has not produced a packet yet.
     trial: Option<Trial>,
 }
@@ -400,6 +402,9 @@ impl ExportSession {
             if video.hvc1 {
                 muxer.set_codec_tag(*stream, *b"hvc1")?;
             }
+            if let Some(hdr) = &video.hdr_metadata {
+                muxer.set_hdr_metadata(*stream, hdr)?;
+            }
         }
         if let Some(out) = self.audio.as_mut() {
             out.stream = muxer.add_stream(&out.encoder, None)?;
@@ -462,6 +467,7 @@ fn open_video(
                 next_pts: 0,
                 frame_rate: v.frame_rate,
                 hvc1,
+                hdr_metadata: v.hdr_metadata,
                 trial: None,
             });
         }
@@ -486,6 +492,7 @@ fn open_video(
                     next_pts: 0,
                     frame_rate: v.frame_rate,
                     hvc1,
+                    hdr_metadata: v.hdr_metadata,
                     trial,
                 });
             }

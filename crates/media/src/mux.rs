@@ -167,6 +167,18 @@ impl Muxer {
         result.map_err(self.error("setting the display matrix"))
     }
 
+    /// Stores HDR mastering display and content light levels on a video stream, which
+    /// the MOV/MP4 muxer writes as `mdcv` and `clli` boxes and Matroska as colour
+    /// elements.
+    pub fn set_hdr_metadata(
+        &mut self,
+        stream: usize,
+        hdr: &crate::export::HdrMetadata,
+    ) -> Result<()> {
+        let result = ffi::set_hdr_metadata(&mut self.output, stream, hdr);
+        result.map_err(self.error("setting the HDR metadata"))
+    }
+
     /// Sets the codec tag of a stream (`hvc1` for HEVC that QuickTime players accept).
     pub fn set_codec_tag(&mut self, stream: usize, fourcc: [u8; 4]) -> Result<()> {
         let result = ffi::set_stream_codec_tag(&mut self.output, stream, fourcc);
