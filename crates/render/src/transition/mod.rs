@@ -598,7 +598,9 @@ fn pass(json: &Json) -> Result<Pass, String> {
         .bytes()
         .next()
         .is_some_and(|b| b.is_ascii_alphabetic())
-        && entry.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        && entry
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_');
     if !identifier {
         return Err(format!(
             "entry {entry:?} is not ASCII letters, digits and '_' starting with a letter"
@@ -615,7 +617,10 @@ fn pass(json: &Json) -> Result<Pass, String> {
     let (along, across) = match fields.get("scale") {
         None => (1.0, 1.0),
         Some(Json::Object(axes)) => {
-            if let Some(axis) = axes.keys().find(|k| !["along", "across"].contains(&k.as_str())) {
+            if let Some(axis) = axes
+                .keys()
+                .find(|k| !["along", "across"].contains(&k.as_str()))
+            {
                 return Err(format!("unknown scale axis {axis:?}"));
             }
             let axis = |name| axes.get(name).map_or(Ok(1.0), factor);

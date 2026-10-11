@@ -17,8 +17,7 @@ use render::profiler::GpuProfiler;
 use render::renderer::Renderer;
 use render::shaders::ShaderLibrary;
 use render::transition::{
-    Direction, Easing, ParamKind, ParamValue, Pass, Transition, TransitionNode,
-    TransitionRegistry,
+    Direction, Easing, ParamKind, ParamValue, Pass, Transition, TransitionNode, TransitionRegistry,
 };
 use render::wgpu;
 
@@ -448,7 +447,10 @@ fn extra_passes_are_discovered_and_drawn_in_order_at_their_sizes() {
         return;
     };
     let pixels = noise(16 * 8, 5);
-    for (d, second) in [(Direction::Right, [4.0, 8.0]), (Direction::Down, [16.0, 3.0])] {
+    for (d, second) in [
+        (Direction::Right, [4.0, 8.0]),
+        (Direction::Down, [16.0, 3.0]),
+    ] {
         let node = TransitionNode::new(chain.clone(), 0.5, Easing::Linear).direction(d);
         let out = run(&gpu, (16, 8), &pixels, &pixels, node);
         let what = d.id();
@@ -476,16 +478,56 @@ fn extra_passes_are_discovered_and_drawn_in_order_at_their_sizes() {
 fn broken_passes_are_reported() {
     let dir = temp_dir("broken-passes");
     let cases = [
-        ("missing-entry", r#"{"entry": "blur"}"#.to_owned(), "no `@fragment fn blur`"),
-        ("bad-scale", r#"{"entry": "first", "scale": 0.01}"#.to_owned(), "pass 0: scale 0.01 is not a number from 1/16 to 1"),
-        ("big-scale", r#"{"entry": "first"}, {"entry": "second", "scale": 2}"#.to_owned(), "pass 1: scale 2"),
-        ("bad-axis", r#"{"entry": "first", "scale": {"sideways": 0.5}}"#.to_owned(), "unknown scale axis \"sideways\""),
-        ("final-entry", r#"{"entry": "fs"}"#.to_owned(), "the final pass"),
-        ("bad-entry", r#"{"entry": "2x"}"#.to_owned(), "entry \"2x\" is not ASCII letters"),
-        ("no-entry", r#"{"scale": 0.5}"#.to_owned(), "no string \"entry\""),
-        ("unknown-field", r#"{"entry": "first", "size": 2}"#.to_owned(), "unknown field \"size\""),
-        ("bad-min", r#"{"entry": "first", "min": 0}"#.to_owned(), "min 0 is not a whole number"),
-        ("too-many", vec![r#"{"entry": "first"}"#; 9].join(", "), "9 passes; at most 8"),
+        (
+            "missing-entry",
+            r#"{"entry": "blur"}"#.to_owned(),
+            "no `@fragment fn blur`",
+        ),
+        (
+            "bad-scale",
+            r#"{"entry": "first", "scale": 0.01}"#.to_owned(),
+            "pass 0: scale 0.01 is not a number from 1/16 to 1",
+        ),
+        (
+            "big-scale",
+            r#"{"entry": "first"}, {"entry": "second", "scale": 2}"#.to_owned(),
+            "pass 1: scale 2",
+        ),
+        (
+            "bad-axis",
+            r#"{"entry": "first", "scale": {"sideways": 0.5}}"#.to_owned(),
+            "unknown scale axis \"sideways\"",
+        ),
+        (
+            "final-entry",
+            r#"{"entry": "fs"}"#.to_owned(),
+            "the final pass",
+        ),
+        (
+            "bad-entry",
+            r#"{"entry": "2x"}"#.to_owned(),
+            "entry \"2x\" is not ASCII letters",
+        ),
+        (
+            "no-entry",
+            r#"{"scale": 0.5}"#.to_owned(),
+            "no string \"entry\"",
+        ),
+        (
+            "unknown-field",
+            r#"{"entry": "first", "size": 2}"#.to_owned(),
+            "unknown field \"size\"",
+        ),
+        (
+            "bad-min",
+            r#"{"entry": "first", "min": 0}"#.to_owned(),
+            "min 0 is not a whole number",
+        ),
+        (
+            "too-many",
+            [r#"{"entry": "first"}"#; 9].join(", "),
+            "9 passes; at most 8",
+        ),
     ];
     for (folder, passes, _) in &cases {
         write(

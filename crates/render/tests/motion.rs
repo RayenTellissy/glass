@@ -651,8 +651,7 @@ fn motion_transitions_at_4k_gpu_time() {
         for frame in 0..32u32 {
             let mut g = Graph::new();
             let (ia, ib) = (g.import("a", &va), g.import("b", &vb));
-            let node =
-                TransitionNode::new(t.clone(), f64::from(frame) / 31.0, Easing::EaseInOut);
+            let node = TransitionNode::new(t.clone(), f64::from(frame) / 31.0, Easing::EaseInOut);
             let out = g.add(node, &[ia, ib]);
             g.export(out.out(0), &target_view);
             g.compile()
