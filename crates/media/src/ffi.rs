@@ -650,6 +650,105 @@ pub(crate) fn set_display_matrix(
     Ok(())
 }
 
+/// `AVMasteringDisplayMetadata` (libavutil/mastering_display_metadata.h), which the
+/// generated bindings leave out; its layout has not changed since FFmpeg 3.
+#[repr(C)]
+struct MasteringDisplayMetadata {
+    display_primaries: [[sys::AVRational; 2]; 3],
+    white_point: [sys::AVRational; 2],
+    min_luminance: sys::AVRational,
+    max_luminance: sys::AVRational,
+    has_primaries: c_int,
+    has_luminance: c_int,
+}
+
+/// `AVContentLightMetadata` (libavutil/mastering_display_metadata.h).
+#[repr(C)]
+struct ContentLightMetadata {
+    max_cll: c_uint,
+    max_fall: c_uint,
+}
+
+/// Stores mastering display and content light levels as coded side data of an output
+/// stream, for the muxer to write into the header.
+pub(crate) fn set_hdr_metadata(
+    output: &mut ffmpeg::format::context::Output,
+    stream: usize,
+    hdr: &crate::export::HdrMetadata,
+) -> Result<(), ffmpeg::Error> {
+    let chroma = |v: u16| sys::AVRational {
+        num: c_int::from(v),
+        den: 50_000,
+    };
+    let luma = |v: u32| sys::AVRational {
+        num: c_int::try_from(v).unwrap_or(c_int::MAX),
+        den: 10_000,
+    };
+    let xy = |(x, y): (u16, u16)| [chroma(x), chroma(y)];
+    if let Some(m) = &hdr.mastering {
+        let value = MasteringDisplayMetadata {
+            display_primaries: [xy(m.red), xy(m.green), xy(m.blue)],
+            white_point: xy(m.white),
+            min_luminance: luma(m.min_luminance),
+            max_luminance: luma(m.max_luminance),
+            has_primaries: 1,
+            has_luminance: 1,
+        };
+        add_stream_side_data(
+            output,
+            stream,
+            sys::AVPacketSideDataType::AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
+            &value,
+        )?;
+    }
+    if let Some(c) = &hdr.content_light {
+        let value = ContentLightMetadata {
+            max_cll: c.max_cll.into(),
+            max_fall: c.max_fall.into(),
+        };
+        add_stream_side_data(
+            output,
+            stream,
+            sys::AVPacketSideDataType::AV_PKT_DATA_CONTENT_LIGHT_LEVEL,
+            &value,
+        )?;
+    }
+    Ok(())
+}
+
+/// Copies `value` into a new coded side data entry of an output stream.
+fn add_stream_side_data<T>(
+    output: &mut ffmpeg::format::context::Output,
+    stream: usize,
+    kind: sys::AVPacketSideDataType,
+    value: &T,
+) -> Result<(), ffmpeg::Error> {
+    let mut st = output
+        .stream_mut(stream)
+        .ok_or(ffmpeg::Error::StreamNotFound)?;
+    // SAFETY: the StreamMut borrows the Output mutably, so its codecpar is valid and not
+    // shared; av_packet_side_data_new allocates `size` bytes (or returns null) owned by
+    // codecpar, and exactly that many bytes are copied from `value`, a plain C struct.
+    unsafe {
+        let par = &mut *(*st.as_mut_ptr()).codecpar;
+        let size = size_of::<T>();
+        let sd = sys::av_packet_side_data_new(
+            &mut par.coded_side_data,
+            &mut par.nb_coded_side_data,
+            kind,
+            size,
+            0,
+        );
+        if sd.is_null() || (*sd).data.is_null() {
+            return Err(ffmpeg::Error::Other {
+                errno: ffmpeg::error::ENOMEM,
+            });
+        }
+        std::ptr::copy_nonoverlapping((value as *const T).cast::<u8>(), (*sd).data, size);
+    }
+    Ok(())
+}
+
 /// The display matrix of an input stream, if it has one.
 pub(crate) fn display_matrix(stream: &ffmpeg::format::stream::Stream) -> Option<[i32; 9]> {
     stream_params(stream).display_matrix
