@@ -234,7 +234,7 @@ Done when: a 1000-clip project round-trips through save and load byte-identicall
 
 Done when: every tool below works with keyboard and mouse, the 200-clip benchmark stays under budget, and the UI passes the i18n check with RTL enabled.
 
-- [ ] Track headers: name, mute, solo, lock, visibility, height presets
+- [~] Track headers: name, mute, solo, lock, visibility, height presets
 - [ ] Clip rendering: thumbnails, waveforms, names, effect badges, speed indicator, all from the analysis cache
 - [ ] Zoom and scroll with snapping, minimap, zoom to fit, zoom to selection
 - [ ] Playhead, in and out, markers with colours and notes
