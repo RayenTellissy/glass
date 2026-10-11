@@ -102,7 +102,7 @@ The reference development machine is an Apple M2 with 8 GB of RAM and a small di
 #### Concurrency
 
 - **One cargo command at a time** on the machine (build, test, clippy, run, bench). Anything else that compiles waits. `scripts/cargo-serial` enforces this across every checkout and worktree of the repo, so run cargo through it.
-- The compiler is capped at four jobs: `.cargo/config.toml` sets `[build] jobs = 4`, and `scripts/dev-env.sh` exports `CARGO_BUILD_JOBS=4` for tools that ignore the config.
+- The compiler is capped at eight jobs: `.cargo/config.toml` sets `[build] jobs = 8`, and `scripts/dev-env.sh` exports `CARGO_BUILD_JOBS=8` for tools that ignore the config.
 - At most 10 concurrent workers (terminals running tasks, automated sessions), coordinator included; 3 to 5 is better. Each works in its own worktree (see [Working in parallel](#working-in-parallel)).
 - **Benchmarks and the stress project run alone:** serially, with no build, test or other heavy app running. Timing taken on a busy machine is not a result.
 - If the machine swaps, or a build takes more than three times its usual time, drop to a single worker for the rest of the session.
@@ -119,7 +119,7 @@ The reference development machine is an Apple M2 with 8 GB of RAM and a small di
 
 ## Building
 
-The development machine is modest, so the compiler is capped at four parallel jobs. `.cargo/config.toml` sets `[build] jobs = 4` for every build in this repo; also export `CARGO_BUILD_JOBS=4` in your shell so tools that ignore the config file follow the same limit.
+The compiler is capped at eight parallel jobs. `.cargo/config.toml` sets `[build] jobs = 8` for every build in this repo; also export `CARGO_BUILD_JOBS=8` in your shell so tools that ignore the config file follow the same limit.
 
 The easiest way to set up a shell is to source the development environment script from the repo root:
 
@@ -127,7 +127,7 @@ The easiest way to set up a shell is to source the development environment scrip
 source scripts/dev-env.sh
 ```
 
-It exports `CARGO_BUILD_JOBS=4`, points `CARGO_TARGET_DIR` at the main checkout's `target/` (shared by every worktree) and, when `FFMPEG_DIR` is not already set, points it at the FFmpeg the bindings build against: the pinned build in the main checkout's `.glass-cache/ffmpeg/<host-triple>/` (or under `GLASS_FFMPEG_CACHE` when set) when `scripts/ffmpeg/build.sh` has produced one (see [FFmpeg](#ffmpeg)), otherwise Homebrew's FFmpeg (`brew install ffmpeg`). No machine-specific path is committed to the repo.
+It exports `CARGO_BUILD_JOBS=8`, points `CARGO_TARGET_DIR` at the main checkout's `target/` (shared by every worktree) and, when `FFMPEG_DIR` is not already set, points it at the FFmpeg the bindings build against: the pinned build in the main checkout's `.glass-cache/ffmpeg/<host-triple>/` (or under `GLASS_FFMPEG_CACHE` when set) when `scripts/ffmpeg/build.sh` has produced one (see [FFmpeg](#ffmpeg)), otherwise Homebrew's FFmpeg (`brew install ffmpeg`). No machine-specific path is committed to the repo.
 
 ### Logging
 
