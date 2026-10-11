@@ -254,7 +254,7 @@ Done when: every tool below works with keyboard and mouse, the 200-clip benchmar
   - [ ] `Sheet / Keyboard` rest: Switch preset dialog (keep my changes or start clean), saved sets, import and export from the preset menu, preset comparison table, toasts with Undo; the Settings › Shortcuts pane from `Dialog / Settings — Shortcuts`; the app loads and saves `keymap.json` in the config folder and dispatches through it once the app shell exists
 - [ ] Command palette: effects, clips, commands, fuzzy search
 - [ ] Right-to-left layout and full i18n
-- [ ] Dockable panels, saveable workspaces, presets for Edit, Colour, Audio, Effects
+- [~] Dockable panels, saveable workspaces, presets for Edit, Colour, Audio, Effects
 - [ ] Debug panel: thread activity, cache stats, frame-time graph, log ring buffer
 
 ## Phase 7 — Core editing features (M2)
