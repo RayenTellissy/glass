@@ -410,7 +410,7 @@ Entries are never edited after the fact except to fix typos. A decision that rev
 - **Details:** `project::transition`, `project::model::Track::transitions`, `project::schema::migrate_v4_to_v5`, `project::diff::Node::Transition`, `project::time::Time::floor_to_multiple`; `crates/project/tests/transitions.rs`, `crates/project/tests/schema.rs`, `tests/fixtures/projects/v5-*.json`.
 - **Consequences:** A roll edit (moving a cut with its transition) must be one edit that moves both clip edges, or the transition is removed by the first trim. The transition browser's default duration and "apply to all cuts" (Phase 9) go through `add_transition`. Custom cubic-bezier easing curves need more than an id: the easing editor (Phase 9) adds them with a schema bump; the engine treats an unknown easing id as linear until then.
 
-## 53. Frame queues park on their own mutex-and-condvar parker
+## 56. Frame queues park on their own mutex-and-condvar parker
 
 - **Date:** 2026-10-11
 - **Decision:** `engine::frame_queue` replaces `crossbeam-utils`' `Parker` with a small private parker (a wake-up token in a `std::sync::Mutex<bool>` and a `Condvar`). `Parker::new` locks the mutex, waits on the condition variable with a zero timeout and notifies it once, so the standard library allocates both there. `crossbeam-utils` is no longer a direct dependency (amends Decision 27).
