@@ -142,6 +142,19 @@ fn same_rate(a: Rational, b: Rational) -> bool {
     i64::from(a.num) * i64::from(b.den) == i64::from(b.num) * i64::from(a.den)
 }
 
+/// `rate` (both parts positive) in lowest terms, the form edits store, so `50/2` and
+/// `25/1` compare equal.
+fn reduced(rate: Rational) -> Rational {
+    let (mut a, mut b) = (rate.num.unsigned_abs(), rate.den.unsigned_abs());
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    match i32::try_from(a) {
+        Ok(g) if g > 1 => Rational::new(rate.num / g, rate.den / g),
+        _ => rate,
+    }
+}
+
 /// A usable frame rate: both parts positive and from [`MIN_FPS`] to [`MAX_FPS`] frames
 /// per second.
 pub fn check_frame_rate(rate: Rational) -> Result<(), EditError> {
@@ -336,6 +349,15 @@ impl SequenceFormat {
         }
         check_sample_rate(self.sample_rate)
     }
+
+    /// The same format with its frame rate in lowest terms. Edits store formats this way
+    /// (after [`SequenceFormat::check`]); a loaded file may hold any form.
+    pub fn reduced(self) -> Self {
+        Self {
+            frame_rate: reduced(self.frame_rate),
+            ..self
+        }
+    }
 }
 
 /// The project-wide settings.
@@ -364,11 +386,17 @@ impl Project {
     }
 
     /// Replaces the project settings. No sequence changes: the format is what new
-    /// sequences start with ([`Project::add_sequence_with`]). Settings equal to the
-    /// current ones return this root unchanged.
-    pub fn set_project_settings(&self, settings: ProjectSettings) -> Result<Project, EditError> {
+    /// sequences start with ([`Project::add_sequence_with`]). The frame rate is stored in
+    /// lowest terms. Settings equal to the current ones return this root unchanged.
+    pub fn set_project_settings(
+        &self,
+        mut settings: ProjectSettings,
+    ) -> Result<Project, EditError> {
         settings.check()?;
-        if *self.settings == settings {
+        settings.sequence = settings.sequence.reduced();
+        let mut current = ProjectSettings::clone(&self.settings);
+        current.sequence = current.sequence.reduced();
+        if current == settings {
             return Ok(self.clone());
         }
         let mut next = self.clone();
@@ -383,7 +411,8 @@ impl Project {
     /// for a length off the grid; [`EditError::TransitionRoom`] or
     /// [`EditError::TransitionHandle`] when a centred transition's split around its cut
     /// moves and no longer fits), then the sequence markers in order
-    /// ([`EditError::MarkerOffGrid`]). Nothing is moved. A format equal to the current one
+    /// ([`EditError::MarkerOffGrid`]). Nothing is moved. The frame rate is stored in
+    /// lowest terms, so a format equal to the current one in any form (`50/2` for `25/1`)
     /// returns this root unchanged.
     pub fn set_sequence_format(
         &self,
@@ -391,18 +420,20 @@ impl Project {
         format: SequenceFormat,
     ) -> Result<Project, EditError> {
         format.check()?;
+        let format = format.reduced();
         let index = self
             .sequences
             .iter()
             .position(|s| s.id == sequence)
             .ok_or(EditError::UnknownSequence(sequence))?;
         let current = &self.sequences[index];
-        if current.format() == format {
+        if current.format().reduced() == format {
             return Ok(self.clone());
         }
         let mut next = self.clone();
         let seq = next.sequence_at_mut(index);
-        let regrid = seq.frame_rate != format.frame_rate || seq.sample_rate != format.sample_rate;
+        let regrid =
+            !same_rate(seq.frame_rate, format.frame_rate) || seq.sample_rate != format.sample_rate;
         seq.set_format(format);
         if regrid {
             for track in &seq.tracks {

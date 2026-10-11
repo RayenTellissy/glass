@@ -1,5 +1,5 @@
 //! The Glass document model: the immutable edit tree of sequences, tracks, clips,
-//! markers, transitions, keyframes and effect parameter schemas, plus undo history, save
+//! markers, transitions, keyframes, nested sequences and effect parameter schemas, plus undo history, save
 //! and load, and schema migrations. Pure data: no I/O threads, no GPU, and no dependencies
 //! on other Glass crates.
 
@@ -14,6 +14,7 @@ pub mod keyframe;
 pub mod marker;
 pub mod media_pool;
 pub mod model;
+pub mod nest;
 pub mod params;
 pub mod relink;
 pub mod schema;
@@ -33,8 +34,8 @@ pub use keyframe::{ClipParam, Curve, Handle, HandleSide, Interpolation, Key, Key
 pub use marker::{Marker, MarkerOwner, MarkerSpec, TodoState};
 pub use media_pool::ColourLabel;
 pub use model::{
-    Adjustment, Clip, Item, ItemKind, MediaRef, MediaRefs, Project, Sequence, Subtitle, Track,
-    TrackKind,
+    Adjustment, Clip, ClipSource, Item, ItemKind, MediaRef, MediaRefs, Project, Sequence, Subtitle,
+    Track, TrackKind,
 };
 pub use relink::Relink;
 pub use schema::LoadError;

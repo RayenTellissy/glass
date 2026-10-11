@@ -13,10 +13,10 @@ use std::path::{Path, PathBuf};
 use project::params::{ParamDef, ParamSchema, ParamValue, Range, effects};
 use project::schema::{self, LoadError, OLDEST_VERSION, SCHEMA_VERSION};
 use project::{
-    Alignment, BlendMode, CacheFolder, ChannelLayout, Clip, ClipParam, ClipSpec, ColourLabel,
-    ColourSpace, Crop, Handle, HandleSide, Interpolation, KeyTarget, MarkerOwner, MarkerSpec,
-    MediaId, Project, ProjectSettings, Rational, Resolution, SequenceFormat, SpeedKeep, Time,
-    TimeRange, TodoState, TrackKind, Transform, TransitionSpec,
+    Alignment, BlendMode, CacheFolder, ChannelLayout, Clip, ClipParam, ClipSource, ClipSpec,
+    ColourLabel, ColourSpace, Crop, Handle, HandleSide, Interpolation, KeyTarget, MarkerOwner,
+    MarkerSpec, MediaId, Project, ProjectSettings, Rational, Resolution, SequenceFormat, SpeedKeep,
+    Time, TimeRange, TodoState, TrackKind, Transform, TransitionSpec,
 };
 use serde_json::Value;
 
@@ -459,6 +459,63 @@ fn keyframes() -> Project {
     .expect("key")
 }
 
+/// The project in every `*-nested.json` fixture (from v8): a sequence at 24 fps nested in
+/// one at 25 fps, slipped and with a transition out of it, and a compound clip made from
+/// a selection (a clip and a subtitle) holding a clip with an effect and a marker.
+fn nested() -> Project {
+    let p = Project::new("fixture-nested", "Ferry crossing");
+    let (p, a) = p.add_media("7a8b9c", "/footage/ferry.mov").expect("media");
+    let (p, titles) = p
+        .add_sequence("Titles", Rational::new(24, 1), 48_000)
+        .expect("titles");
+    let (p, tv1) = p
+        .add_track(titles, TrackKind::Video, "V1", None)
+        .expect("tv1");
+    let (p, _) = p
+        .insert_clip(
+            tv1,
+            clip(a, Time::ZERO, Time::seconds(3), Time::seconds(10)),
+        )
+        .expect("title clip");
+    let (p, seq) = p.add_sequence("Main", FPS, 48_000).expect("main");
+    let (p, v1) = p.add_track(seq, TrackKind::Video, "V1", None).expect("v1");
+    let (p, v2) = p.add_track(seq, TrackKind::Video, "V2", None).expect("v2");
+    let (p, s1) = p
+        .add_track(seq, TrackKind::Subtitle, "S1", None)
+        .expect("s1");
+    let (p, shot) = p
+        .insert_clip(v1, clip(a, Time::ZERO, frames(50), Time::seconds(1)))
+        .expect("shot");
+    let (p, _) = p.add_effect(shot, &effects::lut(), None).expect("lut");
+    let (p, _) = p
+        .add_marker(
+            MarkerOwner::Clip(shot),
+            MarkerSpec {
+                name: "Gull".into(),
+                ..MarkerSpec::at(Time::seconds(1), ColourLabel::Blue)
+            },
+        )
+        .expect("marker");
+    let (p, cue) = p
+        .insert_subtitle(s1, TimeRange::new(frames(10), frames(20)), "Morning")
+        .expect("cue");
+    let (p, _, _) = p.nest_items(&[shot, cue], "Opening").expect("compound");
+    let (p, card) = p
+        .insert_sequence_clip(
+            v2,
+            titles,
+            TimeRange::new(frames(50), frames(25)),
+            Time::new(1, 2).expect("t"),
+        )
+        .expect("titles clip");
+    p.add_transition(TransitionSpec {
+        alignment: Alignment::Start,
+        ..TransitionSpec::new(Some(card), None, frames(10))
+    })
+    .expect("fade")
+    .0
+}
+
 /// The project each fixture name was saved from.
 fn builder(name: &str) -> Project {
     match name {
@@ -468,6 +525,7 @@ fn builder(name: &str) -> Project {
         "transitions" => transitions(),
         "settings" => settings(),
         "keyframes" => keyframes(),
+        "nested" => nested(),
         other => panic!("no builder for {other} fixtures"),
     }
 }
@@ -531,6 +589,7 @@ fn the_current_version_fixtures_are_what_save_writes() {
         "transitions",
         "settings",
         "keyframes",
+        "nested",
     ] {
         let bytes = schema::save(&builder(name));
         let path = fixtures_dir().join(format!("v{SCHEMA_VERSION}-{name}.json"));
@@ -624,7 +683,7 @@ fn v3_clips_gain_their_default_properties() {
                 if let Some(clip) = item.clip() {
                     let defaults = Clip {
                         markers: clip.markers.clone(),
-                        ..Clip::new(clip.media, clip.source_start)
+                        ..Clip::new(clip.source, clip.source_start)
                     };
                     assert_eq!(*clip, defaults, "{name}: item {}", item.id);
                     clips += 1;
@@ -722,6 +781,69 @@ fn v6_clips_and_effects_gain_empty_keyframes() {
         assert!(clips >= 1, "{name}");
         assert!(loaded.content_eq(&builder(name)), "{name}");
     }
+}
+
+#[test]
+fn v7_sequences_gain_compound_false() {
+    for name in [
+        "basic",
+        "tracks",
+        "props",
+        "transitions",
+        "settings",
+        "keyframes",
+    ] {
+        let path = fixtures_dir().join(format!("v7-{name}.json"));
+        let v7: Value = serde_json::from_slice(&read(&path)).expect("JSON");
+        let loaded = schema::load(&read(&path)).expect("loads");
+        assert_eq!(
+            loaded.next_id(),
+            v7["project"]["next_id"].as_u64().expect("next id")
+        );
+        assert!(!loaded.sequences().is_empty(), "{name}");
+        for seq in loaded.sequences() {
+            assert!(!seq.compound, "{name}: sequence {}", seq.id);
+            for item in seq.tracks.iter().flat_map(|t| t.items.iter()) {
+                if let Some(clip) = item.clip() {
+                    assert!(matches!(clip.source, ClipSource::Media(_)), "{name}");
+                }
+            }
+        }
+        assert!(loaded.content_eq(&builder(name)), "{name}");
+    }
+}
+
+#[test]
+fn the_nested_fixture_round_trips_sources_and_compounds() {
+    let path = fixtures_dir().join(format!("v{SCHEMA_VERSION}-nested.json"));
+    let loaded = schema::load(&read(&path)).expect("loads");
+    assert!(loaded.content_eq(&nested()));
+    let names: Vec<(&str, bool)> = loaded
+        .sequences()
+        .iter()
+        .map(|s| (s.name.as_str(), s.compound))
+        .collect();
+    assert_eq!(
+        names,
+        [("Titles", false), ("Main", false), ("Opening", true)]
+    );
+    let main = &loaded.sequences()[1];
+    let sources: Vec<ClipSource> = main
+        .tracks
+        .iter()
+        .flat_map(|t| t.items.iter().filter_map(|i| i.clip().map(|c| c.source)))
+        .collect();
+    let ids: Vec<_> = loaded.sequences().iter().map(|s| s.id).collect();
+    assert_eq!(
+        sources,
+        [ClipSource::Sequence(ids[2]), ClipSource::Sequence(ids[0])]
+    );
+    let opening = &loaded.sequences()[2];
+    let inner = opening.tracks[0].items[0].clip().expect("shot");
+    assert_eq!((inner.effects.len(), inner.markers.len()), (1, 1));
+    assert_eq!(opening.tracks[2].items.len(), 1, "the subtitle moved in");
+    assert_eq!(main.tracks[1].transitions.len(), 1);
+    assert_eq!(schema::save(&loaded), read(&path));
 }
 
 #[test]
