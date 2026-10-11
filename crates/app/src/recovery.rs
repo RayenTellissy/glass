@@ -253,4 +253,32 @@ mod tests {
         assert!(LaunchRecovery::scan(&cache, now).is_empty());
         let _ = std::fs::remove_dir_all(&cache);
     }
+
+    #[test]
+    fn project_cache_folders_are_scanned_with_their_files() {
+        let user = temp_cache("user");
+        let project_cache = temp_cache("project");
+        crashed_session(&project_cache);
+        let now = autosave::now_ms();
+        // Unknown to the recent list: only the per-user folder is read.
+        assert!(LaunchRecovery::scan_all(&user, &Recent::default(), now).is_empty());
+
+        let file = project_cache.join("Harbour.proj");
+        let mut recent = Recent::default();
+        recent.opened(crate::recent::RecentProject {
+            path: file.clone(),
+            cache: project_cache.clone(),
+        });
+        let found = LaunchRecovery::scan_all(&user, &recent, now);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].file.as_deref(), Some(file.as_path()));
+
+        // Opening the project finds the same autosave in its own folder.
+        let dir = found[0].recovered.info.dir.clone();
+        let opened = LaunchRecovery::for_project(&dir, &file, now).expect("found on open");
+        assert_eq!(opened.prompt.edits, 3);
+        assert!(LaunchRecovery::for_project(&user.join("none"), &file, now).is_none());
+        let _ = std::fs::remove_dir_all(&user);
+        let _ = std::fs::remove_dir_all(&project_cache);
+    }
 }

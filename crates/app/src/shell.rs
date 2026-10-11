@@ -22,7 +22,10 @@ use ui::dialogs::about::{AboutAction, AboutDialog, AboutInfo};
 use ui::dialogs::recovery::RecoveryAction;
 use ui::dialogs::shortcuts::{self, ShortcutsAction, ShortcutsEditor};
 use ui::panels::preview::{PreviewAction, PreviewView};
+use ui::panels::timeline::clip_media::ClipMedia;
+use ui::panels::timeline::clips::{self as timeline_clips, ClipsView};
 use ui::panels::timeline::ruler::Timecode;
+use ui::panels::timeline::view::{TimelineView, TrackLayout};
 use ui::workspace::Workspaces;
 use ui::workspace::dock;
 use ui::workspace::menu::{self, MenuCommand, MenuView};
@@ -48,6 +51,9 @@ pub struct Shell {
     workspaces: Workspaces,
     menu: MenuView,
     pool: Pool,
+    /// Thumbnails and waveforms for the clips; filled by the analysis feed once it is
+    /// wired (until then clips draw their placeholders).
+    clip_media: ClipMedia,
     about: Option<AboutDialog>,
     recoveries: VecDeque<LaunchRecovery>,
     shortcuts: Option<ShortcutsEditor>,
@@ -129,6 +135,7 @@ impl Shell {
             workspaces,
             menu: MenuView::default(),
             pool: Pool::default(),
+            clip_media: ClipMedia::new(),
             about: None,
             recoveries,
             shortcuts: None,
@@ -561,6 +568,22 @@ impl Shell {
             .cloned();
         let playhead = self.state.playhead();
         let metadata = self.pool.metadata.clone();
+        let project = self.state.project().clone();
+        let clip_media = &mut self.clip_media;
+        let mut clips =
+            |ui: &mut egui::Ui, rect: Rect, view: &TimelineView, layout: &TrackLayout| {
+                if let Some(sequence) = &sequence {
+                    let _ = timeline_clips::clips(
+                        ui,
+                        rect,
+                        view,
+                        layout,
+                        &ClipsView::new(&project, sequence),
+                        clip_media,
+                        &(),
+                    );
+                }
+            };
         let layout_before = self.workspaces.current.clone();
         let events = {
             let mut panels = Panels {
@@ -575,7 +598,7 @@ impl Shell {
                     panel: timeline,
                     sequence,
                     playhead,
-                    layer: None,
+                    layer: Some(&mut clips),
                 });
             }
             egui::CentralPanel::default()
