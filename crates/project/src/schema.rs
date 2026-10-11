@@ -6,7 +6,7 @@
 //! ```json
 //! {
 //!   "format": "glass.project",
-//!   "schema_version": 8,
+//!   "schema_version": 9,
 //!   "project": { "uid": "...", "name": "...", "next_id": 7, "settings": {...}, "media": {...}, "sequences": [...] }
 //! }
 //! ```
@@ -72,6 +72,11 @@
 //! - v8: sequences carry `compound` (a compound clip's contents, hidden from the browser),
 //!   and a clip names its source as `"media": <id>` as before or `"sequence": <id>` for a
 //!   nested sequence (`crate::nest`).
+//! - v9: `media` is the media pool (`crate::media_pool`), `{"bins": [...], "items": [...],
+//!   "label_names": {...}}`: each reference became an item in a bin with its name, kind,
+//!   files, content hash, size, card, import time, facts, metadata, colour label and tags;
+//!   the root bin (id 0) is named after the project. Tracks carry their switches
+//!   (`crate::switches`): `muted`, `solo`, `visible`, `locked` and `height`.
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -83,7 +88,7 @@ use crate::validate::ValidationError;
 pub const FORMAT: &str = "glass.project";
 
 /// The schema version this build writes, and the newest it reads.
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 9;
 
 /// The oldest schema version this build reads.
 pub const OLDEST_VERSION: u32 = 1;
@@ -100,6 +105,7 @@ pub const MIGRATIONS: [Migration; (SCHEMA_VERSION - OLDEST_VERSION) as usize] = 
     migrate_v5_to_v6,
     migrate_v6_to_v7,
     migrate_v7_to_v8,
+    migrate_v8_to_v9,
 ];
 
 /// Why a project file could not be read. [`LoadError::i18n_key`] names the message to
@@ -542,6 +548,160 @@ pub fn migrate_v7_to_v8(mut project: Value) -> Result<Value, String> {
     Ok(project)
 }
 
+/// v8 → v9: `media`, `{"refs": [...]}`, becomes the media pool: a root bin (id 0) named
+/// after the project, and one item per reference in it, keeping its id, path and content
+/// hash, named after the file without its extension, its kind guessed from the extension
+/// (audio and still image extensions, anything else video), with nothing else known.
+/// Every track gets its switches at their defaults: heard, unsoloed, visible, unlocked,
+/// medium height. `next_id` does not change (the root bin is not a node).
+pub fn migrate_v8_to_v9(mut project: Value) -> Result<Value, String> {
+    let root = object(&mut project)?;
+    let name = root
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let refs = match root.remove("media") {
+        None => Vec::new(),
+        Some(Value::Object(mut media)) => match media.remove("refs") {
+            None => Vec::new(),
+            Some(Value::Array(refs)) => refs,
+            Some(_) => return Err("media refs is not a list".to_string()),
+        },
+        Some(_) => return Err("media is not an object".to_string()),
+    };
+    let mut items = Vec::with_capacity(refs.len());
+    for media in refs {
+        let Value::Object(mut media) = media else {
+            return Err("a media reference is not an object".to_string());
+        };
+        let id = media
+            .remove("id")
+            .ok_or_else(|| "a media reference has no id".to_string())?;
+        let path = match media.remove("path") {
+            Some(Value::String(path)) => path,
+            _ => return Err("a media reference has no path".to_string()),
+        };
+        let content_hash = media
+            .remove("content_hash")
+            .unwrap_or_else(|| Value::from(""));
+        items.push(serde_json::json!({
+            "id": id,
+            "bin": 0,
+            "name": v8_file_stem(&path),
+            "kind": v8_media_kind(&path),
+            "path": path,
+            "spanned": [],
+            "sidecars": [],
+            "content_hash": content_hash,
+            "size_bytes": 0,
+            "card": null,
+            "added_unix": 0,
+            "facts": {
+                "duration_s": null,
+                "width": 0,
+                "height": 0,
+                "frame_rate": null,
+                "video_codec": null,
+                "video_profile": null,
+                "bit_depth": 0,
+                "chroma": null,
+                "primaries": null,
+                "hdr": null,
+                "audio_codec": null,
+                "audio_channels": 0,
+                "sample_rate": 0,
+                "audio_bit_depth": null,
+                "sequence_frames": null,
+                "container": null
+            },
+            "metadata": {
+                "camera_make": null,
+                "camera_model": null,
+                "lens": null,
+                "focal_length_mm": null,
+                "f_number": null,
+                "iso": null,
+                "shutter": null,
+                "timecode": null,
+                "reel": null,
+                "gps": null,
+                "created": null
+            },
+            "label": null,
+            "tags": []
+        }));
+    }
+    let pool = serde_json::json!({
+        "bins": [{ "id": 0, "name": name, "parent": null }],
+        "items": items,
+        "label_names": {}
+    });
+    root.insert("media".to_string(), pool);
+    let Some(sequences) = root.get_mut("sequences") else {
+        return Ok(project);
+    };
+    let sequences = sequences
+        .as_array_mut()
+        .ok_or_else(|| "sequences is not a list".to_string())?;
+    for sequence in sequences {
+        let Some(tracks) = sequence
+            .as_object_mut()
+            .ok_or_else(|| "a sequence is not an object".to_string())?
+            .get_mut("tracks")
+        else {
+            continue;
+        };
+        for track in tracks
+            .as_array_mut()
+            .ok_or_else(|| "tracks is not a list".to_string())?
+        {
+            let track = track
+                .as_object_mut()
+                .ok_or_else(|| "a track is not an object".to_string())?;
+            let switches = [
+                ("muted", Value::Bool(false)),
+                ("solo", Value::Bool(false)),
+                ("visible", Value::Bool(true)),
+                ("locked", Value::Bool(false)),
+                ("height", Value::from("medium")),
+            ];
+            for (key, value) in switches {
+                if track.contains_key(key) {
+                    return Err(format!("a v8 track already has {key}"));
+                }
+                track.insert(key.to_string(), value);
+            }
+        }
+    }
+    Ok(project)
+}
+
+/// The file name without its last extension, splitting on `/` and `\` (the v8 → v9
+/// item name; kept as written for the migration).
+fn v8_file_stem(path: &str) -> &str {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    match name.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => stem,
+        _ => name,
+    }
+}
+
+/// The v8 → v9 item kind from the file's extension (kept as written for the migration).
+fn v8_media_kind(path: &str) -> &'static str {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "wav" | "aif" | "aiff" | "mp3" | "m4a" | "aac" | "flac" | "ogg" | "opus" | "caf" => "audio",
+        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "heic" | "heif" | "bmp" | "gif" | "webp" | "exr"
+        | "dpx" => "still",
+        _ => "video",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -898,6 +1058,101 @@ mod tests {
         assert_eq!(
             migrate_v7_to_v8(json!({ "uid": "u" })).expect("no sequences"),
             json!({ "uid": "u" })
+        );
+    }
+
+    #[test]
+    fn v8_to_v9_turns_references_into_pool_items_and_adds_track_switches() {
+        let v8 = json!({
+            "name": "Harbour film",
+            "next_id": 9,
+            "media": { "refs": [
+                { "id": 1, "content_hash": "ab", "path": "/a/Dusk.MOV" },
+                { "id": 2, "content_hash": "", "path": "C:\\b\\gulls.wav" },
+                { "id": 3, "content_hash": "cd", "path": "/c/still.tiff" }
+            ] },
+            "sequences": [
+                {
+                    "id": 4,
+                    "tracks": [
+                        { "id": 5, "kind": "video", "items": [] },
+                        { "id": 6, "kind": "audio", "items": [] }
+                    ]
+                },
+                { "id": 7 }
+            ]
+        });
+        let v9 = migrate_v8_to_v9(v8.clone()).expect("migrates");
+        assert_eq!(v9["next_id"], json!(9));
+        assert_eq!(
+            v9["media"]["bins"],
+            json!([{ "id": 0, "name": "Harbour film", "parent": null }])
+        );
+        assert_eq!(v9["media"]["label_names"], json!({}));
+        let items = v9["media"]["items"].as_array().expect("items");
+        let short: Vec<Value> = items
+            .iter()
+            .map(|i| json!([i["id"], i["name"], i["kind"], i["path"], i["content_hash"], i["bin"]]))
+            .collect();
+        assert_eq!(
+            short,
+            [
+                json!([1, "Dusk", "video", "/a/Dusk.MOV", "ab", 0]),
+                json!([2, "gulls", "audio", "C:\\b\\gulls.wav", "", 0]),
+                json!([3, "still", "still", "/c/still.tiff", "cd", 0]),
+            ]
+        );
+        assert_eq!(items[0]["facts"]["width"], json!(0));
+        assert!(items[0]["metadata"]["camera_model"].is_null());
+        assert_eq!(items[0]["tags"], json!([]));
+        for track in v9["sequences"][0]["tracks"].as_array().expect("tracks") {
+            assert_eq!(track["muted"], json!(false));
+            assert_eq!(track["solo"], json!(false));
+            assert_eq!(track["visible"], json!(true));
+            assert_eq!(track["locked"], json!(false));
+            assert_eq!(track["height"], json!("medium"));
+        }
+        assert_eq!(v9["sequences"][1], v8["sequences"][1]);
+        // An empty project gets a root bin and nothing else.
+        let bare = migrate_v8_to_v9(json!({ "name": "x" })).expect("bare");
+        assert_eq!(bare["media"]["items"], json!([]));
+        assert_eq!(bare["media"]["bins"][0]["name"], json!("x"));
+    }
+
+    #[test]
+    fn v8_to_v9_rejects_malformed_trees() {
+        assert!(migrate_v8_to_v9(json!([])).is_err());
+        assert_eq!(
+            migrate_v8_to_v9(json!({ "media": [] })),
+            Err("media is not an object".to_string())
+        );
+        assert_eq!(
+            migrate_v8_to_v9(json!({ "media": { "refs": {} } })),
+            Err("media refs is not a list".to_string())
+        );
+        assert_eq!(
+            migrate_v8_to_v9(json!({ "media": { "refs": [3] } })),
+            Err("a media reference is not an object".to_string())
+        );
+        assert_eq!(
+            migrate_v8_to_v9(json!({ "media": { "refs": [{ "path": "/a" }] } })),
+            Err("a media reference has no id".to_string())
+        );
+        assert_eq!(
+            migrate_v8_to_v9(json!({ "media": { "refs": [{ "id": 1 }] } })),
+            Err("a media reference has no path".to_string())
+        );
+        assert_eq!(
+            migrate_v8_to_v9(json!({ "sequences": [{ "tracks": [3] }] })),
+            Err("a track is not an object".to_string())
+        );
+        assert_eq!(
+            migrate_v8_to_v9(json!({ "sequences": [{ "tracks": [{ "locked": true }] }] })),
+            Err("a v8 track already has locked".to_string())
+        );
+        assert_eq!(
+            migrate_v8_to_v9(json!({ "sequences": {} })),
+            Err("sequences is not a list".to_string())
         );
     }
 

@@ -157,8 +157,6 @@ pub fn vtt_escape(text: &str) -> String {
 mod tests {
     use std::sync::Arc;
 
-    use imbl::Vector;
-
     use super::*;
     use crate::id::{ItemId, MediaId, TrackId};
     use crate::model::{Clip, Item, Subtitle, TrackKind};
@@ -169,9 +167,6 @@ mod tests {
 
     fn track(items: &[(&str, &str, &str)]) -> Track {
         Track {
-            id: TrackId(1),
-            kind: TrackKind::Subtitle,
-            name: "Subtitles".into(),
             items: items
                 .iter()
                 .enumerate()
@@ -185,7 +180,7 @@ mod tests {
                     })
                 })
                 .collect(),
-            transitions: Vector::new(),
+            ..Track::new(TrackId(1), TrackKind::Subtitle, "Subtitles")
         }
     }
 

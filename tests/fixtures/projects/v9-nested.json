@@ -1,0 +1,487 @@
+{
+  "format": "glass.project",
+  "schema_version": 9,
+  "project": {
+    "uid": "fixture-nested",
+    "name": "Ferry crossing",
+    "next_id": 20,
+    "settings": {
+      "sequence": {
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 30,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo"
+      },
+      "colour_space": "rec709",
+      "cache_folder": {
+        "relative": ".glass-cache"
+      }
+    },
+    "media": {
+      "bins": [
+        {
+          "id": 0,
+          "name": "Ferry crossing",
+          "parent": null
+        }
+      ],
+      "items": [
+        {
+          "id": 1,
+          "bin": 0,
+          "name": "ferry",
+          "kind": "video",
+          "path": "/footage/ferry.mov",
+          "spanned": [],
+          "sidecars": [],
+          "content_hash": "7a8b9c",
+          "size_bytes": 0,
+          "card": null,
+          "added_unix": 0,
+          "facts": {
+            "duration_s": null,
+            "width": 0,
+            "height": 0,
+            "frame_rate": null,
+            "video_codec": null,
+            "video_profile": null,
+            "bit_depth": 0,
+            "chroma": null,
+            "primaries": null,
+            "hdr": null,
+            "audio_codec": null,
+            "audio_channels": 0,
+            "sample_rate": 0,
+            "audio_bit_depth": null,
+            "sequence_frames": null,
+            "container": null
+          },
+          "metadata": {
+            "camera_make": null,
+            "camera_model": null,
+            "lens": null,
+            "focal_length_mm": null,
+            "f_number": null,
+            "iso": null,
+            "shutter": null,
+            "timecode": null,
+            "reel": null,
+            "gps": null,
+            "created": null
+          },
+          "label": null,
+          "tags": []
+        }
+      ],
+      "label_names": {}
+    },
+    "sequences": [
+      {
+        "id": 2,
+        "name": "Titles",
+        "compound": false,
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 24,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo",
+        "markers": [],
+        "tracks": [
+          {
+            "id": 3,
+            "kind": "video",
+            "name": "V1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
+            "items": [
+              {
+                "id": 4,
+                "range": {
+                  "start": "0",
+                  "duration": "3"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "10",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "keyframes": {},
+                "markers": []
+              }
+            ],
+            "transitions": []
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "name": "Main",
+        "compound": false,
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 25,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo",
+        "markers": [],
+        "tracks": [
+          {
+            "id": 6,
+            "kind": "video",
+            "name": "V1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
+            "items": [
+              {
+                "id": 17,
+                "range": {
+                  "start": "0",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "sequence": 13,
+                "source_start": "0",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "keyframes": {},
+                "markers": []
+              }
+            ],
+            "transitions": []
+          },
+          {
+            "id": 7,
+            "kind": "video",
+            "name": "V2",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
+            "items": [
+              {
+                "id": 18,
+                "range": {
+                  "start": "2",
+                  "duration": "1"
+                },
+                "type": "clip",
+                "sequence": 2,
+                "source_start": "1/2",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "keyframes": {},
+                "markers": []
+              }
+            ],
+            "transitions": [
+              {
+                "id": 19,
+                "outgoing": 18,
+                "incoming": null,
+                "kind": "cross-dissolve",
+                "duration": "2/5",
+                "alignment": "start",
+                "direction": null,
+                "easing": "linear",
+                "params": {}
+              }
+            ]
+          },
+          {
+            "id": 8,
+            "kind": "subtitle",
+            "name": "S1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
+            "items": [],
+            "transitions": []
+          }
+        ]
+      },
+      {
+        "id": 13,
+        "name": "Opening",
+        "compound": true,
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 25,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo",
+        "markers": [],
+        "tracks": [
+          {
+            "id": 14,
+            "kind": "video",
+            "name": "V1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
+            "items": [
+              {
+                "id": 9,
+                "range": {
+                  "start": "0",
+                  "duration": "2"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "1",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [
+                  {
+                    "id": 10,
+                    "schema": "lut",
+                    "enabled": true,
+                    "params": {
+                      "enabled": {
+                        "bool": true
+                      },
+                      "file": {
+                        "text": ""
+                      },
+                      "input": {
+                        "choice": "rec709"
+                      },
+                      "intensity": {
+                        "float": 1.0
+                      }
+                    },
+                    "keyframes": {}
+                  }
+                ],
+                "keyframes": {},
+                "markers": [
+                  {
+                    "id": 11,
+                    "start": "1",
+                    "duration": "0",
+                    "name": "Gull",
+                    "note": "",
+                    "colour": "blue",
+                    "chapter": false,
+                    "todo": "off"
+                  }
+                ]
+              }
+            ],
+            "transitions": []
+          },
+          {
+            "id": 15,
+            "kind": "video",
+            "name": "V2",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
+            "items": [],
+            "transitions": []
+          },
+          {
+            "id": 16,
+            "kind": "subtitle",
+            "name": "S1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
+            "items": [
+              {
+                "id": 12,
+                "range": {
+                  "start": "2/5",
+                  "duration": "4/5"
+                },
+                "type": "subtitle",
+                "text": "Morning"
+              }
+            ],
+            "transitions": []
+          }
+        ]
+      }
+    ]
+  }
+}
