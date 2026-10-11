@@ -384,7 +384,7 @@ Done when: a graded reference shot matches a golden render within tolerance and 
 
 Done when: a 16-track mix with effects and automation plays without dropouts at a 256-sample buffer on both platforms.
 
-- [ ] Mixer: buses, sends, faders, meters, automation lanes
+- [~] Mixer: buses, sends, faders, meters, automation lanes
 - [ ] Effects: EQ, compressor, limiter, gate, de-esser, reverb, delay, pitch shift
 - [ ] Spectral noise removal and de-hum
 - [ ] Loudness normalisation to platform targets
