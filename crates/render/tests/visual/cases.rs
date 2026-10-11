@@ -63,6 +63,11 @@ pub fn all() -> Vec<Case> {
             frames: &[12],
             scene: mask_intersection,
         },
+        Case {
+            name: "cross_dissolve",
+            frames: &[0, 12, 24],
+            scene: cross_dissolve,
+        },
     ]
 }
 
@@ -350,4 +355,18 @@ fn mask_intersection(frame: u32) -> Scene {
                 .with_mode(MaskMode::Intersection),
         ],
     )
+}
+
+/// Cross dissolve from the gradient to the colour bars over 24 frames: frame 0 is the
+/// gradient alone, 12 half way, 24 the bars alone.
+fn cross_dissolve(frame: u32) -> Scene {
+    Scene {
+        layers: vec![(
+            Source::Transition {
+                id: "cross-dissolve",
+                progress: f64::from(frame) / 24.0,
+            },
+            Layer::default(),
+        )],
+    }
 }

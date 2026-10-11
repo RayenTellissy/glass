@@ -16,6 +16,8 @@ cosmic-text.workspace = true
 swash.workspace = true
 naga.workspace = true
 notify.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
