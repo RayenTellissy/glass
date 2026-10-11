@@ -5,11 +5,13 @@
 
 pub mod analysis;
 pub mod autosave;
+pub mod export;
 pub mod frame_queue;
 pub mod logging;
 pub mod lookahead;
 pub mod media_check;
 pub mod media_mgmt;
+pub mod mix;
 pub mod quality;
 pub mod scrub;
 pub mod threads;

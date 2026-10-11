@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use crate::OutputConfig;
 use crate::callback::{self, Callback, Feeder, Timing};
 use crate::clock::{Clock, Shared, Source};
+use crate::mixer::Mixer;
 
 /// Sample rate of an offline stream whose config leaves it unset.
 pub const DEFAULT_OFFLINE_RATE: u32 = 48_000;
@@ -38,6 +39,24 @@ impl OfflineOutput {
     /// [`OfflineOutput::render_at`], like a device's.
     pub fn with_device_timing(config: &OutputConfig) -> (Self, Feeder, Clock) {
         Self::build(config, Source::Device)
+    }
+
+    /// A manually advanced output whose audio comes from `mixer` (at the mixer's rate and
+    /// channel count) instead of a feeder: tests drive the mixer's callback this way, as a
+    /// device would.
+    pub fn with_mixer(mixer: Mixer) -> (Self, Clock) {
+        let config = mixer.config();
+        let channels = config.layout.channels();
+        let shared = Shared::new(config.sample_rate, Source::Manual);
+        let callback = callback::mixing(Arc::clone(&shared), mixer, channels);
+        let clock = Clock::new(Arc::clone(&shared));
+        let output = Self {
+            callback,
+            shared,
+            channels,
+            scratch: vec![0.0; BLOCK_FRAMES * channels],
+        };
+        (output, clock)
     }
 
     fn build(config: &OutputConfig, source: Source) -> (Self, Feeder, Clock) {

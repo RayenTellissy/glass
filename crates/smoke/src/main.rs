@@ -1,5 +1,6 @@
 //! Headless check binary: opens the reference project (`tests/fixtures/reference.proj`),
-//! plays 2 s of it and exports 1 s without a window, verifies the export, then exits 0.
+//! mixes 2 s of its audio offline and checks the tone's level, plays 2 s of it and exports
+//! 1 s (with the mixed audio) without a window, verifies the export, then exits 0.
 //!
 //! `smoke --write-reference [path]` writes the reference project instead (to
 //! `tests/fixtures/reference.proj` by default), from the generator in `reference.rs`.
@@ -20,6 +21,8 @@ use engine::timeline::TimelinePlan;
 
 /// Timeline frames played: 2 s at the reference's 30 fps.
 const PLAY_FRAMES: i64 = 2 * reference::FPS;
+/// Seconds of the sequence mixed offline and checked against the A1 tone.
+const MIX_SECONDS: i64 = 2;
 
 fn main() -> ExitCode {
     let ring = match logging::init() {
@@ -105,6 +108,8 @@ fn check() -> Result<(), String> {
         ));
     }
 
+    run::mix_check(&opened.project, opened.sequence, MIX_SECONDS)?;
+
     let Some(gpu) = run::gpu() else {
         if std::env::var_os("GLASS_REQUIRE_GPU").is_some_and(|v| v == "1") {
             return Err("no GPU adapter with 16-bit normalised textures".to_owned());
@@ -114,7 +119,13 @@ fn check() -> Result<(), String> {
     };
     let plan = Arc::new(plan);
     run::play(&gpu, &plan, PLAY_FRAMES)?;
-    run::export(&gpu, &plan, reference::EXPORT)?;
+    run::export(
+        &gpu,
+        &plan,
+        &opened.project,
+        opened.sequence,
+        reference::EXPORT,
+    )?;
     println!("smoke: total {:.2} s", started.elapsed().as_secs_f64());
     Ok(())
 }

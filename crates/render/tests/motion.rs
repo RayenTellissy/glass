@@ -2,8 +2,11 @@
 //! swirl and roll. Each is exactly A at progress 0 and exactly B at 1 (linear and eased,
 //! whatever the direction and parameters); push and slide match f64 references of their
 //! formulas mid way; the whip pan's blur keeps a flat picture's level and is symmetric
-//! and energy-preserving on a line; a few placements are checked by sampling; plus the
-//! GPU time of each at 4K. GPU checks skip without an adapter.
+//! and energy-preserving on a line; a few placements are checked by sampling; zooming
+//! out minifies without aliasing; plus the GPU time of each at 4K, held to the timing
+//! rules (`common::timing`). GPU checks skip without an adapter. Every GPU test holds
+//! the timing lock: each makes its own device, and another device's work can run between
+//! the passes of a multi-pass transition, inside its timed span.
 
 mod common;
 
@@ -56,15 +59,26 @@ fn transition(id: &str) -> Arc<Transition> {
         .clone()
 }
 
-/// One transition pass over `a` and `b` (premultiplied pixels of `SIZE`), read back.
+/// One transition over `a` and `b` (premultiplied pixels of `SIZE`), read back.
 fn run(gpu: &Gpu, a: &[[f32; 4]], b: &[[f32; 4]], node: TransitionNode) -> Vec<[f32; 4]> {
-    let ta = common::rgba16f(&gpu.device, &gpu.queue, SIZE, a);
-    let tb = common::rgba16f(&gpu.device, &gpu.queue, SIZE, b);
+    run_at(gpu, SIZE, a, b, node)
+}
+
+/// One transition over `a` and `b` (premultiplied pixels of `size`), read back.
+fn run_at(
+    gpu: &Gpu,
+    size: (u32, u32),
+    a: &[[f32; 4]],
+    b: &[[f32; 4]],
+    node: TransitionNode,
+) -> Vec<[f32; 4]> {
+    let ta = common::rgba16f(&gpu.device, &gpu.queue, size, a);
+    let tb = common::rgba16f(&gpu.device, &gpu.queue, size, b);
     let (va, vb) = (
         ta.create_view(&Default::default()),
         tb.create_view(&Default::default()),
     );
-    let target = common::blank(&gpu.device, wgpu::TextureFormat::Rgba16Float, SIZE);
+    let target = common::blank(&gpu.device, wgpu::TextureFormat::Rgba16Float, size);
     let target_view = target.create_view(&Default::default());
     let mut g = Graph::new();
     let (ia, ib) = (g.import("a", &va), g.import("b", &vb));
@@ -229,6 +243,7 @@ fn the_motion_transitions_are_bundled_with_names() {
 
 #[test]
 fn every_motion_transition_is_exactly_a_then_exactly_b() {
+    let _serial = common::timing::serial();
     let Some(gpu) = gpu() else {
         eprintln!("skipped: no GPU adapter");
         return;
@@ -324,6 +339,7 @@ fn check(what: &str, out: &[[f32; 4]], tol: f64, reference: impl Fn([f64; 2]) ->
 
 #[test]
 fn push_and_slide_match_their_references_mid_way() {
+    let _serial = common::timing::serial();
     let Some(gpu) = gpu() else {
         eprintln!("skipped: no GPU adapter");
         return;
@@ -382,6 +398,7 @@ fn luminance(p: [f32; 4]) -> f64 {
 
 #[test]
 fn the_whip_pan_blur_keeps_levels_and_is_symmetric() {
+    let _serial = common::timing::serial();
     let Some(gpu) = gpu() else {
         eprintln!("skipped: no GPU adapter");
         return;
@@ -392,7 +409,7 @@ fn the_whip_pan_blur_keeps_levels_and_is_symmetric() {
             .direction(d)
             .value("blur", &number(blur))
     };
-    // Enough taps for one a pixel: none staggered.
+    // Enough samples for one tap a pixel in `fs`: an exact box.
     let dense = |t: f64, d: Direction, blur: f64| whip(t, d, blur).value("samples", &number(128.0));
 
     // A flat picture (the same on both sides) keeps its level at every pixel, so its
@@ -476,6 +493,7 @@ fn alpha(gpu: &Gpu, node: TransitionNode) -> impl Fn(u32, u32) -> f32 {
 
 #[test]
 fn the_motion_transitions_move_where_intended() {
+    let _serial = common::timing::serial();
     let Some(gpu) = gpu() else {
         eprintln!("skipped: no GPU adapter");
         return;
@@ -539,13 +557,75 @@ fn the_motion_transitions_move_where_intended() {
     assert_eq!((o(32, 1), o(10, 1)), (0.0, 0.0));
 }
 
-/// GPU time of one 4K pass of each motion transition over noise with its defaults,
-/// median of 30 frames from the pass timestamps. The slowest unblurred one is checked
-/// against the 3 ms budget. The blurred ones (whip pan, zoom) read A or B once per tap,
-/// and at 4K every tap of a long blur costs about a full read of the frame, so they are
-/// only held to the 8 ms compositor frame budget; their cost by tap count is printed.
+#[test]
+fn zooming_out_minifies_without_aliasing() {
+    let _serial = common::timing::serial();
+    let Some(gpu) = gpu() else {
+        eprintln!("skipped: no GPU adapter");
+        return;
+    };
+    // A one-pixel checker zoomed out to about an eighth (7.5 pixels of A to one output
+    // pixel, so the samples drift across its texels), over a transparent B, unblurred.
+    // Its box-filtered reference is 0.5 everywhere; sampled without prefiltering it
+    // would swing between 0 and 1.
+    let size = (256u32, 128u32);
+    let checker: Vec<[f32; 4]> = (0..size.0 * size.1)
+        .map(|i| {
+            let v = ((i % size.0 + i / size.0) % 2) as f32;
+            [v, v, v, 1.0]
+        })
+        .collect();
+    let clear = vec![[0.0; 4]; checker.len()];
+    let (t, shrink) = (0.75, 7.5f64);
+    let zoom = shrink.powf(1.0 / t);
+    let node = TransitionNode::new(transition("zoom"), t, Easing::Linear)
+        .value("mode", &choice("out"))
+        .value("zoom", &number(zoom))
+        .value("blur", &number(0.0));
+    let out = run_at(&gpu, size, &checker, &clear, node);
+    // A fades out over B by a smoothstep.
+    let left = 1.0 - t * t * (3.0 - 2.0 * t);
+    // The inside of A's footprint, two pixels in from its edges.
+    let half = [
+        f64::from(size.0) / 2.0 / shrink - 2.0,
+        f64::from(size.1) / 2.0 / shrink - 2.0,
+    ];
+    let mut errors = Vec::new();
+    for y in 0..size.1 {
+        for x in 0..size.0 {
+            let d = [
+                f64::from(x) + 0.5 - f64::from(size.0) / 2.0,
+                f64::from(y) + 0.5 - f64::from(size.1) / 2.0,
+            ];
+            if d[0].abs() < half[0] && d[1].abs() < half[1] {
+                let px = out[(y * size.0 + x) as usize];
+                let level = f64::from(px[0]) / left;
+                assert!(
+                    (f64::from(px[3]) / left - 1.0).abs() < 0.01,
+                    "({x}, {y}) alpha {}",
+                    px[3]
+                );
+                errors.push(level - 0.5);
+            }
+        }
+    }
+    let rms = (errors.iter().map(|e| e * e).sum::<f64>() / errors.len() as f64).sqrt();
+    let worst = errors.iter().fold(0.0f64, |m, e| m.max(e.abs()));
+    println!(
+        "zoom out to 1/{shrink}: {} pixels, rms {rms:.4}, worst {worst:.4} from the box-filtered 0.5",
+        errors.len()
+    );
+    assert!(errors.len() > 300, "{} pixels", errors.len());
+    assert!(rms < 0.02 && worst < 0.06, "rms {rms}, worst {worst}");
+}
+
+/// GPU time of each motion transition at 4K over noise with its defaults, from the
+/// node's timestamps (spanning all its passes) over 30 frames across the transition,
+/// held to 3 ms by the shared timing rules (`common::timing`). The blurred ones (whip
+/// pan, zoom) also print their cost half way by `samples`.
 #[test]
 fn motion_transitions_at_4k_gpu_time() {
+    let _serial = common::timing::serial();
     let Some(gpu) = gpu() else {
         eprintln!("skipped: no GPU adapter");
         return;
@@ -564,15 +644,14 @@ fn motion_transitions_at_4k_gpu_time() {
     let target = common::blank(&gpu.device, wgpu::TextureFormat::Rgba16Float, (3840, 2160));
     let target_view = target.create_view(&Default::default());
     let mut pool = TexturePool::new();
-    let mut slowest = (0.0f64, "");
-    let mut blurred = (0.0f64, "");
+    let mut measured = Vec::new();
     for id in IDS {
+        let t = transition(id);
         let mut times = Vec::new();
         for frame in 0..32u32 {
             let mut g = Graph::new();
             let (ia, ib) = (g.import("a", &va), g.import("b", &vb));
-            let node =
-                TransitionNode::new(transition(id), f64::from(frame) / 31.0, Easing::EaseInOut);
+            let node = TransitionNode::new(t.clone(), f64::from(frame) / 31.0, Easing::EaseInOut);
             let out = g.add(node, &[ia, ib]);
             g.export(out.out(0), &target_view);
             g.compile()
@@ -584,32 +663,22 @@ fn motion_transitions_at_4k_gpu_time() {
                 times.extend(timings.passes[0].gpu_ms);
             }
         }
-        times.sort_by(f64::total_cmp);
-        let median = times[times.len() / 2];
-        let max = times[times.len() - 1];
-        println!("4K {id}: median {median:.3} ms, max {max:.3} ms GPU");
-        let worst = if ["whip-pan", "zoom"].contains(&id) {
-            &mut blurred
-        } else {
-            &mut slowest
-        };
-        if median > worst.0 {
-            *worst = (median, id);
-        }
+        let times = common::timing::Samples::new(times);
+        println!("4K {id} GPU: {times}");
+        measured.push((id, times));
     }
-    println!("slowest: {} at {:.3} ms", slowest.1, slowest.0);
-    println!("slowest blurred: {} at {:.3} ms", blurred.1, blurred.0);
-    // The blurred ones by tap count, at their fastest (half way), for the record.
+    // The blurred ones by `samples`, half way, for the record.
     for (id, counts) in [
         ("whip-pan", [4.0, 8.0, 16.0, 32.0]),
         ("zoom", [3.0, 6.0, 12.0, 24.0]),
     ] {
+        let t = transition(id);
         for samples in counts {
             let mut times = Vec::new();
             for frame in 0..12u32 {
                 let mut g = Graph::new();
                 let (ia, ib) = (g.import("a", &va), g.import("b", &vb));
-                let node = TransitionNode::new(transition(id), 0.5, Easing::Linear)
+                let node = TransitionNode::new(t.clone(), 0.5, Easing::Linear)
                     .value("samples", &number(samples));
                 let out = g.add(node, &[ia, ib]);
                 g.export(out.out(0), &target_view);
@@ -623,14 +692,12 @@ fn motion_transitions_at_4k_gpu_time() {
                     times.extend(timings.passes[0].gpu_ms);
                 }
             }
-            times.sort_by(f64::total_cmp);
-            println!(
-                "4K {id} half way, {samples} samples: median {:.3} ms",
-                times[times.len() / 2]
-            );
+            let times = common::timing::Samples::new(times);
+            println!("4K {id} half way, {samples} samples GPU: {times}");
         }
     }
-    // The motion budget, loose for a shared GPU.
-    assert!(slowest.0 < 3.0, "{} {} ms", slowest.1, slowest.0);
-    assert!(blurred.0 < 8.0, "{} {} ms", blurred.1, blurred.0);
+    for (id, times) in &measured {
+        // The motion budget: under half the 8 ms compositor budget.
+        common::timing::assert_gpu_within(&format!("4K {id}"), times, 3.0);
+    }
 }

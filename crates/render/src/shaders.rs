@@ -12,8 +12,9 @@
 //!
 //! Shaders outside that folder (transitions, from `assets/transitions/`) are added at
 //! run time with [`ShaderLibrary::add_external`]: each is compiled after `common.wgsl`
-//! and a prelude from the folder, and in debug builds its file is watched too. An
-//! edited prelude reports every external shader built on it as changed.
+//! and a prelude from the folder, must define the fragment entry points it was added
+//! with, and in debug builds its file is watched too. An edited prelude reports every
+//! external shader built on it as changed.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -67,21 +68,21 @@ pub fn validate(name: &str, source: &str) -> Result<(), ShaderError> {
     parse(name, source).map(|_| ())
 }
 
-/// [`validate`], and checks the shader has the fragment entry point `fs`, which every
-/// external shader must define.
-pub fn validate_external(name: &str, source: &str) -> Result<(), ShaderError> {
+/// [`validate`], and checks the shader defines every fragment entry point in `entries`
+/// (a transition's `fs` and the entry points of its extra passes).
+pub fn validate_external(name: &str, source: &str, entries: &[&str]) -> Result<(), ShaderError> {
     let module = parse(name, source)?;
-    if module
-        .entry_points
-        .iter()
-        .any(|e| e.name == "fs" && e.stage == naga::ShaderStage::Fragment)
-    {
-        Ok(())
-    } else {
-        Err(ShaderError::Invalid {
+    match entries.iter().find(|entry| {
+        !module
+            .entry_points
+            .iter()
+            .any(|e| e.name == **entry && e.stage == naga::ShaderStage::Fragment)
+    }) {
+        None => Ok(()),
+        Some(missing) => Err(ShaderError::Invalid {
             name: name.to_owned(),
-            message: "there is no `@fragment fn fs`".to_owned(),
-        })
+            message: format!("there is no `@fragment fn {missing}`"),
+        }),
     }
 }
 
@@ -114,6 +115,9 @@ struct External {
     prelude: &'static str,
     /// The file, canonical, when it is on disk (watched in debug builds).
     path: Option<PathBuf>,
+    /// The fragment entry points every source must define (an edit without one is kept
+    /// out like any invalid edit).
+    entries: Vec<&'static str>,
 }
 
 type Sources = Arc<Mutex<HashMap<String, String>>>;
@@ -165,15 +169,16 @@ impl ShaderLibrary {
     }
 
     /// Adds (or replaces) the shader `name`, compiled as `common.wgsl`, the embedded
-    /// shader `prelude`, then `source`. With a `path`, a watching library rereads that
-    /// file when it changes. Rejects a source that does not validate, keeping what was
-    /// there.
+    /// shader `prelude`, then `source`, which must define the fragment entry points
+    /// `entries`. With a `path`, a watching library rereads that file when it changes.
+    /// Rejects a source that does not validate, keeping what was there.
     pub fn add_external(
         &self,
         name: &str,
         prelude: &'static str,
         source: String,
         path: Option<PathBuf>,
+        entries: &[&'static str],
     ) -> Result<(), ShaderError> {
         {
             let mut sources = lock(&self.sources);
@@ -181,6 +186,7 @@ impl ShaderLibrary {
             validate_external(
                 name,
                 &compose_external(part("common"), part(prelude), &source),
+                entries,
             )?;
             sources.insert(name.to_owned(), source);
         }
@@ -190,6 +196,7 @@ impl ShaderLibrary {
             External {
                 prelude,
                 path: path.clone(),
+                entries: entries.to_vec(),
             },
         );
         #[cfg(debug_assertions)]
@@ -572,6 +579,7 @@ mod watch {
             Some(e) => validate_external(
                 other,
                 &compose_external(part("common"), part(e.prelude), part(other)),
+                &e.entries,
             ),
             None => validate(other, &compose(part("common"), part(other))),
         };
