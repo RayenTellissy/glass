@@ -5,7 +5,10 @@
 pub mod file_dialog;
 pub mod format;
 pub mod import;
+pub mod inspector;
 pub mod media_pool;
 pub mod metadata;
+pub mod placeholder;
+pub mod preview;
 pub mod timeline;
 pub mod widgets;
