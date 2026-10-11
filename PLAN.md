@@ -503,7 +503,7 @@ Done when: a new user can complete the first-run flow without external help and 
 | AI models bloat the binary | On-demand download, feature flags, quantised models |
 | Stale frames from cache invalidation bugs | Deterministic segment hashing, re-render counting test, visual regression suite |
 | Scope creep before v0.1 | Nothing from Phase 9 onward starts until the v0.1 checklist is green |
-| Too many parallel tasks overload the machine | Hard cap of 7 parallel tasks, one build at a time, 4 compiler jobs, serial benchmarks, drop to one task when the machine slows |
+| Too many parallel tasks overload the machine | Hard cap of 7 parallel tasks, one build at a time, 8 compiler jobs, serial benchmarks, drop to one task when the machine slows |
 | Long-running work drifts from the plan | Session loop above, one task at a time, every session starts by reading this file |
 
 ## Decision Log
