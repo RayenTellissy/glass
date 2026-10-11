@@ -65,4 +65,6 @@ pub use playback::{
     FormatChanged, FrameRender, PlaybackStats, Presented, PresentedFrame, TimelineConfig,
     TimelinePlayback, TimelineScrubRender,
 };
-pub use render::{PREVIEW_FORMAT, RenderStats, RenderedFrame, RendererConfig, TimelineRenderer};
+pub use render::{
+    FrameOutput, PREVIEW_FORMAT, RenderStats, RenderedFrame, RendererConfig, TimelineRenderer,
+};
