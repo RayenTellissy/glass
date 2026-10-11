@@ -401,7 +401,7 @@ Done when: a 16-track mix with effects and automation plays without dropouts at 
 - [ ] Loudness normalisation to platform targets
 - [ ] VST3 and AU hosting in a sandboxed helper process
 - [ ] Audio clip effects and keyframes on the timeline
-- [ ] Sample-accurate editing and crossfades
+- [~] Sample-accurate editing and crossfades
 - [ ] Voice-over recording to the timeline with punch and roll
 - [ ] Stereo and surround panning, downmix rules
 - [ ] Audio-only and stem export
