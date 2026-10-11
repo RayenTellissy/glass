@@ -289,7 +289,7 @@ Done when: the v0.1 checklist passes on both platforms and a tagged build ships 
 - [ ] Smart export: reuse cached rendered segments, stream-copy untouched ranges when the codec matches
 - [ ] Export in and out range, selected clips, stills
 - [ ] Subtitle export: burned in, sidecar SRT and VTT, embedded
-- [ ] Output verification: duration, frame count, loudness, then reveal in Finder or Explorer
+- [~] Output verification: duration, frame count, loudness, then reveal in Finder or Explorer
 - [ ] **v0.1 checklist:** import, play, cut, trim, 10 transitions, basic titles, export, both platforms, installers on tag
 
 ## Phase 9 — Built-in library (M4, v0.5)
