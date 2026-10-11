@@ -7,7 +7,8 @@
 #   --verify  probe every file with ffprobe and compare it with the manifest
 #
 # Output goes to tests/fixtures/generated/ (git-ignored), with MANIFEST.json listing
-# what each file is expected to contain.
+# what each file is expected to contain. Existing files whose recipe changed are
+# regenerated (see .recipes below).
 
 set -euo pipefail
 
@@ -18,7 +19,7 @@ for arg in "$@"; do
         --force) FORCE=1 ;;
         --verify) VERIFY=1 ;;
         -h | --help)
-            sed -n "2,11p" "$0" | sed "s/^# \{0,1\}//"
+            sed -n "2,12p" "$0" | sed "s/^# \{0,1\}//"
             exit 0
             ;;
         *)
@@ -67,6 +68,72 @@ GENERATED=0
 SKIPPED=0
 MANIFEST_ENTRIES=()
 VERIFY_JOBS=()
+
+# Recipes: .recipes beside the manifest records one hash per fixture of what made it (the
+# FFmpeg version plus the exact ffmpeg arguments, or the producing function's source, the
+# functions it calls and the variables it reads, plus the recipes of generated inputs). A
+# file whose recorded hash differs from the current recipe is stale and is regenerated, so
+# a changed recipe reaches worktrees that already have the old bytes.
+RECIPES="$OUT/.recipes"
+FFMPEG_VERSION="$("$FFMPEG" -version | head -n 1)"
+NEW_RECIPES=()
+STALE=()
+
+hash_lines() {
+    if command -v shasum >/dev/null 2>&1; then
+        printf "%s\n" "$@" | shasum -a 256 | cut -c 1-16
+    else
+        printf "%s\n" "$@" | sha256sum | cut -c 1-16
+    fi
+}
+
+# The recipe hash recorded for a key by this run (new) or the last one (old).
+new_recipe() {
+    local entry
+    for entry in ${NEW_RECIPES[@]+"${NEW_RECIPES[@]}"}; do
+        if [ "${entry%%$'\t'*}" = "$1" ]; then printf "%s" "${entry#*$'\t'}"; fi
+    done
+}
+old_recipe() {
+    if [ -f "$RECIPES" ]; then awk -F '\t' -v f="$1" '$1 == f { print $2 }' "$RECIPES"; fi
+}
+
+# input_recipes args...: the recipes of generated files the arguments read.
+input_recipes() {
+    local arg
+    for arg in "$@"; do
+        case "$arg" in "$OUT"/*) printf "%s=%s\n" "${arg#"$OUT"/}" "$(new_recipe "${arg#"$OUT"/}")" ;; esac
+    done
+}
+
+# function_recipe fn: the source of fn and of the functions it calls, and the values of
+# the upper-case variables they read (paths excluded: the FFmpeg version stands in).
+function_recipe() {
+    local body name
+    body="$(declare -f "$1")"
+    for name in $(printf "%s\n" "$body" | grep -o "[a-z_][a-z0-9_]*" | sort -u); do
+        if [ "$name" != "$1" ] && declare -F "$name" >/dev/null; then
+            body="$body"$'\n'"$(declare -f "$name")"
+        fi
+    done
+    printf "%s\n" "$body"
+    for name in $(printf "%s\n" "$body" | grep -o "\${\{0,1\}[A-Z_][A-Z0-9_]*" | tr -d '${' | sort -u); do
+        case "$name" in OUT | FFMPEG | FFPROBE) ;; *) printf "%s=%s\n" "$name" "${!name-}" ;; esac
+    done
+}
+
+# up_to_date key hash: records hash for key and succeeds when the file exists, --force is
+# off and its last recipe was the same; otherwise an existing file is reported as stale.
+up_to_date() {
+    local key=$1 hash=$2 old
+    NEW_RECIPES+=("$key"$'\t'"$hash")
+    if [ ! -e "$OUT/${key%/}" ] || [ "$FORCE" -eq 1 ]; then return 1; fi
+    old="$(old_recipe "$key")"
+    if [ "$old" = "$hash" ]; then return 0; fi
+    STALE+=("$key")
+    printf "  stale %s (%s)\n" "$key" "$([ -n "$old" ] && echo "recipe changed" || echo "no recipe recorded")"
+    return 1
+}
 
 json_or_null() {
     if [ "$1" = "null" ]; then echo "null"; else echo "\"$1\""; fi
@@ -120,7 +187,7 @@ make() {
     local file=$1
     shift
     local target="$OUT/$file"
-    if [ -e "$target" ] && [ "$FORCE" -eq 0 ]; then
+    if up_to_date "$file" "$(hash_lines "$FFMPEG_VERSION" "$@" "$(input_recipes "$@")")"; then
         SKIPPED=$((SKIPPED + 1))
         printf "  skip  %s\n" "$file"
         return
@@ -266,45 +333,6 @@ make still_1080p.jpg \
     -f lavfi -i "testsrc2=size=1920x1080" -frames:v 1 -pix_fmt yuvj420p -q:v 3
 add_entry still_1080p.jpg image mjpeg 1920 1080 null null yuvj420p false 1 null null null
 
-# Rotation and timecode: a portrait phone clip stores landscape pixels plus a display
-# matrix, and camera files carry a start timecode (here a QuickTime tmcd track). Written
-# in two passes because -display_rotation applies to an input and is kept by stream copy.
-ROT_FILE="rotated_timecode_h264_640x360_25.mov"
-if [ -e "$OUT/$ROT_FILE" ] && [ "$FORCE" -eq 0 ]; then
-    SKIPPED=$((SKIPPED + 1))
-    printf "  skip  %s\n" "$ROT_FILE"
-else
-    ROT_TMP="$OUT/.partial-unrotated-$ROT_FILE"
-    "$FFMPEG" -hide_banner -loglevel error -nostdin -y \
-        -f lavfi -i "testsrc2=size=640x360:rate=25:duration=1" \
-        -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p -g 25 -f mov "$ROT_TMP"
-    "$FFMPEG" -hide_banner -loglevel error -nostdin -y \
-        -display_rotation 90 -i "$ROT_TMP" -c copy -timecode 01:02:03:04 \
-        -movflags +faststart -f mov "$OUT/.partial-$ROT_FILE"
-    rm -f "$ROT_TMP"
-    mv -f "$OUT/.partial-$ROT_FILE" "$OUT/$ROT_FILE"
-    GENERATED=$((GENERATED + 1))
-    printf "  made  %s\n" "$ROT_FILE"
-fi
-add_entry "$ROT_FILE" video h264 640 360 25/1 1 yuv420p false null null null null 90 01:02:03:04
-
-SEQ_DIR="sequence_640x360_24"
-if [ -d "$OUT/$SEQ_DIR" ] && [ "$FORCE" -eq 0 ]; then
-    SKIPPED=$((SKIPPED + 1))
-    printf "  skip  %s/\n" "$SEQ_DIR"
-else
-    rm -rf "${OUT:?}/.partial-$SEQ_DIR"
-    mkdir -p "$OUT/.partial-$SEQ_DIR"
-    "$FFMPEG" -hide_banner -loglevel error -nostdin -y \
-        -f lavfi -i "testsrc2=size=640x360:rate=24:duration=2" \
-        -pix_fmt rgb24 -start_number 1 "$OUT/.partial-$SEQ_DIR/frame_%04d.png"
-    rm -rf "${OUT:?}/$SEQ_DIR"
-    mv "$OUT/.partial-$SEQ_DIR" "$OUT/$SEQ_DIR"
-    GENERATED=$((GENERATED + 1))
-    printf "  made  %s/\n" "$SEQ_DIR"
-fi
-add_entry "$SEQ_DIR/frame_%04d.png" image_sequence png 640 360 24/1 2 rgb24 false 48 null null null
-
 # produce file function [args...]: runs `function tmp_path args...` to write the file (or,
 # when the name ends in "/", a directory) under a temporary name and renames it on success.
 produce() {
@@ -312,7 +340,7 @@ produce() {
     shift 2
     local name=${file%/}
     local target="$OUT/$name"
-    if [ -e "$target" ] && [ "$FORCE" -eq 0 ]; then
+    if up_to_date "$file" "$(hash_lines "$FFMPEG_VERSION" "$(function_recipe "$fn")" "$@" "$(input_recipes "$@")")"; then
         SKIPPED=$((SKIPPED + 1))
         printf "  skip  %s\n" "$file"
         return
@@ -331,6 +359,30 @@ ffmpeg_to() {
     shift
     "$FFMPEG" -hide_banner -loglevel error -nostdin -y "$@" "$out"
 }
+
+# Rotation and timecode: a portrait phone clip stores landscape pixels plus a display
+# matrix, and camera files carry a start timecode (here a QuickTime tmcd track). Written
+# in two passes because -display_rotation applies to an input and is kept by stream copy.
+ROT_FILE="rotated_timecode_h264_640x360_25.mov"
+rotated_timecode() {
+    local out=$1 plain="$1.plain.mov"
+    ffmpeg_to "$plain" -f lavfi -i "testsrc2=size=640x360:rate=25:duration=1" \
+        -c:v libx264 -x264-params threads=16 -preset veryfast -pix_fmt yuv420p -g 25 -f mov
+    ffmpeg_to "$out" -display_rotation 90 -i "$plain" -c copy -timecode 01:02:03:04 \
+        -movflags +faststart -f mov
+    rm -f "$plain"
+}
+produce "$ROT_FILE" rotated_timecode
+add_entry "$ROT_FILE" video h264 640 360 25/1 1 yuv420p false null null null null 90 01:02:03:04
+
+SEQ_DIR="sequence_640x360_24"
+png_sequence() {
+    mkdir -p "$1"
+    ffmpeg_to "$1/frame_%04d.png" -f lavfi -i "testsrc2=size=640x360:rate=24:duration=2" \
+        -pix_fmt rgb24 -start_number 1
+}
+produce "$SEQ_DIR/" png_sequence
+add_entry "$SEQ_DIR/frame_%04d.png" image_sequence png 640 360 24/1 2 rgb24 false 48 null null null
 
 # Stills, animations and sequences for media::source. Solid frames of known colour make
 # pixel spot checks exact; a red top-left block shows orientation.
@@ -681,11 +733,16 @@ TAG_CHECKS+=("$TAGGED_MP4|location|+35.6586+139.7454/" "$TAGGED_MP4|date|2026-08
     echo "  ]"
     echo "}"
 } >"$OUT/MANIFEST.json"
+printf "%s\n" ${NEW_RECIPES[@]+"${NEW_RECIPES[@]}"} >"$RECIPES.partial"
+mv -f "$RECIPES.partial" "$RECIPES"
 
 ELAPSED=$((SECONDS - START_SECONDS))
 TOTAL_KB=$(du -sk "$OUT" | cut -f1)
 echo "Summary: $GENERATED generated, $SKIPPED skipped, ${#MANIFEST_ENTRIES[@]} manifest entries," \
     "$((TOTAL_KB / 1024)) MB total, ${ELAPSED}s"
+if [ "${#STALE[@]}" -gt 0 ]; then
+    echo "Stale: ${#STALE[@]} fixture(s) regenerated for a changed or unrecorded recipe: ${STALE[*]}"
+fi
 if [ "$MISSING" -gt 0 ]; then
     echo "Missing encoders: $MISSING fixture(s) not made; their tests skip (see the notes above)"
 fi
@@ -806,6 +863,16 @@ for check in "${TAG_CHECKS[@]}"; do
     check_eq "$file" "tag $key" "$got" "$value"
 done
 # --- End of camera metadata fixtures -------------------------------------------------
+
+# Stale fixtures were regenerated above: list them, and check that every fixture made or
+# kept by this run has its recipe recorded.
+if [ "${#STALE[@]}" -gt 0 ]; then
+    for file in "${STALE[@]}"; do printf "  stale %s (regenerated)\n" "$file"; done
+fi
+for entry in ${NEW_RECIPES[@]+"${NEW_RECIPES[@]}"}; do
+    key="${entry%%$'\t'*}"
+    if [ "$(old_recipe "$key")" != "${entry#*$'\t'}" ]; then fail "$key" "recipe not recorded in .recipes"; fi
+done
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "Verification failed: $FAILURES problem(s)"
