@@ -10,10 +10,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use project::params::{ParamDef, ParamSchema, ParamValue, Range, effects};
 use project::schema::{self, LoadError, OLDEST_VERSION, SCHEMA_VERSION};
 use project::{
-    ClipSpec, ColourLabel, MarkerOwner, MarkerSpec, MediaId, Project, Rational, Time, TimeRange,
-    TodoState, TrackKind,
+    BlendMode, Clip, ClipSpec, ColourLabel, Crop, MarkerOwner, MarkerSpec, MediaId, Project,
+    Rational, SpeedKeep, Time, TimeRange, TodoState, TrackKind, Transform,
 };
 use serde_json::Value;
 
@@ -123,11 +124,95 @@ fn tracks() -> Project {
     p
 }
 
+/// A third-party effect this build has no schema for in `params::effects`.
+fn glow() -> ParamSchema {
+    ParamSchema::new(
+        "acme.glow",
+        "acme.glow",
+        vec![ParamDef::float(
+            "radius",
+            "acme.glow.radius",
+            8.0,
+            Range::new(0.0, 100.0),
+        )],
+    )
+}
+
+/// The project in every `*-props.json` fixture (from v4): clips with every property away
+/// from its default, and effect stacks.
+fn props() -> Project {
+    let p = Project::new("fixture-props", "Ferry crossing");
+    let (p, a) = p.add_media("1f2e3d", "/footage/ferry.mov").expect("media");
+    let (p, seq) = p.add_sequence("Crossing", FPS, 48_000).expect("sequence");
+    let (p, v1) = p.add_track(seq, TrackKind::Video, "V1", None).expect("v1");
+    let (p, a1) = p.add_track(seq, TrackKind::Audio, "A1", None).expect("a1");
+    let (p, wide) = p
+        .insert_clip(v1, clip(a, Time::ZERO, frames(50), Time::seconds(1)))
+        .expect("clip");
+    let (p, close) = p
+        .insert_clip(v1, clip(a, frames(110), frames(25), Time::seconds(9)))
+        .expect("clip");
+    let (p, sound) = p
+        .insert_clip(a1, clip(a, Time::ZERO, Time::seconds(2), Time::seconds(1)))
+        .expect("clip");
+    let p = p
+        .set_clip_speed(wide, Rational::new(1, 2), SpeedKeep::Source)
+        .expect("speed");
+    let p = p
+        .set_clip_transform(
+            wide,
+            Transform {
+                position: [-120.5, 64.0],
+                scale: [1.25, -1.25],
+                rotation: 12.5,
+                anchor: [8.0, -4.0],
+            },
+        )
+        .expect("transform");
+    let p = p
+        .set_clip_crop(
+            wide,
+            Crop {
+                left: 32.0,
+                top: 0.0,
+                right: 32.0,
+                bottom: 18.0,
+                feather: 6.0,
+            },
+        )
+        .expect("crop");
+    let p = p.set_clip_opacity(wide, 0.75).expect("opacity");
+    let p = p.set_clip_blend(wide, BlendMode::Screen).expect("blend");
+    let lut = effects::lut();
+    let (p, grade) = p.add_effect(wide, &lut, None).expect("lut");
+    let p = p
+        .set_effect_param(
+            grade,
+            &lut,
+            "file",
+            ParamValue::Text("/luts/ferry.cube".into()),
+        )
+        .expect("file");
+    let p = p
+        .set_effect_param(grade, &lut, "intensity", ParamValue::Float(0.6))
+        .expect("intensity");
+    let (p, halo) = p.add_effect(wide, &glow(), Some(0)).expect("glow");
+    let p = p.set_effect_enabled(halo, false).expect("disable");
+    let p = p
+        .set_clip_speed(close, Rational::new(3, 2), SpeedKeep::Timeline)
+        .expect("speed");
+    let p = p.set_clip_enabled(close, false).expect("disable");
+    let p = p.set_clip_gain(sound, -6.5).expect("gain");
+    p.slip_clip(sound, Time::new(3, 2).expect("time"))
+        .expect("slip")
+}
+
 /// The project each fixture name was saved from.
 fn builder(name: &str) -> Project {
     match name {
         "basic" => basic(),
         "tracks" => tracks(),
+        "props" => props(),
         other => panic!("no builder for {other} fixtures"),
     }
 }
@@ -184,7 +269,7 @@ fn every_version_has_fixtures_and_their_versions_match_the_names() {
 
 #[test]
 fn the_current_version_fixtures_are_what_save_writes() {
-    for name in ["basic", "tracks"] {
+    for name in ["basic", "tracks", "props"] {
         let bytes = schema::save(&builder(name));
         let path = fixtures_dir().join(format!("v{SCHEMA_VERSION}-{name}.json"));
         if std::env::var_os("GLASS_UPDATE_FIXTURES").is_some() {
@@ -258,7 +343,105 @@ fn v2_gains_empty_marker_lists() {
     let loaded = schema::load(&read(&path)).expect("loads");
     assert!(loaded.content_eq(&basic()));
     let saved: Value = serde_json::from_slice(&schema::save(&loaded)).expect("JSON");
-    assert_eq!(saved["schema_version"], Value::from(3));
+    assert_eq!(saved["schema_version"], Value::from(SCHEMA_VERSION));
+}
+
+#[test]
+fn v3_clips_gain_their_default_properties() {
+    for name in ["basic", "tracks"] {
+        let path = fixtures_dir().join(format!("v3-{name}.json"));
+        let v3: Value = serde_json::from_slice(&read(&path)).expect("JSON");
+        let loaded = schema::load(&read(&path)).expect("loads");
+        assert_eq!(
+            loaded.next_id(),
+            v3["project"]["next_id"].as_u64().expect("next id")
+        );
+        let mut clips = 0;
+        for track in &loaded.sequences()[0].tracks {
+            for item in &track.items {
+                if let Some(clip) = item.clip() {
+                    let defaults = Clip {
+                        markers: clip.markers.clone(),
+                        ..Clip::new(clip.media, clip.source_start)
+                    };
+                    assert_eq!(*clip, defaults, "{name}: item {}", item.id);
+                    clips += 1;
+                }
+            }
+        }
+        assert!(clips >= 2, "{name}");
+        assert!(loaded.content_eq(&builder(name)));
+    }
+}
+
+#[test]
+fn the_props_fixture_round_trips_every_clip_property() {
+    let p = props();
+    let bytes = schema::save(&p);
+    let loaded = schema::load(&bytes).expect("loads");
+    assert!(loaded.content_eq(&p));
+    assert_eq!(schema::save(&loaded), bytes);
+    let seq = &loaded.sequences()[0];
+    let wide = seq.tracks[0].items[0].clip().expect("clip");
+    assert_eq!(wide.speed.constant_speed(), Some(Rational::new(1, 2)));
+    assert_eq!(seq.tracks[0].items[0].range.duration, frames(100));
+    assert_eq!(wide.blend, BlendMode::Screen);
+    let schemas: Vec<_> = wide.effects.iter().map(|e| e.schema.as_str()).collect();
+    assert_eq!(schemas, ["acme.glow", "lut"]);
+    assert!(!wide.effects[0].enabled);
+    let lut = effects::lut();
+    assert_eq!(wide.effects[1].params.float(&lut, "intensity"), Some(0.6));
+    let json: Value = serde_json::from_slice(&bytes).expect("JSON");
+    let item = &json["project"]["sequences"][0]["tracks"][0]["items"][0];
+    assert_eq!(item["blend"], "screen");
+    assert_eq!(
+        item["speed"]["keys"][0]["speed"],
+        serde_json::json!({ "num": 1, "den": 2 })
+    );
+    let close = seq.tracks[0].items[1].clip().expect("clip");
+    assert!(!close.enabled);
+    let sound = seq.tracks[1].items[0].clip().expect("clip");
+    assert_eq!(sound.gain_db, -6.5);
+    assert_eq!(sound.source_start, Time::new(3, 2).expect("time"));
+}
+
+#[test]
+fn clip_properties_out_of_range_are_refused_on_load() {
+    let bytes = read(&fixtures_dir().join(format!("v{SCHEMA_VERSION}-props.json")));
+    let cases: [(&str, Value); 7] = [
+        ("opacity", Value::from(1.5)),
+        ("gain_db", Value::from(30.0)),
+        ("blend", Value::from("dissolve")),
+        (
+            "speed",
+            serde_json::json!({ "keys": [{ "source_time": "0", "speed": { "num": 0, "den": 1 } }] }),
+        ),
+        (
+            "speed",
+            serde_json::json!({ "keys": [{ "source_time": "0", "speed": { "num": 2, "den": 4 } }] }),
+        ),
+        (
+            "speed",
+            serde_json::json!({ "keys": [{ "source_time": "1", "speed": { "num": 1, "den": 1 } }] }),
+        ),
+        ("speed", serde_json::json!({ "keys": [] })),
+    ];
+    for (key, value) in cases {
+        let mut json: Value = serde_json::from_slice(&bytes).expect("JSON");
+        json["project"]["sequences"][0]["tracks"][0]["items"][0][key] = value.clone();
+        let err = schema::load(&serde_json::to_vec(&json).expect("JSON")).expect_err("refused");
+        assert!(
+            matches!(err, LoadError::Invalid(_) | LoadError::Model { .. }),
+            "{key} = {value}: {err:?}"
+        );
+        assert_eq!(err.i18n_key(), "project.open_error.damaged");
+    }
+    // Two effects with one id.
+    let mut json: Value = serde_json::from_slice(&bytes).expect("JSON");
+    let effects = &mut json["project"]["sequences"][0]["tracks"][0]["items"][0]["effects"];
+    effects[1]["id"] = effects[0]["id"].clone();
+    let err = schema::load(&serde_json::to_vec(&json).expect("JSON")).expect_err("refused");
+    assert!(matches!(err, LoadError::Invalid(_)), "{err:?}");
 }
 
 #[test]

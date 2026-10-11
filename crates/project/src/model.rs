@@ -15,7 +15,9 @@ use std::sync::Arc;
 use imbl::{OrdMap, Vector};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::id::{ItemId, MarkerId, MediaId, SequenceId, TrackId};
+use crate::clip::{BlendMode, Crop, Effect, SpeedMap, Transform};
+use crate::error::EditError;
+use crate::id::{EffectId, ItemId, MarkerId, MediaId, SequenceId, TrackId};
 use crate::marker::Marker;
 use crate::time::{Rational, Time, TimeError, TimeRange};
 
@@ -350,6 +352,9 @@ pub struct Item {
     pub kind: ItemKind,
 }
 
+// Every item is its own `Arc` node, so the enum is never stored by value in a collection;
+// boxing the clip would only add a second allocation per clip.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ItemKind {
@@ -378,26 +383,69 @@ impl Item {
     }
 }
 
-/// A piece of a source file placed on a track. The clip properties (speed map, effect
-/// stack, transform, gain, enabled flag) join it in a later schema version.
+/// A piece of a source file placed on a track, with its properties (schema v4; see
+/// [`crate::clip`] for how they relate and the edits that set them).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Clip {
     pub media: MediaId,
     /// Source time (seconds from the start of the file) shown at the item's start.
     pub source_start: Time,
+    /// How fast the source plays: the source duration is the timeline duration times the
+    /// speed.
+    pub speed: SpeedMap,
+    /// A disabled clip keeps its place but shows and plays nothing.
+    pub enabled: bool,
+    /// Audio gain in dB (clips on audio tracks).
+    pub gain_db: f64,
+    /// Placement on the canvas (clips on video tracks, as are the crop, opacity, blend mode
+    /// and effects).
+    pub transform: Transform,
+    pub crop: Crop,
+    /// 0 to 1.
+    pub opacity: f64,
+    pub blend: BlendMode,
+    /// The effect stack, applied first to last.
+    pub effects: Vector<Arc<Effect>>,
     /// Markers on the clip in source time, so they stay on their frame when the clip is
     /// trimmed or moved; ordered by start then id (schema v3).
     pub markers: Vector<Arc<Marker>>,
 }
 
 impl Clip {
-    /// The source span an item with timeline `range` shows (speed 1).
-    pub fn source_range(&self, range: TimeRange) -> TimeRange {
-        TimeRange::new(self.source_start, range.duration)
+    /// A clip of `media` from `source_start` with every property at its default: speed 1,
+    /// enabled, 0 dB, centred at 100%, uncropped, opaque, normal blend, no effects, no
+    /// markers.
+    pub fn new(media: MediaId, source_start: Time) -> Self {
+        Self {
+            media,
+            source_start,
+            speed: SpeedMap::default(),
+            enabled: true,
+            gain_db: 0.0,
+            transform: Transform::IDENTITY,
+            crop: Crop::NONE,
+            opacity: 1.0,
+            blend: BlendMode::Normal,
+            effects: Vector::new(),
+            markers: Vector::new(),
+        }
+    }
+
+    /// The source span an item with timeline `range` shows: from `source_start`, for the
+    /// timeline duration times the speed.
+    pub fn source_range(&self, range: TimeRange) -> Result<TimeRange, EditError> {
+        Ok(TimeRange::new(
+            self.source_start,
+            self.speed.source_duration(range.duration)?,
+        ))
     }
 
     pub fn marker(&self, id: MarkerId) -> Option<&Arc<Marker>> {
         self.markers.iter().find(|m| m.id == id)
+    }
+
+    pub fn effect(&self, id: EffectId) -> Option<&Arc<Effect>> {
+        self.effects.iter().find(|e| e.id == id)
     }
 }
 

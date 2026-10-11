@@ -1,27 +1,32 @@
 // Vector shapes (render::shape). Outlines become exact box-filtered coverage by
-// signed-area accumulation: each edge draws a quad from itself to the right edge of its
-// outline's box in the accumulation atlas, adding, per pixel, the edge's height within
-// the pixel's row times the mean fraction of the pixel lying right of the edge (additive
-// blending). The sum is the integral of the winding number over the pixel; the fill rule
-// turns it into coverage. Paint then samples the atlas and draws source-over, in order,
-// premultiplied linear light. Rust mirror: render::shape::node (Item, Seg, Stop layout).
+// signed-area accumulation: each edge adds, per pixel, its height within the pixel's row
+// times the mean fraction of the pixel lying right of it (additive blending into the
+// accumulation atlas). The sum is the integral of the winding number over the pixel; the
+// fill rule turns it into coverage. The CPU bins outlines into bands of 4 rows
+// (render::shape::strips): an edge's quad runs only to the end of the columns edges
+// cross in its band, and what the edges left of a piece add to every pixel right of
+// them comes with the paint piece as a carry per row. Paint adds the carry to the atlas
+// in those columns, uses the carry alone in the gaps between them, and draws
+// source-over, in order, premultiplied linear light. Rust mirror: render::shape::node
+// (Item, Piece, Stop layout).
 
 struct Globals {
     canvas: vec2<f32>,
     atlas: vec2<f32>,
-    rule: u32,
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
 }
 
-// One edge, in its outline's box coordinates (pixels from the box's top left).
-struct Seg {
-    p: vec4<f32>,
+// One quad of a pass over columns rect.x..rect.z and rows rect.y..rect.w of its item's
+// box (pixels from the box's top left).
+struct Piece {
+    rect: vec4<f32>,
+    // Accumulate: the edge's end points, in box coordinates. Paint: the winding integral
+    // carried in from the left, per canvas row modulo 4.
+    data: vec4<f32>,
     item: u32,
+    // Paint: 0 coverage from the carry alone, 1 the carry plus the accumulation.
+    kind: u32,
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
 }
 
 struct Item {
@@ -54,7 +59,7 @@ struct Stop {
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
-@group(0) @binding(1) var<storage, read> segs: array<Seg>;
+@group(0) @binding(1) var<storage, read> pieces: array<Piece>;
 @group(0) @binding(2) var<storage, read> items: array<Item>;
 @group(0) @binding(3) var<storage, read> stops: array<Stop>;
 @group(0) @binding(4) var acc0: texture_2d<f32>;
@@ -86,23 +91,15 @@ struct AccOut {
     @location(1) @interpolate(flat) origin: vec2<f32>,
 }
 
+// An edge's strip in one band: from its leftmost column to the end of its interval.
 @vertex
 fn vs_accumulate(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> AccOut {
-    let s = segs[ii];
-    let item = items[s.item];
-    let size = item.rect.zw;
-    let lo = vec2<f32>(
-        clamp(floor(min(s.p.x, s.p.z)), 0.0, size.x),
-        clamp(floor(min(s.p.y, s.p.w)), 0.0, size.y),
-    );
-    let hi = vec2<f32>(size.x, clamp(ceil(max(s.p.y, s.p.w)), 0.0, size.y));
-    var local = mix(lo, hi, quad_corner(vi));
-    if hi.y <= lo.y || hi.x <= lo.x {
-        local = lo;
-    }
+    let piece = pieces[ii];
+    let item = items[piece.item];
+    let local = mix(piece.rect.xy, piece.rect.zw, quad_corner(vi));
     var o: AccOut;
     o.pos = to_clip(item.atlas + local, globals.atlas);
-    o.seg = s.p;
+    o.seg = piece.data;
     o.origin = item.atlas;
     return o;
 }
@@ -183,29 +180,42 @@ fn paint(item: Item, pos: vec2<f32>) -> vec4<f32> {
 
 struct PaintOut {
     @builtin(position) pos: vec4<f32>,
-    @location(0) @interpolate(flat) item: u32,
+    @location(0) @interpolate(flat) piece: u32,
 }
 
 @vertex
 fn vs_paint(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> PaintOut {
-    let item = items[ii];
+    let piece = pieces[ii];
+    let item = items[piece.item];
+    let local = mix(piece.rect.xy, piece.rect.zw, quad_corner(vi));
     var o: PaintOut;
-    o.pos = to_clip(item.rect.xy + item.rect.zw * quad_corner(vi), globals.canvas);
-    o.item = ii;
+    o.pos = to_clip(item.rect.xy + local, globals.canvas);
+    o.piece = ii;
     return o;
+}
+
+// Coverage at canvas pixel `pos`: the carry of its row, plus the accumulation inside an
+// interval.
+fn piece_coverage(piece: Piece, item: Item, pos: vec2<f32>) -> f32 {
+    var a = piece.data[u32(pos.y) & 3u];
+    if piece.kind == 1u {
+        let texel = vec2<i32>(floor(pos) - item.rect.xy + item.atlas);
+        a += load_acc(item.rule >> 8u, texel);
+    }
+    return coverage(a, item.rule & 0xffu);
 }
 
 @fragment
 fn fs_paint(in: PaintOut) -> @location(0) vec4<f32> {
-    let item = items[in.item];
-    let texel = vec2<i32>(floor(in.pos.xy) - item.rect.xy + item.atlas);
-    let cov = coverage(load_acc(item.rule >> 8u, texel), item.rule & 0xffu);
-    return paint(item, in.pos.xy) * cov;
+    let piece = pieces[in.piece];
+    let item = items[piece.item];
+    return paint(item, in.pos.xy) * piece_coverage(piece, item, in.pos.xy);
 }
 
-// One outline's coverage over the whole canvas (the accumulation is canvas-sized).
+// One outline's coverage (the accumulation is canvas-sized, the box at its own place).
 @fragment
-fn fs_resolve(in: VsOut) -> @location(0) vec4<f32> {
-    let cov = coverage(load_acc(0u, vec2<i32>(in.pos.xy)), globals.rule);
+fn fs_cover(in: PaintOut) -> @location(0) vec4<f32> {
+    let piece = pieces[in.piece];
+    let cov = piece_coverage(piece, items[piece.item], in.pos.xy);
     return vec4<f32>(cov, 0.0, 0.0, 1.0);
 }

@@ -1,8 +1,8 @@
 //! Typed errors for edit operations.
 
-use crate::id::{ItemId, MarkerId, MediaId, SequenceId, TrackId};
+use crate::id::{EffectId, ItemId, MarkerId, MediaId, SequenceId, TrackId};
 use crate::model::TrackKind;
-use crate::time::{Time, TimeError};
+use crate::time::{Rational, Time, TimeError};
 
 /// Why an edit was rejected. A rejected edit leaves the project unchanged (edits return a
 /// new root and never modify the old one).
@@ -50,6 +50,35 @@ pub enum EditError {
     TrackKindMismatch { from: TrackKind, to: TrackKind },
     #[error("source time would go before the start of the media: {0} s")]
     SourceBeforeStart(Time),
+    #[error("speed {0} is outside 1/100 to 100")]
+    SpeedOutOfRange(Rational),
+    #[error("speed {0} is not stored reduced with a positive denominator")]
+    SpeedNotReduced(Rational),
+    #[error("speed ramps are not supported yet: a speed map holds exactly one key at 0 s")]
+    UnsupportedSpeedMap,
+    #[error("{0} is not a finite number")]
+    NotFinite(&'static str),
+    #[error("{what} is {value}, outside {min} to {max}")]
+    OutOfRange {
+        what: &'static str,
+        value: f64,
+        min: f64,
+        max: f64,
+    },
+    #[error("no effect {0}")]
+    UnknownEffect(EffectId),
+    #[error("effect schema {schema:?} is not valid: {reason}")]
+    InvalidEffectSchema { schema: String, reason: String },
+    #[error("effect {effect} follows schema {expected:?}, not {found:?}")]
+    EffectSchemaMismatch {
+        effect: EffectId,
+        expected: String,
+        found: String,
+    },
+    #[error("effect schema {schema:?} has no parameter {param:?}")]
+    UnknownParam { schema: String, param: String },
+    #[error("effect index {index} out of range (the stack holds {len})")]
+    EffectIndex { index: usize, len: usize },
     #[error("media {0} is relinked twice in one batch")]
     RelinkTwice(MediaId),
     #[error("media {0} cannot be relinked to an empty path")]
