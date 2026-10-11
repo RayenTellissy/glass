@@ -42,13 +42,15 @@
 //! fallback.
 //!
 //! [`presets`] holds the built-in platform and deliverable presets, which resolve
-//! against a timeline's format into [`ExportSettings`].
+//! against a timeline's format into [`ExportSettings`]; [`verify`] reads a finished file
+//! back against its settings and preset and reveals it in the file manager.
 
 mod gif_writer;
 mod picture;
 pub mod presets;
 mod session;
 mod settings;
+pub mod verify;
 
 use std::path::PathBuf;
 

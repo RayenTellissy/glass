@@ -98,8 +98,13 @@ pub enum Source {
     /// layer's transform and blend.
     Masked(Box<Source>, Vec<Mask>),
     /// The bundled transition `id` from the gradient (A) to the colour bars (B, filtered
-    /// up to the canvas) at linear `progress`, as a canvas-sized layer.
-    Transition { id: &'static str, progress: f64 },
+    /// up to the canvas) at linear `progress`, as a canvas-sized layer; `setup` sets its
+    /// direction and parameters.
+    Transition {
+        id: &'static str,
+        progress: f64,
+        setup: fn(TransitionNode) -> TransitionNode,
+    },
 }
 
 impl Source {
@@ -263,7 +268,11 @@ impl Studio {
                 Source::Shapes(shapes) => g
                     .add(ShapeNode::new(&self.renderer, CANVAS, shapes), &[])
                     .out(0),
-                Source::Transition { id, progress } => {
+                Source::Transition {
+                    id,
+                    progress,
+                    setup,
+                } => {
                     let bars = g
                         .add(
                             YuvSourceNode::new(
@@ -284,7 +293,7 @@ impl Studio {
                         .unwrap_or_else(|| panic!("no bundled transition {id:?}"))
                         .clone();
                     g.add(
-                        TransitionNode::new(transition, *progress, Easing::Linear),
+                        setup(TransitionNode::new(transition, *progress, Easing::Linear)),
                         &[gradient, bars],
                     )
                     .out(0)

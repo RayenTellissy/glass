@@ -12,6 +12,7 @@ use render::shape::{
 };
 use render::text::{GlyphTransform, Outline, Shadow, TextPaint};
 use render::transform::{Resample, Transform2D};
+use render::transition::{Direction, ParamValue, TransitionNode};
 
 use super::{CANVAS, Case, Scene, Source, TextSpec};
 
@@ -97,6 +98,61 @@ pub fn all() -> Vec<Case> {
             name: "non_additive_dissolve",
             frames: &[6, 12, 18],
             scene: non_additive_dissolve,
+        },
+        Case {
+            name: "linear_wipe",
+            frames: &[6, 12, 18],
+            scene: linear_wipe,
+        },
+        Case {
+            name: "linear_wipe_soft_border",
+            frames: &[6, 12, 18],
+            scene: linear_wipe_soft_border,
+        },
+        Case {
+            name: "radial_wipe",
+            frames: &[6, 12, 18],
+            scene: radial_wipe,
+        },
+        Case {
+            name: "clock_wipe",
+            frames: &[6, 12, 18],
+            scene: clock_wipe,
+        },
+        Case {
+            name: "iris",
+            frames: &[6, 12, 18],
+            scene: iris,
+        },
+        Case {
+            name: "iris_star_close",
+            frames: &[6, 12, 18],
+            scene: iris_star_close,
+        },
+        Case {
+            name: "iris_diamond",
+            frames: &[12],
+            scene: iris_diamond,
+        },
+        Case {
+            name: "iris_rectangle",
+            frames: &[12],
+            scene: iris_rectangle,
+        },
+        Case {
+            name: "barn_door",
+            frames: &[6, 12, 18],
+            scene: barn_door,
+        },
+        Case {
+            name: "venetian_blinds",
+            frames: &[6, 12, 18],
+            scene: venetian_blinds,
+        },
+        Case {
+            name: "checker_wipe",
+            frames: &[6, 12, 18],
+            scene: checker_wipe,
         },
     ]
 }
@@ -396,11 +452,22 @@ fn cross_dissolve(frame: u32) -> Scene {
 /// The bundled transition `id` with default parameters from the gradient to the colour
 /// bars over 24 frames.
 fn transition(id: &'static str, frame: u32) -> Scene {
+    transition_with(id, frame, |node| node)
+}
+
+/// The bundled transition `id` from the gradient to the colour bars over 24 frames, with
+/// the direction and parameters `setup` sets.
+fn transition_with(
+    id: &'static str,
+    frame: u32,
+    setup: fn(TransitionNode) -> TransitionNode,
+) -> Scene {
     Scene {
         layers: vec![(
             Source::Transition {
                 id,
                 progress: f64::from(frame) / 24.0,
+                setup,
             },
             Layer::default(),
         )],
@@ -441,4 +508,72 @@ fn additive_dissolve(frame: u32) -> Scene {
 /// of the way.
 fn non_additive_dissolve(frame: u32) -> Scene {
     transition("non-additive-dissolve", frame)
+}
+
+/// Linear wipe (default: travelling right) from the gradient to the colour bars, a quarter, half and three quarters of the way.
+fn linear_wipe(frame: u32) -> Scene {
+    transition("linear-wipe", frame)
+}
+
+/// Linear wipe travelling down and left with a 12 px softness and a 3 px orange border, a quarter, half and three quarters of the way.
+fn linear_wipe_soft_border(frame: u32) -> Scene {
+    transition_with("linear-wipe", frame, |node| {
+        node.direction(Direction::DownLeft)
+            .value("softness", &ParamValue::Number(12.0))
+            .value("border_width", &ParamValue::Number(3.0))
+            .value("border_colour", &ParamValue::Colour([1.0, 0.4, 0.0, 1.0]))
+    })
+}
+
+/// Radial wipe from the centre, a quarter, half and three quarters of the way.
+fn radial_wipe(frame: u32) -> Scene {
+    transition("radial-wipe", frame)
+}
+
+/// Clock wipe from twelve o'clock, clockwise, a quarter, half and three quarters of the way.
+fn clock_wipe(frame: u32) -> Scene {
+    transition("clock-wipe", frame)
+}
+
+/// Iris opening as a circle, a quarter, half and three quarters of the way.
+fn iris(frame: u32) -> Scene {
+    transition("iris", frame)
+}
+
+/// Iris closing as a star with a 2 px white border, a quarter, half and three quarters of the way.
+fn iris_star_close(frame: u32) -> Scene {
+    transition_with("iris", frame, |node| {
+        node.value("shape", &ParamValue::Choice("star".into()))
+            .value("mode", &ParamValue::Choice("close".into()))
+            .value("border_width", &ParamValue::Number(2.0))
+    })
+}
+
+/// Iris opening as a diamond, half way.
+fn iris_diamond(frame: u32) -> Scene {
+    transition_with("iris", frame, |node| {
+        node.value("shape", &ParamValue::Choice("diamond".into()))
+    })
+}
+
+/// Iris opening as a rectangle of the frame's aspect, half way.
+fn iris_rectangle(frame: u32) -> Scene {
+    transition_with("iris", frame, |node| {
+        node.value("shape", &ParamValue::Choice("rectangle".into()))
+    })
+}
+
+/// Barn door opening on a vertical split, a quarter, half and three quarters of the way.
+fn barn_door(frame: u32) -> Scene {
+    transition("barn-door", frame)
+}
+
+/// Venetian blinds (8, travelling down), a quarter, half and three quarters of the way.
+fn venetian_blinds(frame: u32) -> Scene {
+    transition("venetian-blinds", frame)
+}
+
+/// Checker wipe (8 by 5, travelling right), a quarter, half and three quarters of the way.
+fn checker_wipe(frame: u32) -> Scene {
+    transition("checker-wipe", frame)
 }

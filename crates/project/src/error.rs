@@ -2,6 +2,7 @@
 
 use crate::id::{EffectId, ItemId, MarkerId, MediaId, SequenceId, TrackId, TransitionId};
 use crate::model::TrackKind;
+use crate::settings::CacheFolder;
 use crate::time::{Rational, Time, TimeError};
 use crate::transition::CutSide;
 
@@ -41,10 +42,16 @@ pub enum EditError {
     NegativeDuration(Time),
     #[error("{time} s is not on the {grid} s frame grid of the sequence")]
     MarkerOffGrid { time: Time, grid: Time },
-    #[error("invalid frame rate {num}/{den}")]
+    #[error("invalid frame rate {num}/{den}: it must be from 1 to 240 frames per second")]
     InvalidFrameRate { num: i32, den: i32 },
-    #[error("invalid sample rate {0}")]
+    #[error("invalid sample rate {0}: it must be 44100, 48000 or 96000 Hz")]
     InvalidSampleRate(u32),
+    #[error("invalid resolution {width}x{height}: both sides must be even, from 16 to 8192")]
+    InvalidResolution { width: u32, height: u32 },
+    #[error("drop-frame timecode needs 29.97 or 59.94 fps, not {0}")]
+    DropFrameNotAllowed(Rational),
+    #[error("{0:?} is not a valid cache folder")]
+    InvalidCacheFolder(CacheFolder),
     #[error("track index {index} out of range (sequence has {len} tracks)")]
     TrackIndex { index: usize, len: usize },
     #[error("an item cannot move from a {from:?} track to a {to:?} track")]

@@ -10,10 +10,15 @@
 //! ([`Autosave::close`]). If the app dies, the folder and its unclean-exit marker stay,
 //! and the next launch offers to restore it (`app::recovery`).
 //!
-//! Where: `<cache>/autosave/<project uid>/`. Project settings (and with them the
-//! per-project cache folder) do not exist yet, so the app passes its per-user cache
-//! folder; when the project settings task adds the cache folder setting, the app passes
-//! that folder instead and the launch scan also looks in the recent projects' folders.
+//! Where: `<cache>/autosave/<project uid>/` ([`autosave_location`]). A project without a
+//! file autosaves in the per-user cache folder; once it has one, in its own cache folder
+//! (`.glass-cache/` beside the file by default, `project::settings::CacheFolder`), which
+//! the app resolves and probes through `app::locations`. The first save of a new project
+//! (and Save As) moves the autosave there with [`Autosave::saved_as`]: the new folder is
+//! started from the saved root before the old one is removed, so there is always one.
+//! The launch scan reads the per-user cache folder; a project's own folder is checked
+//! when the project is opened (`project::autosave::find_recovery` on its autosave
+//! folder).
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -22,8 +27,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use project::autosave::{self as files, AutosaveWriter};
 
-pub use project::autosave::{AutosaveError, Recovered, RecoveryInfo, Tick};
-pub use project::{EditLabel, History, Project};
+pub use project::autosave::{AutosaveError, Recovered, RecoveryInfo, Tick, autosave_location};
+pub use project::{CacheFolder, EditLabel, History, Project};
 
 /// The autosave period.
 pub const INTERVAL: Duration = Duration::from_millis(files::INTERVAL_MS);
@@ -84,8 +89,16 @@ pub enum AutosaveEvent {
 }
 
 enum Message {
-    Submit { root: Project, changes: u64 },
-    Saved { root: Project, changes: u64 },
+    Submit {
+        root: Project,
+        changes: u64,
+    },
+    Saved {
+        root: Project,
+        changes: u64,
+        /// The folder to autosave in from now on, when it moves.
+        dir: Option<PathBuf>,
+    },
     Flush,
     Close,
     Stop,
@@ -133,6 +146,19 @@ impl Autosave {
         let _ = self.sender.send(Message::Saved {
             root: root.clone(),
             changes,
+            dir: None,
+        });
+    }
+
+    /// The project was saved as `root` to a file whose autosave folder is `dir`
+    /// ([`autosave_location`]): the first save of a new project, or Save As. When `dir`
+    /// differs from the current folder, the thread starts autosaving there from `root`,
+    /// then removes the old folder; otherwise this is [`Autosave::saved`].
+    pub fn saved_as(&self, root: &Project, changes: u64, dir: impl Into<PathBuf>) {
+        let _ = self.sender.send(Message::Saved {
+            root: root.clone(),
+            changes,
+            dir: Some(dir.into()),
         });
     }
 
@@ -177,8 +203,8 @@ fn run(
     messages: Receiver<Message>,
     events: Sender<AutosaveEvent>,
 ) {
-    let fail = |what: &str, error: files::AutosaveError| {
-        tracing::error!("autosave {what} in {}: {error}", config.dir.display());
+    let fail = |what: &str, dir: &Path, error: files::AutosaveError| {
+        tracing::error!("autosave {what} in {}: {error}", dir.display());
         let _ = events.send(AutosaveEvent::Failed(error.to_string()));
     };
     let started = Instant::now();
@@ -190,7 +216,7 @@ fn run(
         now_ms(),
     ) {
         Ok(writer) => writer,
-        Err(error) => return fail("could not start", error),
+        Err(error) => return fail("could not start", &config.dir, error),
     };
     let _ = events.send(AutosaveEvent::Started {
         took: started.elapsed(),
@@ -204,24 +230,49 @@ fn run(
                 latest = Some((root, changes));
                 false
             }
-            Ok(Message::Saved { root, changes }) => {
+            Ok(Message::Saved { root, changes, dir }) => {
                 latest = None;
                 written_changes = changes;
-                match writer.mark_saved(&root, now_ms()) {
-                    Ok(()) => {
-                        let _ = events.send(AutosaveEvent::Saved);
+                match dir {
+                    // The new folder starts from the saved root before the old one goes.
+                    Some(dir) if dir != writer.dir() => {
+                        let now = now_ms();
+                        match AutosaveWriter::open(&dir, &root, Some(now), 0, now) {
+                            Ok(moved) => {
+                                let old = std::mem::replace(&mut writer, moved);
+                                let from = old.dir().to_path_buf();
+                                tracing::info!(
+                                    "autosave moved from {} to {}",
+                                    from.display(),
+                                    dir.display()
+                                );
+                                if let Err(error) = old.close() {
+                                    tracing::warn!(
+                                        "could not remove the old autosave {}: {error}",
+                                        from.display()
+                                    );
+                                }
+                            }
+                            Err(error) => return fail("could not move", &dir, error),
+                        }
                     }
-                    Err(error) => return fail("could not start a generation", error),
+                    _ => {
+                        if let Err(error) = writer.mark_saved(&root, now_ms()) {
+                            return fail("could not start a generation", writer.dir(), error);
+                        }
+                    }
                 }
+                let _ = events.send(AutosaveEvent::Saved);
                 false
             }
             Ok(Message::Flush) => true,
             Ok(Message::Close) => {
+                let dir = writer.dir().to_path_buf();
                 match writer.close() {
                     Ok(()) => {
                         let _ = events.send(AutosaveEvent::Closed);
                     }
-                    Err(error) => fail("could not remove its folder", error),
+                    Err(error) => fail("could not remove its folder", &dir, error),
                 }
                 return;
             }
@@ -248,7 +299,7 @@ fn run(
                 tracing::debug!("autosave {tick:?} in {took:?}");
                 let _ = events.send(AutosaveEvent::Written { tick, took });
             }
-            Err(error) => return fail("could not write", error),
+            Err(error) => return fail("could not write", writer.dir(), error),
         }
     }
 }
