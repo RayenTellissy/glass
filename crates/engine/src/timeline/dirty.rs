@@ -10,11 +10,14 @@
 //!   changes nothing
 //! - a transition: its old and new spans (an item edit that refits it changes its record
 //!   too)
-//! - a media reference (relink, new content hash): every clip that uses it, as above
-//! - a track added, removed or changed in anything but its name (its kind, and whatever
-//!   later schemas add: visibility, mute, blend): its whole content in both roots; when
-//!   the picture tracks change order, the content of each track whose place among them
-//!   moved
+//! - a media reference whose path or content hash changed (relink): every clip that uses
+//!   it, as above; its pool fields (name, bin, label, tags, facts) change nothing
+//! - a track added, removed or changed in anything but its name, mute, solo, lock and
+//!   height (its kind, its visibility, and whatever later schemas add): its whole content
+//!   in both roots; when the picture tracks change order, the content of each track whose
+//!   place among them moved
+//! - anything on a hidden track (schema v9): nothing, as on an audio track; showing or
+//!   hiding a track dirties its content in the root where it shows
 //! - a sequence added, removed or changed in anything but its name, drop-frame flag,
 //!   sample rate and channel layout (its canvas, its frame rate): every frame
 //! - the project settings, changed in anything but the format new sequences start with
@@ -161,7 +164,7 @@ impl DirtyRanges {
             let mut collect = Collect::default();
             for project in [old, new] {
                 for seq in project.sequences() {
-                    for track in seq.tracks.iter().filter(|t| shows_picture(t.kind)) {
+                    for track in seq.tracks.iter().filter(|t| shows_picture(t)) {
                         for item in &track.items {
                             let Some(child) = item.clip().and_then(|c| c.source.sequence()) else {
                                 continue;
@@ -200,9 +203,9 @@ impl DirtyRanges {
     }
 }
 
-/// Whether a track's items show in the picture.
-fn shows_picture(kind: TrackKind) -> bool {
-    !matches!(kind, TrackKind::Audio)
+/// Whether a track's items show in the picture: a picture track that is visible.
+fn shows_picture(track: &Track) -> bool {
+    !matches!(track.kind, TrackKind::Audio) && track.visible
 }
 
 #[derive(Default)]
@@ -238,7 +241,7 @@ impl Collect {
 
     /// Item `item` of `track` and the transitions naming it.
     fn item(&mut self, seq: &Sequence, track: &Track, item: ItemId) {
-        if !shows_picture(track.kind) {
+        if !shows_picture(track) {
             return;
         }
         if let Some(item) = track.item(item) {
@@ -255,7 +258,7 @@ impl Collect {
 
     /// Everything on `track`.
     fn track(&mut self, seq: &Sequence, track: &Track) {
-        if !shows_picture(track.kind) {
+        if !shows_picture(track) {
             return;
         }
         for item in &track.items {
@@ -371,6 +374,8 @@ impl Roots<'_> {
                     }
                 }
             }
+            (Some(Node::Media { media: a }), Some(Node::Media { media: b }))
+                if a.path == b.path && a.content_hash == b.content_hash => {}
             (Some(Node::Media { media }), _) | (None, Some(Node::Media { media })) => {
                 c.media(self.old, media.id);
                 c.media(self.new, media.id);
@@ -396,7 +401,7 @@ impl Roots<'_> {
                     sequence: sb,
                     track: b,
                 }),
-            ) if sa == sb && same_but_name(a, b) => {}
+            ) if sa == sb && same_picture_track(a, b) => {}
             (Some(Node::Track { track, .. }), _) | (None, Some(Node::Track { track, .. })) => {
                 for project in [self.old, self.new] {
                     if let Some((seq, t)) = project.find_track(track.id) {
@@ -435,7 +440,7 @@ impl Roots<'_> {
 
     fn transition(&self, c: &mut Collect, project: &Project, track: TrackId, t: &Transition) {
         if let Some((seq, track)) = project.find_track(track)
-            && shows_picture(track.kind)
+            && shows_picture(track)
         {
             c.transition(seq, track, t);
         }
@@ -447,8 +452,7 @@ impl Roots<'_> {
         let (Some(a), Some(b)) = (self.old.sequence(sequence), self.new.sequence(sequence)) else {
             return;
         };
-        let picture =
-            |seq: &Sequence, id: TrackId| seq.track(id).is_some_and(|t| shows_picture(t.kind));
+        let picture = |seq: &Sequence, id: TrackId| seq.track(id).is_some_and(|t| shows_picture(t));
         let order = |seq: &Sequence, other: &Sequence| -> Vec<TrackId> {
             seq.tracks
                 .iter()
@@ -489,10 +493,15 @@ fn same_picture_format(a: &Sequence, b: &Sequence) -> bool {
     a == *b
 }
 
-/// Tracks (without items and transitions) equal but for their names.
-fn same_but_name(a: &Track, b: &Track) -> bool {
+/// Tracks (without items and transitions) equal but for what does not change the
+/// picture: name, mute, solo, lock and height (visibility does).
+fn same_picture_track(a: &Track, b: &Track) -> bool {
     let mut a = a.clone();
     a.name = b.name.clone();
+    a.muted = b.muted;
+    a.solo = b.solo;
+    a.locked = b.locked;
+    a.height = b.height;
     a == *b
 }
 

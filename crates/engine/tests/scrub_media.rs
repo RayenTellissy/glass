@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use engine::lookahead::{GopIndexes, Layer, PlanSegment, SegmentList, SourceId, SourceRef};
 use engine::scrub::{
-    CachedFrames, MonotonicClock, ScrubConfig, ScrubRender, ScrubStats, Scrubber,
-    SoftwareDecoderOptions, SoftwareScrubDecoder,
+    CachedFrames, Decoded, MonotonicClock, ScrubConfig, ScrubDecoder, ScrubRender, ScrubStats,
+    Scrubber, SoftwareDecoderOptions, SoftwareScrubDecoder,
 };
 use engine::threads::ThreadRegistry;
 use media::{Rational, Timestamp, VideoFrame};
@@ -214,6 +214,35 @@ fn a_fast_scrub_finds_near_cached_frames() {
                 assert_eq!(answered, 0, "nothing cached without prefetching");
             } else {
                 assert!(stats.prefetched > 0);
+            }
+        }
+    }
+}
+
+/// A GOP walk whose last step lands exactly on a frame, then a target inside that frame
+/// (the default 100 ms step is 3 frames at 30 fps): the frame on screen comes back, not
+/// the next one.
+#[test]
+fn an_exact_decode_inside_the_walked_to_frame_returns_it() {
+    let Some(clip) = clips().into_iter().next() else {
+        return;
+    };
+    let gops = GopIndexes::new();
+    let source = SourceRef::new(SourceId(1), &clip.path);
+    let mut decoder = SoftwareScrubDecoder::open(&source, &gops, SoftwareDecoderOptions::default())
+        .expect("open");
+    for frame in [6_i64, 9, 4] {
+        for offset in [256, 511] {
+            let at = Timestamp::new(frame * 512 + offset, time_base());
+            match decoder.decode_exact(at, &|| false).expect("decode") {
+                Decoded::Frame(pts, _) => assert_eq!(
+                    pts,
+                    Timestamp::new(frame * 512, time_base()),
+                    "{}: {} ticks into frame {frame}",
+                    clip.name,
+                    offset
+                ),
+                other => panic!("frame {frame}: {other:?}"),
             }
         }
     }

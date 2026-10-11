@@ -1,12 +1,12 @@
 //! Diffs between two project roots, by node id.
 //!
 //! A root is flattened into one record per node ([`Node`]): the project header (with the
-//! project settings), each media reference, each sequence (with its format) and track
-//! without its children (plus the order of its children), each sequence marker, each
-//! transition, and each item whole (a clip's properties, effect stack and markers travel
-//! with it). A [`Diff`] lists the records
-//! added or changed and the ids removed; applying it to the flat form of the old root
-//! gives the flat form of the new root, which rebuilds into an equal tree.
+//! project settings, the media pool's bins and its label names), each media pool item,
+//! each sequence (with its format) and track (with its switches) without its children
+//! (plus the order of its children), each sequence marker, each transition, and each item
+//! whole (a clip's properties, effect stack and markers travel with it). A [`Diff`] lists
+//! the records added or changed and the ids removed; applying it to the flat form of the
+//! old root gives the flat form of the new root, which rebuilds into an equal tree.
 //!
 //! Items are compared by pointer first (consecutive roots share them), so a diff costs one
 //! pass over the ids plus the nodes that changed.
@@ -18,7 +18,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::{NodeId, SequenceId, TrackId};
 use crate::marker::Marker;
-use crate::model::{Item, MediaRef, MediaRefs, Project, Sequence, Track};
+use crate::media_pool::{Bin, ColourLabel, MediaPool};
+use crate::model::{Item, MediaRef, Project, Sequence, Track};
 use crate::settings::ProjectSettings;
 use crate::transition::Transition;
 use crate::validate::ValidationError;
@@ -36,8 +37,13 @@ pub enum Node {
         next_id: u64,
         /// The project settings (schema v6; autosave format 6).
         settings: Arc<ProjectSettings>,
+        /// The media pool's bins, the root bin first, and its colour label names
+        /// (schema v9; autosave format 9). Bins are few, so they travel together.
+        bins: Vec<Arc<Bin>>,
+        label_names: BTreeMap<ColourLabel, String>,
         sequences: Vec<SequenceId>,
     },
+    /// A media pool item (schema v9: the item replaced the bare reference).
     Media {
         media: Arc<MediaRef>,
     },
@@ -126,6 +132,13 @@ pub fn flatten(project: &Project) -> Flat {
             name: project.name.clone(),
             next_id: project.next_id,
             settings: project.settings.clone(),
+            bins: project.media.bins.values().cloned().collect(),
+            label_names: project
+                .media
+                .label_names
+                .iter()
+                .map(|(l, n)| (*l, n.clone()))
+                .collect(),
             sequences: project.sequences.iter().map(|s| s.id).collect(),
         },
     );
@@ -238,19 +251,25 @@ pub fn rebuild(flat: &Flat) -> Result<Project, ValidationError> {
         name,
         next_id,
         settings,
+        bins,
+        label_names,
         sequences,
     }) = flat.get(&ROOT_ID)
     else {
         return Err(ValidationError::Structure("no project header".into()));
     };
-    let mut media = MediaRefs::default();
+    let mut media = MediaPool {
+        bins: bins.iter().map(|b| (b.id, b.clone())).collect(),
+        items: imbl::OrdMap::new(),
+        label_names: label_names.iter().map(|(l, n)| (*l, n.clone())).collect(),
+    };
     let mut items: BTreeMap<TrackId, Vec<Arc<Item>>> = BTreeMap::new();
     let mut markers: BTreeMap<SequenceId, Vec<Arc<Marker>>> = BTreeMap::new();
     let mut transitions: BTreeMap<TrackId, Vec<Arc<Transition>>> = BTreeMap::new();
     for node in flat.values() {
         match node {
             Node::Media { media: m } => {
-                media.0.insert(m.id, m.clone());
+                media.items.insert(m.id, m.clone());
             }
             Node::Item { track, item } => items.entry(*track).or_default().push(item.clone()),
             Node::Marker { sequence, marker } => {

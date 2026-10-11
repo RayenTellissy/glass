@@ -151,7 +151,7 @@ impl Project {
         let list = next.markers_mut(owner)?;
         list.check(&spec)?;
         insert_sorted(list.markers, Arc::new(build(id, spec)));
-        Ok((next, id))
+        Ok((self.unlocked(next)?, id))
     }
 
     /// Replaces a marker's content (moving, resizing, renaming, recolouring, ticking),
@@ -166,7 +166,7 @@ impl Project {
         };
         list.markers.remove(mi);
         insert_sorted(list.markers, Arc::new(build(marker, spec)));
-        Ok(next)
+        self.unlocked(next)
     }
 
     /// Removes a marker.
@@ -177,7 +177,7 @@ impl Project {
             Location::Sequence { mi, .. } | Location::Clip { mi, .. } => mi,
         };
         next.markers_at_mut(location)?.markers.remove(mi);
-        Ok(next)
+        self.unlocked(next)
     }
 
     fn locate_marker(&self, marker: MarkerId) -> Result<Location, EditError> {
