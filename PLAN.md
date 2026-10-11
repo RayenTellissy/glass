@@ -288,7 +288,10 @@ Done when: the v0.1 checklist passes on both platforms and a tagged build ships 
 - [ ] Background export queue with progress, pause, cancel, notifications
 - [ ] Smart export: reuse cached rendered segments, stream-copy untouched ranges when the codec matches
 - [ ] Export in and out range, selected clips, stills
-- [ ] Subtitle export: burned in, sidecar SRT and VTT, embedded
+- [~] Subtitle export: burned in, sidecar SRT and VTT, embedded
+  - [ ] Sidecar SRT and WebVTT from a subtitle track: millisecond timestamps, line breaks, escaping, numbering, export range offset and clipping
+  - [ ] Embedded: `mov_text` in MP4 and MOV, WebVTT in Matroska and WebM, language tag, through the export session; re-probed and decoded back
+  - [ ] Burned in: render helper that lays out and draws the cue at a time onto a frame (size from frame height, white with outline and shadow, bottom-centred in the title-safe area); wiring into the export pipeline waits for the export queue
 - [x] Output verification: duration, frame count, loudness, then reveal in Finder or Explorer
 - [ ] **v0.1 checklist:** import, play, cut, trim, 10 transitions, basic titles, export, both platforms, installers on tag
 
