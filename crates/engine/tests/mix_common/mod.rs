@@ -59,6 +59,32 @@ impl Tone {
     }
 }
 
+/// Writes planes of samples (one per channel, all the same length) as a 32-bit float WAV.
+pub fn write_wav(path: &Path, rate: u32, planes: &[Vec<f32>]) {
+    let channels = planes.len();
+    let frames = planes[0].len();
+    let data_bytes = (frames * channels * 4) as u32;
+    let mut bytes = Vec::with_capacity(44 + data_bytes as usize);
+    bytes.extend(b"RIFF");
+    bytes.extend((36 + data_bytes).to_le_bytes());
+    bytes.extend(b"WAVEfmt ");
+    bytes.extend(16u32.to_le_bytes());
+    bytes.extend(3u16.to_le_bytes()); // IEEE float
+    bytes.extend((channels as u16).to_le_bytes());
+    bytes.extend(rate.to_le_bytes());
+    bytes.extend((rate * channels as u32 * 4).to_le_bytes());
+    bytes.extend((channels as u16 * 4).to_le_bytes());
+    bytes.extend(32u16.to_le_bytes());
+    bytes.extend(b"data");
+    bytes.extend(data_bytes.to_le_bytes());
+    for k in 0..frames {
+        for plane in planes {
+            bytes.extend(plane[k].to_le_bytes());
+        }
+    }
+    std::fs::write(path, bytes).unwrap();
+}
+
 /// A fresh folder for one test's files.
 pub fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("glass-mix-{name}-{}", std::process::id()));
