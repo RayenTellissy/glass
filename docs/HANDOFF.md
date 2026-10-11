@@ -74,7 +74,7 @@ Counts on `goal/phase-2` at `3c22cc1` (sub-tasks counted as tasks; needs-human p
 On `3c22cc1` (the About dialog merge): build, `cargo test --workspace --no-fail-fast` (652 passed, 0 failed, 4 ignored), clippy `-D warnings`, `smoke` and fmt pass, and `scripts/licences/third-party.py --check` reports the list current.
 
 - `engine`'s `frame_queue_alloc` test `queue_operations_do_not_allocate_after_warm_up` (`crates/engine/tests/frame_queue_alloc.rs`) is flaky: on `15f82db` it counted 1 cross-thread allocation, then passed 5 of 5 times run alone, and it passed in this check. The likely cause is that the counting window is still open while the producer thread exits. Fixing it is the first item in section 6.
-- The ignored tests include `fifty_shapes_4k_gpu_time` (`crates/render/tests/shape.rs`), at about 9.3 ms GPU median against the 8 ms budget, which the open Phase 4 task tracks.
+- `fifty_shapes_4k_gpu_time` (`crates/render/tests/shape.rs`) runs again since sparse strips (Decision 44) cut its accumulate fragments from 29.9 M to 0.4 M; it was ignored at 9.3 ms GPU median on the M2.
 
 ## 2. Needs a person
 
@@ -194,7 +194,7 @@ Full text in `docs/DECISIONS.md`; one line each here.
 - When `render` joins eframe's wgpu device, request `wgpu::Features::TEXTURE_FORMAT_16BIT_NORM` (10-bit P010 surfaces) on the shared device.
 - Sources in other primaries go through `GamutNode` into the working primaries (Decision 15); make sure every source path in the compositor inserts it.
 - The output node is not wired into any preview or export graph yet; shader hot reload is not wired into the app (wire both when the app creates its `Renderer`).
-- Budgets are tight: 5 blended layers at 4K take 5.46 ms, a 4K title 7.2 ms (a half-resolution shadow blur would help), 50 shapes at 4K 9.3 ms (open task).
+- Budgets are tight: 5 blended layers at 4K take 5.46 ms, a 4K title 7.2 ms (a half-resolution shadow blur would help), 50 shapes at 4K 9.3 ms on the M2 before sparse strips (0.75 ms in release on the M5 after, 1.72 ms before).
 - No mipmaps for strong downscales; `text_glyph.wgsl` is not hot-reloaded; the text animator should lay out at the final size.
 - Effect parameters: samples caption, shutter dial and keyframe tooltip still to do; check the schema defaults against the nodes' own defaults.
 - LUT: an inspector row to pick the `.cube` file, log input spaces (Decision 36 has display-referred Rec.709, sRGB and linear), and use from the engine and timeline.

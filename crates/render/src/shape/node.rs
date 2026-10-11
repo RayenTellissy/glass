@@ -1,11 +1,13 @@
-//! The GPU half of shapes: outlines packed into an accumulation atlas, the passes that
-//! accumulate and paint them ([`ShapeNode`]), and single-outline coverage for masks
-//! ([`CoverageNode`]). The byte layouts here mirror the structs in `shape.wgsl`.
+//! The GPU half of shapes: outlines packed into an accumulation atlas and binned into
+//! sparse strips ([`super::strips`]), the passes that accumulate and paint them
+//! ([`ShapeNode`]), and single-outline coverage for masks ([`CoverageNode`]). The byte
+//! layouts here mirror the structs in `shape.wgsl`.
 
 use std::ops::Range;
 
 use wgpu::util::DeviceExt;
 
+use super::strips::{self, Piece};
 use super::{Affine, FillRule, Outline, Paint, Shape};
 use crate::graph::{Node, NodeContext, TextureDesc};
 use crate::renderer::{Renderer, Uniform};
@@ -31,7 +33,7 @@ const ATLAS_ROWS: u32 = 256;
 /// that reuse them after a paint pass.
 const MAX_ATLASES: usize = 4;
 
-const SEG_BYTES: usize = 32;
+const PIECE_BYTES: usize = 48;
 const ITEM_BYTES: usize = 96;
 const STOP_BYTES: usize = 32;
 
@@ -52,15 +54,27 @@ struct Item {
     color: [f32; 4],
 }
 
+/// The items, accumulate pieces and paint pieces of one atlas fill.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Batch {
+    items: Range<u32>,
+    edges: Range<u32>,
+    spans: Range<u32>,
+}
+
 /// Everything the passes read, built on the CPU when the node is made.
 #[derive(Clone, Debug, Default)]
 struct Prepared {
     items: Vec<Item>,
-    /// Edges in their item's box coordinates, grouped by item.
-    segs: Vec<([f32; 4], u32)>,
+    /// Accumulate pieces (an edge's strip in a band), grouped by item.
+    edges: Vec<Piece>,
+    /// Paint pieces (intervals and covered gaps of each band), grouped by item.
+    spans: Vec<Piece>,
+    /// Outline edges binned.
+    edge_count: usize,
     stops: Vec<([f32; 4], f32)>,
-    /// Items and edges of each atlas fill, in paint order.
-    batches: Vec<(Range<u32>, Range<u32>)>,
+    /// Each atlas fill, in paint order.
+    batches: Vec<Batch>,
     atlas: (u32, u32),
 }
 
@@ -132,7 +146,7 @@ impl Prepared {
                 self.items[index].fill = fill;
                 return;
             }
-            let first = self.batches[fill as usize].0.start as usize;
+            let first = self.batches[fill as usize].items.start as usize;
             let mut order: Vec<usize> = (first..=index).collect();
             order.sort_by_key(|&i| std::cmp::Reverse(self.items[i].rect[3]));
             let mut repack = Packer::new(packer.size);
@@ -153,8 +167,12 @@ impl Prepared {
         let at = packer.place(w, h).unwrap_or_default();
         self.items[index].atlas = at;
         self.items[index].fill = self.batches.len() as u32;
-        let segs = self.segs.len() as u32;
-        self.batches.push((index as u32..index as u32, segs..segs));
+        let (edges, spans) = (self.edges.len() as u32, self.spans.len() as u32);
+        self.batches.push(Batch {
+            items: index as u32..index as u32,
+            edges: edges..edges,
+            spans: spans..spans,
+        });
     }
 
     fn push(
@@ -194,13 +212,23 @@ impl Prepared {
         });
         self.place(index, packer);
         let (ox, oy) = (rect[0] as f32, rect[1] as f32);
-        for (a, b) in outline.edges() {
-            self.segs
-                .push(([a.x - ox, a.y - oy, b.x - ox, b.y - oy], index as u32));
-        }
+        let edges: Vec<[f32; 4]> = outline
+            .edges()
+            .map(|(a, b)| [a.x - ox, a.y - oy, b.x - ox, b.y - oy])
+            .collect();
+        self.edge_count += edges.len();
+        strips::bin(
+            &edges,
+            rect,
+            outline.rule,
+            index as u32,
+            &mut self.edges,
+            &mut self.spans,
+        );
         if let Some(batch) = self.batches.last_mut() {
-            batch.0.end = index as u32 + 1;
-            batch.1.end = self.segs.len() as u32;
+            batch.items.end = index as u32 + 1;
+            batch.edges.end = self.edges.len() as u32;
+            batch.spans.end = self.spans.len() as u32;
         }
     }
 
@@ -213,17 +241,26 @@ impl Prepared {
             .unwrap_or(0)
     }
 
-    fn seg_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(self.segs.len().max(1) * SEG_BYTES);
-        for (p, item) in &self.segs {
-            for v in p {
-                out.extend_from_slice(&v.to_le_bytes());
+    /// The accumulate pieces, then the paint pieces (instance `edges.len()` onwards).
+    fn piece_bytes(&self) -> Vec<u8> {
+        let count = self.edges.len() + self.spans.len();
+        let mut out = vec![0; count.max(1) * PIECE_BYTES];
+        let pieces = self.edges.iter().chain(&self.spans);
+        for (bytes, piece) in out.chunks_exact_mut(PIECE_BYTES).zip(pieces) {
+            let [r0, r1, r2, r3] = piece.rect.map(f32::to_bits);
+            let [d0, d1, d2, d3] = piece.data.map(f32::to_bits);
+            let words = [r0, r1, r2, r3, d0, d1, d2, d3, piece.item, piece.kind];
+            for (b, w) in bytes.chunks_exact_mut(4).zip(words) {
+                b.copy_from_slice(&w.to_le_bytes());
             }
-            out.extend_from_slice(&item.to_le_bytes());
-            out.extend_from_slice(&[0; 12]);
         }
-        out.resize(out.len().max(SEG_BYTES), 0);
         out
+    }
+
+    /// Fragments the accumulate passes and the paint passes shade.
+    fn fragments(&self) -> (u64, u64) {
+        let area = |pieces: &[Piece]| pieces.iter().map(Piece::area).sum();
+        (area(&self.edges), area(&self.spans))
     }
 
     fn item_bytes(&self) -> Vec<u8> {
@@ -265,13 +302,13 @@ impl Prepared {
 /// The buffers and bind groups of one node's passes.
 struct Bound {
     uniform: wgpu::Buffer,
-    segs: wgpu::Buffer,
+    pieces: wgpu::Buffer,
     items: wgpu::Buffer,
     stops: wgpu::Buffer,
 }
 
 impl Bound {
-    fn new(device: &wgpu::Device, prepared: &Prepared, canvas: (u32, u32), rule: u32) -> Self {
+    fn new(device: &wgpu::Device, prepared: &Prepared, canvas: (u32, u32)) -> Self {
         let storage = |label, contents: &[u8]| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
@@ -284,7 +321,6 @@ impl Bound {
             .f32(canvas.1 as f32)
             .f32(prepared.atlas.0 as f32)
             .f32(prepared.atlas.1 as f32)
-            .u32(rule)
             .align16();
         Self {
             uniform: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -292,7 +328,7 @@ impl Bound {
                 contents: uniform.bytes(),
                 usage: wgpu::BufferUsages::UNIFORM,
             }),
-            segs: storage("shape edges", &prepared.seg_bytes()),
+            pieces: storage("shape pieces", &prepared.piece_bytes()),
             items: storage("shape items", &prepared.item_bytes()),
             stops: storage("shape stops", &prepared.stop_bytes()),
         }
@@ -305,7 +341,7 @@ impl Bound {
         atlases: &[&wgpu::TextureView],
         dummy: &wgpu::TextureView,
     ) -> wgpu::BindGroup {
-        let buffers = [&self.uniform, &self.segs, &self.items, &self.stops];
+        let buffers = [&self.uniform, &self.pieces, &self.items, &self.stops];
         let mut entries: Vec<wgpu::BindGroupEntry<'_>> = buffers
             .iter()
             .zip(0u32..)
@@ -486,7 +522,7 @@ fn accumulate(
     cx: &mut NodeContext<'_>,
     bound: &Bound,
     acc: &wgpu::TextureView,
-    segs: Range<u32>,
+    edges: Range<u32>,
     timestamps: Option<wgpu::RenderPassTimestampWrites<'_>>,
 ) {
     let format = acc.texture().format();
@@ -502,17 +538,18 @@ fn accumulate(
     let mut pass = begin_pass(cx.encoder, "shape accumulate", acc, true, timestamps);
     pass.set_pipeline(&pipeline);
     pass.set_bind_group(0, &group, &[]);
-    if !segs.is_empty() {
-        pass.draw(0..6, segs);
+    if !edges.is_empty() {
+        pass.draw(0..6, edges);
     }
 }
 
 /// Shapes drawn in order, source-over, into a transparent `Rgba16Float` layer the size
 /// of the canvas (linear light, premultiplied). Outputs: the layer, then one to four
 /// accumulation atlases (scratch, not meant to be read: canvas-wide, their height rounded
-/// up to 256 rows). Outlines are packed into atlas fills, each one accumulate pass; one
-/// paint pass then draws every outline of up to four fills, so the layer is written once
-/// unless the outlines need more than four canvases' worth of atlas.
+/// up to 256 rows, written only where edges cross). Outlines are packed into atlas fills,
+/// each one accumulate pass; one paint pass then draws every outline of up to four fills,
+/// so the layer is written once unless the outlines need more than four canvases' worth
+/// of atlas.
 #[derive(Clone, Debug)]
 pub struct ShapeNode {
     canvas: (u32, u32),
@@ -561,7 +598,19 @@ impl ShapeNode {
     }
 
     pub fn edge_count(&self) -> usize {
-        self.prepared.segs.len()
+        self.prepared.edge_count
+    }
+
+    /// Fragments the accumulate passes shade (each edge's strip to the end of its
+    /// interval, per band).
+    pub fn accumulate_fragments(&self) -> u64 {
+        self.prepared.fragments().0
+    }
+
+    /// Fragments the paint passes shade (intervals, and the gaps between them that have
+    /// coverage).
+    pub fn paint_fragments(&self) -> u64 {
+        self.prepared.fragments().1
     }
 
     /// Atlas fills, each an accumulate pass.
@@ -597,6 +646,7 @@ impl Node for ShapeNode {
             ("shapes", self.shapes.to_string()),
             ("outlines", self.outline_count().to_string()),
             ("edges", self.edge_count().to_string()),
+            ("pieces", self.prepared.spans.len().to_string()),
             ("batches", self.batch_count().to_string()),
         ]
     }
@@ -608,7 +658,7 @@ impl Node for ShapeNode {
         outputs: &[&wgpu::TextureView],
     ) {
         let (layer, atlases) = (outputs[0], &outputs[1..]);
-        let bound = Bound::new(cx.renderer.device(), &self.prepared, self.canvas, 0);
+        let bound = Bound::new(cx.renderer.device(), &self.prepared, self.canvas);
         let mut timestamps = Timestamps::new(cx.timestamps());
         let paint = pipeline(
             cx.renderer,
@@ -631,10 +681,18 @@ impl Node for ShapeNode {
         let dummy = cx.renderer.dummy_view();
         let groups = batches.chunks(MAX_ATLASES).count();
         for (g, group) in batches.chunks(MAX_ATLASES).enumerate() {
-            for ((_, segs), atlas) in group.iter().zip(atlases) {
-                accumulate(cx, &bound, atlas, segs.clone(), timestamps.pass(false));
+            for (batch, atlas) in group.iter().zip(atlases) {
+                accumulate(
+                    cx,
+                    &bound,
+                    atlas,
+                    batch.edges.clone(),
+                    timestamps.pass(false),
+                );
             }
-            let items = group[0].0.start..group[group.len() - 1].0.end;
+            // Paint pieces follow the accumulate pieces in the buffer.
+            let offset = self.prepared.edges.len() as u32;
+            let spans = group[0].spans.start + offset..group[group.len() - 1].spans.end + offset;
             let bind = bound.group(cx.renderer.device(), &paint, atlases, dummy);
             let mut pass = begin_pass(
                 cx.encoder,
@@ -645,14 +703,16 @@ impl Node for ShapeNode {
             );
             pass.set_pipeline(&paint);
             pass.set_bind_group(0, &bind, &[]);
-            pass.draw(0..6, items);
+            if !spans.is_empty() {
+                pass.draw(0..6, spans);
+            }
         }
     }
 }
 
 /// One outline's coverage (0 to 1 after its fill rule) in the red channel of an
 /// `R16Float` texture the size of the canvas, for masks. Outputs: the coverage, and the
-/// canvas-sized accumulation texture (scratch).
+/// canvas-sized accumulation texture (scratch, written only where edges cross).
 #[derive(Clone, Debug)]
 pub struct CoverageNode {
     canvas: (u32, u32),
@@ -718,7 +778,7 @@ impl Node for CoverageNode {
     fn params(&self) -> Vec<(&'static str, String)> {
         vec![
             ("rule", format!("{:?}", self.rule)),
-            ("edges", self.prepared.segs.len().to_string()),
+            ("edges", self.prepared.edge_count.to_string()),
         ]
     }
 
@@ -729,38 +789,37 @@ impl Node for CoverageNode {
         outputs: &[&wgpu::TextureView],
     ) {
         let (coverage, acc) = (outputs[0], outputs[1]);
-        let bound = Bound::new(
-            cx.renderer.device(),
-            &self.prepared,
-            self.canvas,
-            self.rule.code(),
-        );
+        let bound = Bound::new(cx.renderer.device(), &self.prepared, self.canvas);
         let mut timestamps = Timestamps::new(cx.timestamps());
-        let segs = 0..self.prepared.segs.len() as u32;
-        accumulate(cx, &bound, acc, segs, timestamps.pass(false));
-        let resolve = pipeline(
+        let edges = self.prepared.edges.len() as u32;
+        accumulate(cx, &bound, acc, 0..edges, timestamps.pass(false));
+        // The pieces do not overlap, and pixels outside them stay cleared to zero.
+        let cover = pipeline(
             cx.renderer,
-            "shape resolve",
-            ("vs_fullscreen", "fs_resolve"),
+            "shape cover",
+            ("vs_paint", "fs_cover"),
             coverage.texture().format(),
             None,
         );
         let group = bound.group(
             cx.renderer.device(),
-            &resolve,
+            &cover,
             &[acc],
             cx.renderer.dummy_view(),
         );
         let mut pass = begin_pass(
             cx.encoder,
-            "shape resolve",
+            "shape cover",
             coverage,
             true,
             timestamps.pass(true),
         );
-        pass.set_pipeline(&resolve);
+        pass.set_pipeline(&cover);
         pass.set_bind_group(0, &group, &[]);
-        pass.draw(0..3, 0..1);
+        let spans = edges..edges + self.prepared.spans.len() as u32;
+        if !spans.is_empty() {
+            pass.draw(0..6, spans);
+        }
     }
 }
 
@@ -801,8 +860,13 @@ mod tests {
         );
         assert_eq!(p.items.len(), 1, "off-canvas shapes are dropped");
         assert_eq!(p.items[0].rect, [0, 40, 20, 10]);
-        assert_eq!(p.segs.len(), 2, "horizontal edges are skipped");
-        assert_eq!(p.segs[1].0[0], -10.5, "left edge, in box coordinates");
+        assert_eq!(p.edge_count, 2, "horizontal edges are skipped");
+        assert_eq!(
+            p.edges.len(),
+            2,
+            "one strip per side, merged down the bands"
+        );
+        assert_eq!(p.edges[0].data[0], -10.5, "left edge, in box coordinates");
     }
 
     #[test]
@@ -811,13 +875,24 @@ mod tests {
         let p = prepare((100, 64), &shapes);
         // 60 wide in a 100-wide atlas: one per shelf, two shelves of 30 per fill.
         assert_eq!(p.batches.len(), 3);
-        assert_eq!(p.batches[0].0, 0..2);
-        assert_eq!(p.batches[1].0, 2..4);
-        assert_eq!(p.batches[2].0, 4..5);
+        assert_eq!(p.batches[0].items, 0..2);
+        assert_eq!(p.batches[1].items, 2..4);
+        assert_eq!(p.batches[2].items, 4..5);
         assert_eq!(p.items[1].atlas, [0, 30]);
         assert_eq!(p.items[2].atlas, [0, 0]);
-        let segs: u32 = p.batches.iter().map(|b| b.1.len() as u32).sum();
-        assert_eq!(segs as usize, p.segs.len());
+        let edges: usize = p.batches.iter().map(|b| b.edges.len()).sum();
+        let spans: usize = p.batches.iter().map(|b| b.spans.len()).sum();
+        assert_eq!(edges, p.edges.len());
+        assert_eq!(spans, p.spans.len());
+        for b in &p.batches {
+            let items = b.items.clone();
+            assert!(
+                p.edges[b.edges.start as usize..b.edges.end as usize]
+                    .iter()
+                    .chain(&p.spans[b.spans.start as usize..b.spans.end as usize])
+                    .all(|piece| items.contains(&piece.item))
+            );
+        }
     }
 
     #[test]
@@ -839,7 +914,10 @@ mod tests {
         let mut p = prepare((10, 10), &[rect(1.0, 1.0, 2.0, 2.0)]);
         p.stops.push(([0.5; 4], 0.25));
         assert_eq!(p.item_bytes().len(), ITEM_BYTES);
-        assert_eq!(p.seg_bytes().len(), 2 * SEG_BYTES);
+        assert_eq!(
+            p.piece_bytes().len(),
+            (p.edges.len() + p.spans.len()) * PIECE_BYTES
+        );
         assert_eq!(p.stop_bytes().len(), STOP_BYTES);
     }
 }
