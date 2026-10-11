@@ -1,0 +1,12 @@
+{
+  "id": "swirl",
+  "name": "transition.name.swirl",
+  "category": "motion",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "rotation", "label": "transition.param.rotation", "kind": {"choice": {"default": "clockwise", "options": [{"id": "clockwise", "label": "transition.option.clockwise"}, {"id": "anticlockwise", "label": "transition.option.anticlockwise"}]}}, "unit": "none", "keyframeable": false},
+    {"id": "angle", "label": "transition.param.angle", "kind": {"angle": {"default": 540.0, "range": {"min": 0.0, "max": 3600.0}}}, "unit": "degrees", "keyframeable": false},
+    {"id": "radius", "label": "transition.param.radius", "kind": {"float": {"default": 1.0, "range": {"min": 0.05, "max": 3.0}, "soft": null, "decimals": 0}}, "unit": "percent", "keyframeable": false}
+  ]
+}
