@@ -295,7 +295,7 @@ Done when: the transition browser has 150+ items, the title browser 60+, the LUT
 
 ### Transitions (all GPU, all with editable duration, easing, direction, hover preview)
 - [x] Transition framework: a transition is a shader plus a param schema plus a thumbnail, discovered from `assets/transitions/`
-- [ ] Dissolve family: cross, dip to black, dip to white, dip to colour, film, additive, non-additive
+- [~] Dissolve family: cross, dip to black, dip to white, dip to colour, film, additive, non-additive
 - [ ] Wipes: linear in 8 directions, radial, clock, iris shapes, barn door, venetian, checker
 - [ ] Motion: push, slide, whip pan with blur, zoom in and out, spin, swirl, roll
 - [ ] Stylised: glitch, RGB split, pixelate, VHS, light leak, film burn, ink bleed, paper tear, liquid
