@@ -1,8 +1,10 @@
 //! The transition framework: discovery of `assets/transitions/` (the bundled set, and a
 //! folder of broken manifests and shaders that are reported, not fatal), the uniform
-//! layout shared by Rust and `transition.wgsl`, cross dissolve's endpoints (exactly A at
-//! progress 0 and B at 1) and middle, hot reload of an edited transition shader, and
-//! the GPU time of a 4K cross dissolve. GPU checks skip without an adapter.
+//! layout shared by Rust and `transition.wgsl`, extra passes (discovered, broken ones
+//! reported, drawn in order at their sizes and read by the later ones), cross
+//! dissolve's endpoints (exactly A at progress 0 and B at 1) and middle, hot reload of
+//! an edited transition shader and of a pass's entry point, and the GPU time of a 4K
+//! cross dissolve. GPU checks skip without an adapter.
 
 mod common;
 
@@ -10,12 +12,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use render::graph::{Graph, TexturePool};
+use render::graph::{Graph, Node, TextureDesc, TexturePool};
 use render::profiler::GpuProfiler;
 use render::renderer::Renderer;
 use render::shaders::ShaderLibrary;
 use render::transition::{
-    Direction, Easing, ParamKind, ParamValue, Transition, TransitionNode, TransitionRegistry,
+    Direction, Easing, ParamKind, ParamValue, Pass, Transition, TransitionNode,
+    TransitionRegistry,
 };
 use render::wgpu;
 
@@ -347,6 +350,172 @@ fn the_uniform_layout_matches_the_prelude() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Two extra passes and `fs`, each writing what it sees: pass 0 its index and size,
+/// pass 1 pass 0's values (its x plus ten times its own index) and its own size, `fs`
+/// pass 1's values, the targets' sizes and its own index and size.
+const CHAIN: &str = r#"
+@fragment
+fn first(in: VsOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(f32(tr.pass_index), tr.pass_size, 1.0);
+}
+
+@fragment
+fn second(in: VsOut) -> @location(0) vec4<f32> {
+    let before = sample_pass(0u, in.uv);
+    return vec4<f32>(before.x + 10.0 * f32(tr.pass_index), tr.pass_size, before.y);
+}
+
+@fragment
+fn fs(in: VsOut) -> @location(0) vec4<f32> {
+    let x = u32(in.pos.x);
+    if x == 0u {
+        return sample_pass(1u, vec2<f32>(0.5));
+    }
+    if x == 1u {
+        return vec4<f32>(size_of_pass(0u), size_of_pass(1u));
+    }
+    if x == 2u {
+        return vec4<f32>(f32(tr.pass_index), tr.pass_size, size_of_pass(2u).x);
+    }
+    return here_a(in);
+}
+"#;
+
+const CHAIN_PASSES: &str = r#", "directions": ["right", "down"], "passes": [
+    {"entry": "first", "scale": 0.5},
+    {"entry": "second", "scale": {"along": 0.25}, "min": 3}
+]"#;
+
+#[test]
+fn extra_passes_are_discovered_and_drawn_in_order_at_their_sizes() {
+    let dir = temp_dir("passes");
+    write(
+        &dir,
+        "chain",
+        Some(&manifest("chain", CHAIN_PASSES)),
+        Some(CHAIN),
+    );
+    let registry = TransitionRegistry::discover(&dir);
+    assert!(registry.problems().is_empty(), "{:#?}", registry.problems());
+    let chain = registry.get("chain").expect("chain").clone();
+    assert_eq!(
+        chain.passes(),
+        [
+            Pass {
+                entry: "first",
+                along: 0.5,
+                across: 0.5,
+                min: 1
+            },
+            Pass {
+                entry: "second",
+                along: 0.25,
+                across: 1.0,
+                min: 3
+            }
+        ]
+    );
+    assert_eq!(chain.entries(), ["fs", "first", "second"]);
+    // The result first, then one target per pass; "along" follows the direction, and
+    // the second pass is at least 3 pixels on each side.
+    let a = TextureDesc::working(16, 8);
+    let sizes = |d: Direction| {
+        TransitionNode::new(chain.clone(), 0.5, Easing::Linear)
+            .direction(d)
+            .outputs(&[a, a])
+            .iter()
+            .map(|t| (t.width, t.height))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(sizes(Direction::Right), [(16, 8), (8, 4), (4, 8)]);
+    assert_eq!(sizes(Direction::Down), [(16, 8), (8, 4), (16, 3)]);
+    // Without passes, only the result.
+    let plain = TransitionRegistry::bundled()
+        .get("cross-dissolve")
+        .expect("bundled")
+        .clone();
+    assert!(plain.passes().is_empty());
+    assert_eq!(
+        TransitionNode::new(plain, 0.5, Easing::Linear)
+            .outputs(&[a, a])
+            .len(),
+        1
+    );
+
+    let Some(gpu) = gpu(&registry) else {
+        eprintln!("skipped: no GPU adapter");
+        let _ = std::fs::remove_dir_all(&dir);
+        return;
+    };
+    let pixels = noise(16 * 8, 5);
+    for (d, second) in [(Direction::Right, [4.0, 8.0]), (Direction::Down, [16.0, 3.0])] {
+        let node = TransitionNode::new(chain.clone(), 0.5, Easing::Linear).direction(d);
+        let out = run(&gpu, (16, 8), &pixels, &pixels, node);
+        let what = d.id();
+        assert_eq!(
+            out[0],
+            [10.0, second[0], second[1], 8.0],
+            "{what}: pass 1 read pass 0, and fs read pass 1"
+        );
+        assert_eq!(
+            out[1],
+            [8.0, 4.0, second[0], second[1]],
+            "{what}: target sizes"
+        );
+        assert_eq!(
+            out[2],
+            [2.0, 16.0, 8.0, 1.0],
+            "{what}: fs is pass 2, at the output's size; no pass 2 target"
+        );
+        assert_eq!(out[3], pixels[3], "{what}: A as usual");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn broken_passes_are_reported() {
+    let dir = temp_dir("broken-passes");
+    let cases = [
+        ("missing-entry", r#"{"entry": "blur"}"#.to_owned(), "no `@fragment fn blur`"),
+        ("bad-scale", r#"{"entry": "first", "scale": 0.01}"#.to_owned(), "pass 0: scale 0.01 is not a number from 1/16 to 1"),
+        ("big-scale", r#"{"entry": "first"}, {"entry": "second", "scale": 2}"#.to_owned(), "pass 1: scale 2"),
+        ("bad-axis", r#"{"entry": "first", "scale": {"sideways": 0.5}}"#.to_owned(), "unknown scale axis \"sideways\""),
+        ("final-entry", r#"{"entry": "fs"}"#.to_owned(), "the final pass"),
+        ("bad-entry", r#"{"entry": "2x"}"#.to_owned(), "entry \"2x\" is not ASCII letters"),
+        ("no-entry", r#"{"scale": 0.5}"#.to_owned(), "no string \"entry\""),
+        ("unknown-field", r#"{"entry": "first", "size": 2}"#.to_owned(), "unknown field \"size\""),
+        ("bad-min", r#"{"entry": "first", "min": 0}"#.to_owned(), "min 0 is not a whole number"),
+        ("too-many", vec![r#"{"entry": "first"}"#; 9].join(", "), "9 passes; at most 8"),
+    ];
+    for (folder, passes, _) in &cases {
+        write(
+            &dir,
+            folder,
+            Some(&manifest(folder, &format!(r#", "passes": [{passes}]"#))),
+            Some(CHAIN),
+        );
+    }
+    write(
+        &dir,
+        "fine",
+        Some(&manifest("fine", CHAIN_PASSES)),
+        Some(CHAIN),
+    );
+    let registry = TransitionRegistry::discover(&dir);
+    let ids: Vec<&str> = registry.iter().map(|t| t.id()).collect();
+    assert_eq!(ids, ["fine"], "{:#?}", registry.problems());
+    assert_eq!(registry.problems().len(), cases.len());
+    for (folder, _, wanted) in cases {
+        let problem = registry
+            .problems()
+            .iter()
+            .find(|p| p.folder == folder)
+            .unwrap_or_else(|| panic!("{folder} not reported"));
+        assert!(problem.message.contains(wanted), "{folder}: {problem}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn cross_dissolve() -> Arc<Transition> {
     TransitionRegistry::bundled()
         .get("cross-dissolve")
@@ -521,6 +690,92 @@ fn an_edited_transition_shader_reloads_and_a_broken_one_is_kept_out() {
             TransitionNode::new(fade, 0.0, Easing::Linear),
         );
         assert_eq!(out[0], [0.25, 0.125, 0.5, 0.5], "the reloaded shader draws");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&shaders);
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn an_edited_pass_reloads_and_one_without_its_entry_point_is_kept_out() {
+    use render::shaders::EMBEDDED;
+
+    const REGISTER: Duration = Duration::from_secs(120);
+    let shaders = temp_dir("reload-pass-shaders");
+    for (name, source) in EMBEDDED {
+        std::fs::write(shaders.join(format!("{name}.wgsl")), source).expect("copy shader");
+    }
+    let dir = temp_dir("reload-pass");
+    // The pass weighs A; fs shows the pass's target.
+    let body = |pass: &str| {
+        format!(
+            "@fragment\nfn {pass}(in: VsOut) -> @location(0) vec4<f32> {{\n    return sample_a(in.uv) * 1.0;\n}}\n\n@fragment\nfn fs(in: VsOut) -> @location(0) vec4<f32> {{\n    return sample_pass(0u, in.uv);\n}}\n"
+        )
+    };
+    write(
+        &dir,
+        "halve",
+        Some(&manifest(
+            "halve",
+            r#", "passes": [{"entry": "weigh", "scale": 0.5}]"#,
+        )),
+        Some(&body("weigh")),
+    );
+    let registry = TransitionRegistry::discover(&dir);
+    assert!(registry.problems().is_empty(), "{:#?}", registry.problems());
+    let library = ShaderLibrary::watching(&shaders);
+    assert!(library.wait_until_watching(REGISTER));
+    registry.add_shaders(&library);
+    let halve = registry.get("halve").expect("halve").clone();
+    let wait_for = |what: &str, done: &dyn Fn() -> bool| {
+        let start = Instant::now();
+        while !done() {
+            assert!(
+                start.elapsed() < Duration::from_secs(20),
+                "timed out: {what}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    // The pass's entry point is edited: it now halves A.
+    let edited = body("weigh").replace("* 1.0", "* 0.5");
+    let path = dir.join("halve/shader.wgsl");
+    wait_for("the edit to load", &|| {
+        std::fs::write(&path, &edited).expect("edit");
+        std::thread::sleep(Duration::from_millis(100));
+        library.raw(halve.shader()).as_deref() == Some(edited.as_str())
+    });
+    assert!(library.poll_changes().iter().any(|n| n == halve.shader()));
+
+    // A valid shader that no longer defines the pass's entry point is kept out.
+    std::fs::write(&path, body("renamed")).expect("edit without the entry point");
+    wait_for("the edit without the entry point to be rejected", &|| {
+        library.last_error().is_some()
+    });
+    let error = library.last_error().unwrap_or_default();
+    assert!(error.contains("no `@fragment fn weigh`"), "{error}");
+    assert_eq!(
+        library.raw(halve.shader()).as_deref(),
+        Some(edited.as_str()),
+        "the last good source stays"
+    );
+
+    if let Some((device, queue)) = common::device() {
+        let renderer = Renderer::with_shaders(&device, &queue, library);
+        let gpu = Gpu {
+            device,
+            queue,
+            renderer,
+        };
+        let px = [[0.5, 0.25, 1.0, 1.0]];
+        let out = run(
+            &gpu,
+            (1, 1),
+            &px,
+            &px,
+            TransitionNode::new(halve, 0.0, Easing::Linear),
+        );
+        assert_eq!(out[0], [0.25, 0.125, 0.5, 0.5], "the reloaded pass draws");
     }
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&shaders);

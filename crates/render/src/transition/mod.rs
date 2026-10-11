@@ -11,6 +11,11 @@
 //! edited shader through the [`crate::shaders::ShaderLibrary`] watcher; release builds
 //! use the folders embedded at build time ([`assets::transitions::EMBEDDED`]).
 //!
+//! A manifest may list extra [`Pass`]es: fragment entry points of the same shader, each
+//! drawn in order into its own target at a declared fraction of the output's size
+//! before `fs` composes the result. Every later pass reads the earlier targets, so a
+//! transition can blur at a reduced resolution or build a pyramid for minification.
+//!
 //! This crate reads the parameters only as far as it packs them into the uniform;
 //! `project::params` owns the schema, and the engine builds a `ParamSchema` from
 //! [`Transition::schema_params`] with the transition's id and name.
@@ -35,6 +40,15 @@ pub const PRELUDE: &str = "transition";
 
 /// Parameter slots in the uniform: a schema may have at most this many parameters.
 pub const MAX_PARAMS: usize = 8;
+
+/// Extra passes a manifest may list before `fs`; the prelude binds one target each.
+pub const MAX_PASSES: usize = 8;
+
+/// The smallest fraction of the output's extent a pass's target may have.
+pub const MIN_PASS_SCALE: f64 = 1.0 / 16.0;
+
+/// The largest floor a pass may set on its target's extent, in pixels.
+pub const MAX_PASS_MIN: u32 = 16384;
 
 /// The way a transition travels (a wipe's edge, a push's motion), in picture
 /// coordinates with y down.
@@ -154,6 +168,40 @@ impl Param {
     }
 }
 
+/// An extra pass: the shader's fragment entry point `entry` drawn into a target of its
+/// own, which `fs` and every later pass read as `pass<i>` (`sample_pass(i, uv)`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pass {
+    pub entry: &'static str,
+    /// The target's extent along the direction of travel as a fraction of the output's
+    /// (x for a transition without a direction or travelling diagonally, y for up and
+    /// down), from [`MIN_PASS_SCALE`] to 1.
+    pub along: f64,
+    /// The same across the direction of travel.
+    pub across: f64,
+    /// The least extent of the target on either axis, in pixels, unless the output's is
+    /// smaller: a reduced resolution saves time on large frames, and small ones (previews,
+    /// thumbnails) keep their detail.
+    pub min: u32,
+}
+
+impl Pass {
+    /// The target's size in pixels for an output of `size` travelling in `direction`
+    /// (at least 1 by 1).
+    pub fn size(&self, size: (u32, u32), direction: Option<Direction>) -> (u32, u32) {
+        let scale = |extent: u32, f: f64| {
+            ((f64::from(extent) * f).round() as u32)
+                .max(self.min.min(extent))
+                .max(1)
+        };
+        if matches!(direction, Some(Direction::Up | Direction::Down)) {
+            (scale(size.0, self.across), scale(size.1, self.along))
+        } else {
+            (scale(size.0, self.along), scale(size.1, self.across))
+        }
+    }
+}
+
 /// One discovered transition.
 #[derive(Debug)]
 pub struct Transition {
@@ -164,6 +212,7 @@ pub struct Transition {
     thumbnail: f64,
     params: Vec<Param>,
     schema_params: Vec<Json>,
+    passes: Vec<Pass>,
     shader: &'static str,
     source: String,
     path: Option<PathBuf>,
@@ -211,6 +260,22 @@ impl Transition {
     /// `project::params::ParamDef` JSON format.
     pub fn schema_params(&self) -> &[Json] {
         &self.schema_params
+    }
+
+    /// The extra passes drawn before `fs`, in order; empty for a single-pass transition.
+    pub fn passes(&self) -> &[Pass] {
+        &self.passes
+    }
+
+    /// The fragment entry points the shader must define: `fs`, then each pass's once.
+    pub fn entries(&self) -> Vec<&'static str> {
+        let mut entries = vec!["fs"];
+        for p in &self.passes {
+            if !entries.contains(&p.entry) {
+                entries.push(p.entry);
+            }
+        }
+        entries
     }
 
     /// The shader's name in the [`ShaderLibrary`], `transition/<id>`.
@@ -358,9 +423,13 @@ impl TransitionRegistry {
     /// folder on disk). A shader the library rejects is logged.
     pub fn add_shaders(&self, library: &ShaderLibrary) {
         for t in &self.transitions {
-            if let Err(e) =
-                library.add_external(t.shader, PRELUDE, t.source.clone(), t.path.clone())
-            {
+            if let Err(e) = library.add_external(
+                t.shader,
+                PRELUDE,
+                t.source.clone(),
+                t.path.clone(),
+                &t.entries(),
+            ) {
                 tracing::warn!("transition {:?}: {e}", t.id);
             }
         }
@@ -398,6 +467,8 @@ struct Manifest {
     thumbnail: f64,
     #[serde(default)]
     params: Vec<Json>,
+    #[serde(default)]
+    passes: Vec<Json>,
 }
 
 fn half() -> f64 {
@@ -469,18 +540,24 @@ fn parse(
         }
         params.push(p);
     }
+    if m.passes.len() > MAX_PASSES {
+        return Err(bad(format!(
+            "{} passes; at most {MAX_PASSES} run before fs",
+            m.passes.len()
+        )));
+    }
+    let passes = m
+        .passes
+        .iter()
+        .enumerate()
+        .map(|(i, json)| pass(json).map_err(|e| bad(format!("pass {i}: {e}"))))
+        .collect::<Result<Vec<Pass>, String>>()?;
 
     let shader_file = assets::transitions::SHADER;
     let source = shader.ok_or_else(|| format!("{shader_file} is missing"))?;
     let name = intern(format!("{PRELUDE}/{}", m.id));
     let embedded = |n| shaders::embedded(n).unwrap_or_default();
-    shaders::validate_external(
-        name,
-        &shaders::compose_external(embedded("common"), embedded(PRELUDE), source),
-    )
-    .map_err(|e| format!("{shader_file}: {e}"))?;
-
-    Ok(Transition {
+    let transition = Transition {
         id: m.id,
         name: m.name,
         category: m.category,
@@ -488,9 +565,80 @@ fn parse(
         thumbnail: m.thumbnail,
         params,
         schema_params: m.params,
+        passes,
         shader: name,
         source: source.to_owned(),
         path,
+    };
+    shaders::validate_external(
+        name,
+        &shaders::compose_external(embedded("common"), embedded(PRELUDE), source),
+        &transition.entries(),
+    )
+    .map_err(|e| format!("{shader_file}: {e}"))?;
+    Ok(transition)
+}
+
+/// A pass as the manifest writes it: `{"entry": "blur", "scale": 0.25, "min": 256}`, or
+/// with `"scale": {"along": 0.25, "across": 1}`; the scale defaults to 1, the floor to
+/// none.
+fn pass(json: &Json) -> Result<Pass, String> {
+    let fields = json.as_object().ok_or("not an object")?;
+    if let Some(field) = fields
+        .keys()
+        .find(|k| !["entry", "scale", "min"].contains(&k.as_str()))
+    {
+        return Err(format!("unknown field {field:?}"));
+    }
+    let entry = fields
+        .get("entry")
+        .and_then(Json::as_str)
+        .ok_or("no string \"entry\"")?;
+    let identifier = entry
+        .bytes()
+        .next()
+        .is_some_and(|b| b.is_ascii_alphabetic())
+        && entry.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+    if !identifier {
+        return Err(format!(
+            "entry {entry:?} is not ASCII letters, digits and '_' starting with a letter"
+        ));
+    }
+    if entry == "fs" {
+        return Err("entry \"fs\" is the final pass, drawn after the listed ones".to_owned());
+    }
+    let factor = |v: &Json| {
+        v.as_f64()
+            .filter(|f| (MIN_PASS_SCALE..=1.0).contains(f))
+            .ok_or_else(|| format!("scale {v} is not a number from 1/16 to 1"))
+    };
+    let (along, across) = match fields.get("scale") {
+        None => (1.0, 1.0),
+        Some(Json::Object(axes)) => {
+            if let Some(axis) = axes.keys().find(|k| !["along", "across"].contains(&k.as_str())) {
+                return Err(format!("unknown scale axis {axis:?}"));
+            }
+            let axis = |name| axes.get(name).map_or(Ok(1.0), factor);
+            (axis("along")?, axis("across")?)
+        }
+        Some(v) => {
+            let f = factor(v)?;
+            (f, f)
+        }
+    };
+    let min = match fields.get("min") {
+        None => 1,
+        Some(v) => v
+            .as_u64()
+            .filter(|m| (1..=u64::from(MAX_PASS_MIN)).contains(m))
+            .ok_or_else(|| format!("min {v} is not a whole number from 1 to {MAX_PASS_MIN}"))?
+            as u32,
+    };
+    Ok(Pass {
+        entry: intern(entry.to_owned()),
+        along,
+        across,
+        min,
     })
 }
 
