@@ -51,11 +51,10 @@ mod decoder;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::thread::JoinHandle;
+use std::thread::{JoinHandle, Thread};
 use std::time::Duration;
 
 use crossbeam_queue::ArrayQueue;
-use crossbeam_utils::sync::{Parker, Unparker};
 use media::{MediaError, Rational, Timestamp};
 
 use crate::lookahead::{DecodePlan, Layer, PlanSegment, SourceId, SourceRef};
@@ -234,7 +233,8 @@ fn nanos(d: Duration) -> u64 {
 /// A running scrub, owned by the UI thread. Dropping it stops and joins the worker.
 pub struct Scrubber {
     shared: Arc<Shared>,
-    unparker: Unparker,
+    /// The worker thread, unparked for each request.
+    worker: Thread,
     clock: Arc<dyn ScrubClock>,
     cached: CachedFrames,
     ahead_bias: f64,
@@ -275,15 +275,12 @@ impl Scrubber {
             last_request: AtomicU64::new(0),
             counters: Counters::default(),
         });
-        let parker = Parker::new();
-        let unparker = parker.unparker().clone();
         let worker = Worker {
             plan,
             make_decoder,
             decoders: HashMap::new(),
             render,
             clock: clock.clone(),
-            parker,
             shared: shared.clone(),
             cached: cached.clone(),
             pause: config.pause,
@@ -301,7 +298,7 @@ impl Scrubber {
             .spawn(Role::Scrub, None, move || worker.run())?;
         Ok(Self {
             shared,
-            unparker,
+            worker: thread.thread().clone(),
             clock,
             cached,
             ahead_bias: config.ahead_bias,
@@ -340,7 +337,7 @@ impl Scrubber {
             seq: self.seq,
             direction,
         });
-        self.unparker.unpark();
+        self.worker.unpark();
 
         let pick = self
             .cached
@@ -424,7 +421,7 @@ impl Scrubber {
             return;
         };
         self.shared.stop.store(true, Ordering::Release);
-        self.unparker.unpark();
+        self.worker.unpark();
         let _ = thread.join();
     }
 }
@@ -442,7 +439,6 @@ struct Worker<P, D, R, M> {
     decoders: HashMap<SourceId, Option<D>>,
     render: R,
     clock: Arc<dyn ScrubClock>,
-    parker: Parker,
     shared: Arc<Shared>,
     cached: CachedFrames,
     pause: Duration,
@@ -467,7 +463,7 @@ where
     M: FnMut(&SourceRef) -> Result<D, MediaError> + Send + 'static,
 {
     fn run(mut self) {
-        self.clock.attach(self.parker.unparker());
+        self.clock.attach(&std::thread::current());
         while !self.shared.stopping() {
             if let Some(request) = self.shared.requests.pop() {
                 self.latest = Some(request);
@@ -494,7 +490,7 @@ where
     }
 
     fn park(&self, deadline: Option<Duration>) {
-        threads::idle(|| self.clock.park_until(&self.parker, deadline));
+        threads::idle(|| self.clock.park_until(deadline));
     }
 
     fn exact(&mut self, request: Request) {

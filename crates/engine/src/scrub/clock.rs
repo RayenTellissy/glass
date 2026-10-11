@@ -4,20 +4,21 @@
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use crossbeam_utils::sync::{Parker, Unparker};
+use std::thread::Thread;
 
 /// Time since an arbitrary start, and a way for the scrub worker to sleep until a time
 /// on this clock.
 pub trait ScrubClock: Send + Sync + 'static {
     fn now(&self) -> Duration;
 
-    /// Called once by the worker before it first parks, so a clock that moves on its own
-    /// schedule can wake it.
-    fn attach(&self, _unparker: &Unparker) {}
+    /// Called once by the worker thread before it first parks, so a clock that moves on
+    /// its own schedule can wake it.
+    fn attach(&self, _worker: &Thread) {}
 
-    /// Parks the calling thread until `deadline` on this clock (forever for `None`) or
-    /// until it is unparked. May return early; callers check again.
-    fn park_until(&self, parker: &Parker, deadline: Option<Duration>);
+    /// Parks the calling thread (`std::thread::park`) until `deadline` on this clock
+    /// (forever for `None`) or until it is unparked. May return early; callers check
+    /// again.
+    fn park_until(&self, deadline: Option<Duration>);
 }
 
 /// Real time from a monotonic [`Instant`].
@@ -45,14 +46,14 @@ impl ScrubClock for MonotonicClock {
         self.epoch.elapsed()
     }
 
-    fn park_until(&self, parker: &Parker, deadline: Option<Duration>) {
+    fn park_until(&self, deadline: Option<Duration>) {
         match deadline {
             Some(deadline) => {
                 if let Some(wait) = deadline.checked_sub(self.now()) {
-                    parker.park_timeout(wait);
+                    std::thread::park_timeout(wait);
                 }
             }
-            None => parker.park(),
+            None => std::thread::park(),
         }
     }
 }
@@ -62,7 +63,7 @@ impl ScrubClock for MonotonicClock {
 #[derive(Debug, Default)]
 pub struct ManualClock {
     now: Mutex<Duration>,
-    attached: Mutex<Vec<Unparker>>,
+    attached: Mutex<Vec<Thread>>,
 }
 
 impl ManualClock {
@@ -72,13 +73,13 @@ impl ManualClock {
 
     pub fn advance(&self, by: Duration) {
         *self.now.lock().unwrap_or_else(PoisonError::into_inner) += by;
-        for unparker in self
+        for worker in self
             .attached
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
         {
-            unparker.unpark();
+            worker.unpark();
         }
     }
 }
@@ -88,18 +89,18 @@ impl ScrubClock for ManualClock {
         *self.now.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn attach(&self, unparker: &Unparker) {
+    fn attach(&self, worker: &Thread) {
         self.attached
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push(unparker.clone());
+            .push(worker.clone());
     }
 
-    fn park_until(&self, parker: &Parker, deadline: Option<Duration>) {
+    fn park_until(&self, deadline: Option<Duration>) {
         if deadline.is_some_and(|deadline| deadline <= self.now()) {
             return;
         }
         // Only `advance` or the scrubber moves things on; the timeout is a safety net.
-        parker.park_timeout(Duration::from_millis(100));
+        std::thread::park_timeout(Duration::from_millis(100));
     }
 }
