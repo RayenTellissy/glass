@@ -185,6 +185,7 @@ Done when: the stress project (Phase 16) plays at full rate on both platforms, s
 - [x] Look-ahead decode across cuts and transitions, configurable depth
 - [x] Rendered-frame cache keyed by (segment hash, frame index), LRU in VRAM with RAM spill and a configurable ceiling
 - [x] Dirty-range invalidation: any edit invalidates only affected segments, verified by a test that counts re-renders
+- [~] Animated and nested rendering: keyframed clip and effect parameters evaluated per frame (cache keys by evaluated values), nested sequences composited as layers with their media in the same look-ahead
 - [x] Adaptive quality: drop preview resolution before dropping frames, restore when idle
 - [x] Scrub mode: nearest cached frame immediately, exact frame when the pointer pauses for 40 ms
 - [ ] JKL shuttle, reverse playback, audio scrubbing
