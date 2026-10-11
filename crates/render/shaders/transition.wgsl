@@ -1,7 +1,9 @@
 // Shared by every transition shader (`assets/transitions/<id>/shader.wgsl`): the
 // library compiles common.wgsl, this file, then the transition's shader, which defines
-// `fs`. A and B are premultiplied linear light in the working space; the output is the
-// size of A. The uniform is built by `render::transition::TransitionNode`.
+// `fs` and the entry points of the extra passes its manifest lists. A and B are
+// premultiplied linear light in the working space; the output is the size of A. The
+// uniform is built by `render::transition::TransitionNode`; every pass sees the same
+// one but for `pass_index` and `pass_size`.
 
 struct TransitionUniform {
     // Eased progress, 0 at the start (all A) to 1 at the end (all B). A cubic-bezier
@@ -12,11 +14,15 @@ struct TransitionUniform {
     // `render::transition::Direction` index: 0 left, 1 right, 2 up, 3 down, 4 up-left,
     // 5 up-right, 6 down-left, 7 down-right; 0 for a transition without directions.
     direction: u32,
-    _pad: u32,
+    // The pass being drawn: the index of one of the manifest's extra passes, or their
+    // count (0 for a transition without any) in `fs`.
+    pass_index: u32,
     // The direction as a unit vector in uv (x right, y down); zero without directions.
     dir: vec2<f32>,
     // Output size in pixels.
     size: vec2<f32>,
+    // The size in pixels of the target being drawn: the pass's own, `size` in `fs`.
+    pass_size: vec2<f32>,
     // The schema's parameters in manifest order, one vec4 each: numbers and angles
     // (radians) in x, booleans as 0 or 1, choices as the option's index, points in xy,
     // colours as straight-alpha linear RGBA.
@@ -27,6 +33,16 @@ struct TransitionUniform {
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var tex_a: texture_2d<f32>;
 @group(0) @binding(3) var tex_b: texture_2d<f32>;
+// The targets of the manifest's extra passes, in order. A pass reads only those before
+// it; the others (its own included) are a 1x1 placeholder while it draws.
+@group(0) @binding(4) var pass0: texture_2d<f32>;
+@group(0) @binding(5) var pass1: texture_2d<f32>;
+@group(0) @binding(6) var pass2: texture_2d<f32>;
+@group(0) @binding(7) var pass3: texture_2d<f32>;
+@group(0) @binding(8) var pass4: texture_2d<f32>;
+@group(0) @binding(9) var pass5: texture_2d<f32>;
+@group(0) @binding(10) var pass6: texture_2d<f32>;
+@group(0) @binding(11) var pass7: texture_2d<f32>;
 
 // A filtered at uv (clamped to the edge).
 fn sample_a(uv: vec2<f32>) -> vec4<f32> {
@@ -36,6 +52,45 @@ fn sample_a(uv: vec2<f32>) -> vec4<f32> {
 // B filtered at uv (clamped to the edge).
 fn sample_b(uv: vec2<f32>) -> vec4<f32> {
     return textureSampleLevel(tex_b, samp, uv, 0.0);
+}
+
+// The target of pass `i` filtered at uv (clamped to the edge). A switch over the
+// targets, which the GPU's compiler may flatten into a read of each: in a loop, read the
+// target itself (`pass0`, ..., or through a `texture_2d<f32>` parameter, `sum_taps`).
+fn sample_pass(i: u32, uv: vec2<f32>) -> vec4<f32> {
+    switch i {
+        case 0u: { return textureSampleLevel(pass0, samp, uv, 0.0); }
+        case 1u: { return textureSampleLevel(pass1, samp, uv, 0.0); }
+        case 2u: { return textureSampleLevel(pass2, samp, uv, 0.0); }
+        case 3u: { return textureSampleLevel(pass3, samp, uv, 0.0); }
+        case 4u: { return textureSampleLevel(pass4, samp, uv, 0.0); }
+        case 5u: { return textureSampleLevel(pass5, samp, uv, 0.0); }
+        case 6u: { return textureSampleLevel(pass6, samp, uv, 0.0); }
+        default: { return textureSampleLevel(pass7, samp, uv, 0.0); }
+    }
+}
+
+// The sum of `n` filtered reads of `t` from uv in steps of `step` (in uv).
+fn sum_taps(t: texture_2d<f32>, uv: vec2<f32>, step: vec2<f32>, n: f32) -> vec4<f32> {
+    var sum = vec4<f32>(0.0);
+    for (var i = 0.0; i < n; i += 1.0) {
+        sum += textureSampleLevel(t, samp, uv + i * step, 0.0);
+    }
+    return sum;
+}
+
+// The size in pixels of pass `i`'s target (1 by 1 while it is not readable).
+fn size_of_pass(i: u32) -> vec2<f32> {
+    switch i {
+        case 0u: { return vec2<f32>(textureDimensions(pass0)); }
+        case 1u: { return vec2<f32>(textureDimensions(pass1)); }
+        case 2u: { return vec2<f32>(textureDimensions(pass2)); }
+        case 3u: { return vec2<f32>(textureDimensions(pass3)); }
+        case 4u: { return vec2<f32>(textureDimensions(pass4)); }
+        case 5u: { return vec2<f32>(textureDimensions(pass5)); }
+        case 6u: { return vec2<f32>(textureDimensions(pass6)); }
+        default: { return vec2<f32>(textureDimensions(pass7)); }
+    }
 }
 
 // A's texel under this output pixel, unfiltered.

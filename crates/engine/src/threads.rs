@@ -69,6 +69,8 @@ pub enum Role {
     Io,
     /// `glass-export`: a running export.
     Export,
+    /// `glass-export-render`: a running export's frames, rendered and read back.
+    ExportRender,
 }
 
 impl Role {
@@ -87,6 +89,7 @@ impl Role {
             Self::Relink => "glass-relink",
             Self::Io => "glass-io",
             Self::Export => "glass-export",
+            Self::ExportRender => "glass-export-render",
         }
     }
 

@@ -189,7 +189,7 @@ jobs:
         if: matrix.target == 'aarch64-apple-darwin'
         env:
           GLASS_STRICT_TIMING: "1"
-        run: cargo test -p ui -p render -p engine -- --test-threads=1 budget gpu_time never_wait throughput late_frames
+        run: cargo test -p ui -p render -p engine -- --test-threads=1 budget gpu_time never_wait throughput late_frames play_on_time
 
       - name: Smoke
         run: cargo run --bin smoke

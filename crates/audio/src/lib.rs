@@ -7,11 +7,17 @@
 //! [`Clock`] for the scheduler and render thread. The callback that fills the device is
 //! the master clock; [`drift`] keeps its presentation time smooth against the monotonic
 //! clock. [`video_sync`] picks the video frame for each display refresh from it.
+//!
+//! Mixing: [`mixer`] holds the mixer graph (track strips, buses and sends, the master,
+//! meters, automation), run inside the callback by a [`mixer::Mixer`]
+//! ([`OutputStream::open_with_mixer`], [`OfflineOutput::with_mixer`]) or offline for
+//! export.
 
 mod callback;
 mod clock;
 mod device;
 pub mod drift;
+pub mod mixer;
 mod offline;
 pub mod video_sync;
 
