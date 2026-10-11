@@ -506,13 +506,16 @@ fn resolve<'a>(
     }
 }
 
+/// A transition with its cut time and span.
+type Placed<'a> = (Time, TimeRange, &'a Arc<Transition>);
+
 /// The transitions of `track` other than `skip` with their spans, resolved with `index`.
 fn spans<'a>(
     track: &'a Track,
     grid: Time,
     index: &impl ItemIndex,
     skip: Option<TransitionId>,
-) -> Result<Vec<(Time, TimeRange, &'a Arc<Transition>)>, EditError> {
+) -> Result<Vec<Placed<'a>>, EditError> {
     let mut out = Vec::with_capacity(track.transitions.len());
     for t in &track.transitions {
         if Some(t.id) == skip {
@@ -526,10 +529,7 @@ fn spans<'a>(
 }
 
 /// The end of the last span before the cut at `at` and the start of the first after it.
-fn neighbours(
-    spans: &[(Time, TimeRange, &Arc<Transition>)],
-    at: Time,
-) -> (Option<Time>, Option<Time>) {
+fn neighbours(spans: &[Placed<'_>], at: Time) -> (Option<Time>, Option<Time>) {
     let mut prev_end: Option<Time> = None;
     let mut next_start: Option<Time> = None;
     for (cut, span, _) in spans {
