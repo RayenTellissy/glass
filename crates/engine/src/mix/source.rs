@@ -189,6 +189,14 @@ impl SequenceSource {
         self.stats
     }
 
+    /// Whether any clip covers part of mix frames `from..to`.
+    pub(crate) fn plays_between(&self, from: i64, to: i64) -> bool {
+        self.tracks
+            .iter()
+            .flatten()
+            .any(|c| c.start < to && c.end > from)
+    }
+
     /// Opens the readers of clips that play within `from..to` and closes those of clips
     /// that ended before `from`, so a file is open only around the playhead.
     pub(crate) fn prepare(&mut self, from: i64, to: i64) {

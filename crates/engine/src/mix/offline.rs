@@ -63,6 +63,12 @@ impl OfflineMix {
         self.source.stats()
     }
 
+    /// Whether any audio clip plays (has media and a supported speed) within mix frames
+    /// `from..to`, whatever the mixer settings.
+    pub fn plays_between(&self, from: i64, to: i64) -> bool {
+        self.source.plays_between(from, to)
+    }
+
     /// Renders the next `out.len() / channels()` frames, interleaved.
     pub fn render(&mut self, out: &mut [f32]) {
         let channels = self.channels();

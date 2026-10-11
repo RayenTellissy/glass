@@ -7,7 +7,7 @@
 //!       ──▶ glass-export-render: TimelineRenderer::render_output (full quality, never the
 //!           governor; burned-in subtitle over the composite) ──▶ ReadbackRing (lossless,
 //!           several frames in flight)
-//!       ──▶ glass-export: ExportSession (push_picture, silence, embedded cues)
+//!       ──▶ glass-export: ExportSession (push_picture, the audio mix, embedded cues)
 //!       ──▶ finish ──▶ verify ──▶ sidecar ──▶ rename to the final path
 //!   events (Queued, Started, Progress, Paused, Resumed, Finished, Cancelled, Failed) ──▶ UI
 //! ```
@@ -28,8 +28,11 @@
 //! thread waits on the UI. A frame rate other than the timeline's shows the timeline frame
 //! at each output frame's start.
 //!
-//! **Audio.** The engine has no sequence audio mix yet: an audio stream gets silence of
-//! the right length, and its loudness target is not checked.
+//! **Audio.** The audio stream is the sequence mix (`engine::mix::OfflineMix`, the same
+//! graph as playback, every track at its defaults until the project stores mixer
+//! settings), rendered on `glass-export` per output frame at the settings' rate and
+//! channels. When no audio clip plays in the range the stream is silence and its loudness
+//! target is not checked.
 //!
 //! **Pause, cancel, errors.** Pause stops both threads at the next frame boundary (the
 //! encoder and the file stay open, the look-ahead fills its lanes and parks); resume
