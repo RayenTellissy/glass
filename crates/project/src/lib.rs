@@ -3,6 +3,7 @@
 //! and effect parameter schemas, plus undo history, save and load, and schema migrations.
 //! Pure data: no I/O threads, no GPU, and no dependencies on other Glass crates.
 
+pub mod audio_transition;
 pub mod autosave;
 pub mod clip;
 pub mod diff;

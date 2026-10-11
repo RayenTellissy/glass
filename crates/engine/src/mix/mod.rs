@@ -5,11 +5,21 @@
 //! **Clips** ([`source`]): each enabled clip on an audio track is decoded by its own
 //! `media::AudioReader`, resampled to the mix rate and mixed to the mix layout (`media`'s
 //! channel rules), played at the clip's constant speed (the reader runs at the mix rate
-//! divided by the speed, so a 0.5x clip plays an octave down, like tape; speed ramps play
-//! silence until pitch-preserving varispeed exists), and scaled by its gain, evaluated
-//! through the project's own keyframe curve (`Clip::gain_db_at`) at every
-//! `CONTROL_FRAMES`-frame control point and ramped linearly between them. The clips of a
-//! track sum into that track's feed. Transitions on audio tracks are not crossfaded yet.
+//! divided by the speed, rounded to a whole rate, so a 0.5x clip plays an octave down,
+//! like tape; speed ramps play silence until pitch-preserving varispeed exists), and
+//! scaled by its gain, evaluated through the project's own keyframe curve
+//! (`Clip::gain_db_at`) at every `CONTROL_FRAMES`-frame control point and ramped linearly
+//! between them. A clip of a nested sequence plays that sequence's own clip mix. The clips
+//! of a track sum into that track's feed.
+//!
+//! **Edges** ([`edges`]): clip edges and transition spans play at exact sample positions
+//! (a time rounds to the nearest sample at the mix rate, halves later; exact at the
+//! sequence's own rate, whose sample grid audio tracks sit on). The read position of mix
+//! frame `k` of a clip is its source start rounded the same way at the reader rate, plus
+//! `k` less the clip's first frame, so a clip split anywhere plays on without a seam.
+//! Transitions on audio tracks are crossfades (equal power by default, linear or S-curve
+//! through the `crossfade` kind's `curve`, `project::audio_transition`), and fades from or
+//! to nothing next to gaps; declick ramps at hard cuts are an option.
 //!
 //! **Track mute and solo** are the project's own track switches (schema v9, Decision 77):
 //! the graph reads `Track::muted` and `Track::solo` from the snapshot it plays, so muting
@@ -26,6 +36,7 @@
 //! **Tracks** are the sequence's audio tracks, top to bottom; each strip's id is its
 //! `TrackId`'s number, so meters and setting changes address tracks by id.
 
+mod edges;
 mod offline;
 mod playback;
 mod source;
@@ -40,6 +51,7 @@ use project::{
 };
 use project::{TrackId, TrackKind};
 
+pub use edges::DECLICK_SECONDS;
 pub use offline::{OfflineMix, mix_range, mix_range_with};
 pub use playback::{AudioPlayback, AudioPlaybackConfig, FeedStats};
 pub use source::SourceStats;
@@ -175,6 +187,9 @@ pub struct MixSettings {
     pub tracks: BTreeMap<TrackId, TrackMix>,
     pub buses: Vec<BusMix>,
     pub master: MasterMix,
+    /// Short ramps ([`DECLICK_SECONDS`]) at hard cuts where the waveform would jump (see
+    /// [`edges`]); off by default, since they change the samples next to a cut.
+    pub declick: bool,
 }
 
 impl MixSettings {
@@ -264,7 +279,8 @@ pub fn graph_spec(
     })
 }
 
-/// The sample index of `time` at `rate`, rounded to the nearest sample.
+/// The sample index of `time` at `rate`, rounded to the nearest sample, halves away from
+/// zero (to the later sample for the non-negative times of a timeline).
 pub(crate) fn sample_of(time: Time, rate: u32) -> Result<i64, TimeError> {
     time.round_to_multiple(Time::from_samples(1, rate)?)
 }
