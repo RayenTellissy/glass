@@ -655,6 +655,215 @@ pub(crate) fn display_matrix(stream: &ffmpeg::format::stream::Stream) -> Option<
     stream_params(stream).display_matrix
 }
 
+/// Sets the codec tag (fourcc) of an output stream before the header is written, for
+/// example `hvc1` so QuickTime players accept HEVC in MOV and MP4.
+pub(crate) fn set_stream_codec_tag(
+    output: &mut ffmpeg::format::context::Output,
+    stream: usize,
+    fourcc: [u8; 4],
+) -> Result<(), ffmpeg::Error> {
+    let mut st = output
+        .stream_mut(stream)
+        .ok_or(ffmpeg::Error::StreamNotFound)?;
+    // SAFETY: the StreamMut borrows the Output mutably, so its codecpar is valid and not
+    // shared; `codec_tag` is a plain integer the muxer reads when the header is written.
+    unsafe {
+        (*(*st.as_mut_ptr()).codecpar).codec_tag = u32::from_le_bytes(fourcc);
+    }
+    Ok(())
+}
+
+/// One plane of caller memory for [`Sws::scale`]: the bytes and the distance between
+/// rows.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SrcPlane<'a> {
+    pub data: &'a [u8],
+    pub stride: usize,
+}
+
+/// A swscale context that converts pictures in caller memory (the render readback's
+/// RGBA rows, YUV planes) into frames for an encoder, same size, another pixel format.
+///
+/// RGB to YUV uses the destination matrix, range and chroma position of `dst_yuv`; YUV to
+/// YUV and RGB to RGB copy sample values (no matrix or range change).
+pub(crate) struct Sws {
+    ctx: std::ptr::NonNull<sys::SwsContext>,
+    src: ffmpeg::format::Pixel,
+    dst: ffmpeg::format::Pixel,
+    width: u32,
+    height: u32,
+}
+
+// SAFETY: the context is owned by this handle alone and only used through `&mut self`;
+// swscale keeps no thread-affine state in it.
+unsafe impl Send for Sws {}
+
+impl Drop for Sws {
+    fn drop(&mut self) {
+        // SAFETY: the context this handle owns, freed once.
+        unsafe { sys::sws_freeContext(self.ctx.as_ptr()) };
+    }
+}
+
+impl std::fmt::Debug for Sws {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Sws")
+            .field("src", &self.src)
+            .field("dst", &self.dst)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish()
+    }
+}
+
+impl Sws {
+    pub(crate) fn new(
+        src: ffmpeg::format::Pixel,
+        dst: ffmpeg::format::Pixel,
+        width: u32,
+        height: u32,
+        dst_yuv: Option<SwsYuv>,
+    ) -> Result<Self, ffmpeg::Error> {
+        let w = c_int::try_from(width).map_err(|_| ffmpeg::Error::InvalidData)?;
+        let h = c_int::try_from(height).map_err(|_| ffmpeg::Error::InvalidData)?;
+        if w == 0 || h == 0 {
+            return Err(ffmpeg::Error::InvalidData);
+        }
+        let src_rgb = pix_fmt_info(src).is_some_and(|i| i.rgb);
+        let dst_rgb = pix_fmt_info(dst).is_some_and(|i| i.rgb);
+        let flags = sys::SwsFlags::SWS_BICUBIC as c_uint
+            | sys::SwsFlags::SWS_ACCURATE_RND as c_uint
+            | sys::SwsFlags::SWS_FULL_CHR_H_INP as c_uint;
+        // SAFETY: the context is allocated, configured through its public fields before
+        // sws_init_context (as the API documents) and freed on the error paths; on
+        // success the handle owns it.
+        unsafe {
+            let ctx = sys::sws_alloc_context();
+            let Some(ctx) = std::ptr::NonNull::new(ctx) else {
+                return Err(ffmpeg::Error::Other {
+                    errno: ffmpeg::error::ENOMEM,
+                });
+            };
+            let raw = ctx.as_ptr();
+            (*raw).src_w = w;
+            (*raw).src_h = h;
+            (*raw).dst_w = w;
+            (*raw).dst_h = h;
+            (*raw).src_format = sys::AVPixelFormat::from(src) as c_int;
+            (*raw).dst_format = sys::AVPixelFormat::from(dst) as c_int;
+            (*raw).flags = flags;
+            let yuv = dst_yuv.filter(|_| src_rgb && !dst_rgb);
+            if let Some(yuv) = yuv {
+                (*raw).src_range = 1;
+                (*raw).dst_range = c_int::from(yuv.full_range);
+                if let Some(p) = yuv.h_chroma_pos {
+                    (*raw).dst_h_chr_pos = p;
+                }
+                if let Some(p) = yuv.v_chroma_pos {
+                    (*raw).dst_v_chr_pos = p;
+                }
+            }
+            let ret = sys::sws_init_context(raw, std::ptr::null_mut(), std::ptr::null_mut());
+            if ret < 0 {
+                sys::sws_freeContext(raw);
+                return Err(ffmpeg::Error::from(ret));
+            }
+            if let Some(yuv) = yuv {
+                let space: sys::AVColorSpace = yuv.matrix.into();
+                let table = sys::sws_getCoefficients(space as c_int);
+                let ret = sys::sws_setColorspaceDetails(
+                    raw,
+                    table,
+                    1,
+                    table,
+                    c_int::from(yuv.full_range),
+                    0,
+                    1 << 16,
+                    1 << 16,
+                );
+                if ret < 0 {
+                    sys::sws_freeContext(raw);
+                    return Err(ffmpeg::Error::from(ret));
+                }
+            }
+            Ok(Self {
+                ctx,
+                src,
+                dst,
+                width,
+                height,
+            })
+        }
+    }
+
+    /// Converts one picture in the source format, its planes in `planes`, into `out` (a
+    /// frame of the destination format and size). Fails without touching memory when a
+    /// plane is missing, a stride is shorter than a row or a plane holds fewer than
+    /// `stride * rows` bytes.
+    pub(crate) fn scale(
+        &mut self,
+        planes: &[SrcPlane<'_>],
+        out: &mut ffmpeg::frame::Video,
+    ) -> Result<(), ffmpeg::Error> {
+        if out.format() != self.dst || out.width() != self.width || out.height() != self.height {
+            return Err(ffmpeg::Error::InvalidData);
+        }
+        let count = pix_fmt_info(self.src).map_or(0, |i| i.planes);
+        if count == 0 || count > 4 || planes.len() < count {
+            return Err(ffmpeg::Error::InvalidData);
+        }
+        let src_id: sys::AVPixelFormat = self.src.into();
+        let w = c_int::try_from(self.width).map_err(|_| ffmpeg::Error::InvalidData)?;
+        let h = c_int::try_from(self.height).map_err(|_| ffmpeg::Error::InvalidData)?;
+        let mut min_rows = [0 as c_int; 4];
+        let mut strides = [0isize; 4];
+        let mut sizes = [0usize; 4];
+        let mut src_strides = [0 as c_int; 4];
+        let mut src_ptrs: [*const u8; 4] = [std::ptr::null(); 4];
+        for (i, plane) in planes.iter().take(count).enumerate() {
+            strides[i] = isize::try_from(plane.stride).map_err(|_| ffmpeg::Error::InvalidData)?;
+            src_strides[i] =
+                c_int::try_from(plane.stride).map_err(|_| ffmpeg::Error::InvalidData)?;
+            src_ptrs[i] = plane.data.as_ptr();
+        }
+        // SAFETY: both calls write at most four entries into the arrays passed, read the
+        // static pixel format table and the four strides, and touch no picture memory.
+        let ok = unsafe {
+            sys::av_image_fill_linesizes(min_rows.as_mut_ptr(), src_id, w) >= 0
+                && sys::av_image_fill_plane_sizes(sizes.as_mut_ptr(), src_id, h, strides.as_ptr())
+                    >= 0
+        };
+        if !ok {
+            return Err(ffmpeg::Error::InvalidData);
+        }
+        for (i, plane) in planes.iter().take(count).enumerate() {
+            if src_strides[i] < min_rows[i] || plane.data.len() < sizes[i] {
+                return Err(ffmpeg::Error::InvalidData);
+            }
+        }
+        // SAFETY: every source plane was checked above to hold `stride * rows` bytes with
+        // rows at least as long as the format needs at this width, so swscale reads only
+        // inside the borrowed slices; the destination is a frame FFmpeg allocated at the
+        // context's output format and size, borrowed mutably for the call.
+        let written = unsafe {
+            let dst = &mut *out.as_mut_ptr();
+            sys::sws_scale(
+                self.ctx.as_ptr(),
+                src_ptrs.as_ptr(),
+                src_strides.as_ptr(),
+                0,
+                h,
+                dst.data.as_ptr(),
+                dst.linesize.as_ptr(),
+            )
+        };
+        if written != h {
+            return Err(ffmpeg::Error::from(written.min(-1)));
+        }
+        Ok(())
+    }
+}
+
 // ---- Hardware decode ----------------------------------------------------------------------
 
 /// What a hardware decoder's `get_format` callback saw, shared with the callback through

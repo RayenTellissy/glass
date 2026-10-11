@@ -23,6 +23,7 @@ mod demux;
 mod encode;
 mod error;
 pub mod exif;
+pub mod export;
 #[allow(unsafe_code)]
 mod ffi;
 mod format;
