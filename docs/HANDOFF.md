@@ -212,6 +212,7 @@ Full text in `docs/DECISIONS.md`; one line each here.
 
 **Phase 8 (export)**
 - Export audio is silence of the right length: the engine has no sequence audio mix yet, so `engine::export` pushes zeros and skips the loudness target (Decision 70). Replace it with the mix once Phase 12 builds one, and check the preset's loudness again. WebM subtitles are untested until an AV1 or VP9 encoder is in the FFmpeg build.
+- VideoToolbox H.264 with B-frames fails in `ExportSession`: packets reach the muxer with DTS after PTS and `write_interleaved` returns EINVAL ("writing a packet: Invalid argument"), with or without audio; the FFmpeg CLI only warns and guesses DTS. Every web preset (`max_b_frames: Some(2)`) with the default `EncoderPreference::Auto` therefore fails on macOS; with `max_b_frames = Some(0)` VideoToolbox works. Fix the DTS in `media::export` (or give VideoToolbox no B-frames) and add a preset test with `Auto`; the media preset tests all force `Software`.
 - The export queue is not wired into an app window yet: the export dialog submits `ExportJob`s, drains `ExportEvent`s once per frame and turns `Notification`s into OS notifications. An HDR project exported with an SDR preset is clipped (no tone mapping).
 
 **Phase 14 / 16 (performance)**

@@ -751,24 +751,35 @@ fn export_throughput() {
             let output = dir.join(format!("{}-{preference:?}.mp4", preset.id));
             let mut job =
                 ExportJob::from_preset(s.project.clone(), s.seq, preset, output).expect("job");
-            job.settings
-                .video
-                .as_mut()
-                .expect("video")
-                .encoder_preference = preference;
+            let video = job.settings.video.as_mut().expect("video");
+            video.encoder_preference = preference;
+            if preference == EncoderPreference::Auto {
+                // VideoToolbox H.264 with B-frames fails in the muxer ("writing a packet:
+                // Invalid argument", a `media` follow-up), so it is timed without them.
+                video.max_b_frames = Some(0);
+            }
             let id = queue.submit(job);
             let events = collect(&rx, |e| ended(e, id));
-            let done = finished(&events, id);
-            println!(
-                "{}x{} {}: {} frames in {:.2} s, {:.1} fps ({:?})",
-                canvas.0,
-                canvas.1,
-                preset.id,
-                done.frames,
-                done.elapsed.as_secs_f64(),
-                done.fps,
-                done.video_encoder
-            );
+            let outcome = events.iter().find_map(|e| match &e.kind {
+                EventKind::Finished(f) => Some(Ok(f)),
+                EventKind::Failed { failure, .. } => Some(Err(failure)),
+                _ => None,
+            });
+            let size = format!("{}x{} {} {preference:?}", canvas.0, canvas.1, preset.id);
+            match outcome {
+                Some(Ok(done)) => println!(
+                    "{size}: {} frames in {:.2} s, {:.1} fps ({:?})",
+                    done.frames,
+                    done.elapsed.as_secs_f64(),
+                    done.fps,
+                    done.video_encoder
+                ),
+                // Reported, not failed: hardware encoders vary by machine.
+                Some(Err(failure)) if preference == EncoderPreference::Auto => {
+                    println!("{size}: {failure:?}")
+                }
+                other => panic!("{size}: {other:?}"),
+            }
         }
         drop(queue);
         let _ = std::fs::remove_dir_all(dir);
