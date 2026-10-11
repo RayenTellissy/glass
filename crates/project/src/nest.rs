@@ -255,6 +255,8 @@ impl Project {
             tracks: Vector::new(),
             ..Sequence::clone(parent)
         };
+        // Edits store frame rates reduced, whatever form a loaded parent holds.
+        child.set_format(parent.format().reduced());
         for track in &parent.tracks {
             let id = TrackId(next.alloc_id());
             let grid = parent.grid(track.kind)?;
@@ -276,11 +278,9 @@ impl Project {
                 .cloned()
                 .collect();
             let mut inner = Track {
-                id,
-                kind: track.kind,
-                name: track.name.clone(),
                 items,
                 transitions,
+                ..Track::new(id, track.kind, track.name.clone())
             };
             fit_track(&mut inner, grid);
             child.tracks.push_back(Arc::new(inner));
@@ -304,7 +304,7 @@ impl Project {
         place(grid, track, Arc::new(clip))?;
         fit_track(track, grid);
         next.sequences.push_back(Arc::new(child));
-        Ok((next, child_id, clip_id))
+        Ok((self.unlocked(next)?, child_id, clip_id))
     }
 
     /// Puts the contents of the sequence a clip nests back in the clip's sequence, in
@@ -440,7 +440,7 @@ impl Project {
         if moving {
             next.sequences.retain(|s| s.id != child_id);
         }
-        Ok(next)
+        self.unlocked(next)
     }
 
     /// Gives a compound clip its own copy of its compound, so editing one no longer
@@ -465,7 +465,7 @@ impl Project {
         if let ItemKind::Clip(c) = &mut Arc::make_mut(&mut track.items[ii]).kind {
             c.source = ClipSource::Sequence(copy);
         }
-        Ok((next, copy))
+        Ok((self.unlocked(next)?, copy))
     }
 
     /// Deletes a sequence and everything in it. Refused with
@@ -575,6 +575,7 @@ fn copy_sequence(next: &mut Project, id: SequenceId) -> Result<SequenceId, EditE
         tracks: Vector::new(),
         ..Sequence::clone(&source)
     };
+    copy.set_format(source.format().reduced());
     for track in &source.tracks {
         let track_id = TrackId(next.alloc_id());
         let mut ids = HashMap::new();

@@ -13,13 +13,14 @@
 use std::sync::Arc;
 
 use imbl::{OrdMap, Vector};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use crate::clip::{BlendMode, Crop, Effect, SpeedMap, Transform};
 use crate::error::EditError;
 use crate::id::{EffectId, ItemId, MarkerId, MediaId, SequenceId, TrackId};
 use crate::keyframe::{ClipParam, Curve};
 use crate::marker::Marker;
+use crate::media_pool::{MediaItem, MediaPool};
 use crate::settings::{ChannelLayout, ProjectSettings, Resolution, SequenceFormat};
 use crate::time::{Rational, Time, TimeError, TimeRange};
 use crate::transition::Transition;
@@ -35,22 +36,25 @@ pub struct Project {
     /// Project settings (schema v6; see [`crate::settings`]). Shared, so cloning the root
     /// stays O(1).
     pub(crate) settings: Arc<ProjectSettings>,
-    /// Source media the project refers to. The media pool (bins, metadata, relink state)
-    /// will embed this set of references once it joins the tree.
-    pub(crate) media: MediaRefs,
+    /// The media pool (schema v9; see [`crate::media_pool`]): every source file the
+    /// project refers to, with its bins, colour labels, tags and import facts. Whether a
+    /// file is available is not stored (Decision 29).
+    pub(crate) media: MediaPool,
     pub(crate) sequences: Vector<Arc<Sequence>>,
 }
 
 impl Project {
-    /// An empty project with default settings ([`ProjectSettings::default`]). `uid`
-    /// should be unique per project (the app uses a random id).
+    /// An empty project with default settings ([`ProjectSettings::default`]) and an
+    /// empty media pool whose root bin carries the project's name. `uid` should be unique
+    /// per project (the app uses a random id).
     pub fn new(uid: impl Into<String>, name: impl Into<String>) -> Self {
+        let name = name.into();
         Self {
             uid: uid.into(),
-            name: name.into(),
+            media: MediaPool::new(name.clone()),
+            name,
             next_id: 1,
             settings: Arc::new(ProjectSettings::default()),
-            media: MediaRefs::default(),
             sequences: Vector::new(),
         }
     }
@@ -67,7 +71,8 @@ impl Project {
         self.next_id
     }
 
-    pub fn media(&self) -> &MediaRefs {
+    /// The media pool: the project's source references with their bins and labels.
+    pub fn media(&self) -> &MediaPool {
         &self.media
     }
 
@@ -133,70 +138,10 @@ impl Project {
     }
 }
 
-/// A reference to one source file: its content hash (`media::ContentHash`, hex) and the
-/// path it was last found at.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MediaRef {
-    pub id: MediaId,
-    pub content_hash: String,
-    pub path: String,
-}
-
-/// The project's source references by id. Serialised as `{"refs": [...]}` with the list
-/// ordered by id (schema v2); the object leaves room for the media pool's bins and
-/// metadata next to the references.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct MediaRefs(pub(crate) OrdMap<MediaId, Arc<MediaRef>>);
-
-impl MediaRefs {
-    pub fn get(&self, id: MediaId) -> Option<&Arc<MediaRef>> {
-        self.0.get(&id)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &Arc<MediaRef>> {
-        self.0.values()
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// True when both share the same underlying tree (no copy was made).
-    pub fn ptr_eq(&self, other: &MediaRefs) -> bool {
-        self.0.ptr_eq(&other.0)
-    }
-}
-
-/// The serde form of [`MediaRefs`].
-#[derive(Serialize)]
-struct MediaRefsOut<'a> {
-    refs: Vec<&'a Arc<MediaRef>>,
-}
-
-#[derive(Deserialize)]
-struct MediaRefsIn {
-    refs: Vec<Arc<MediaRef>>,
-}
-
-impl Serialize for MediaRefs {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        MediaRefsOut {
-            refs: self.0.values().collect(),
-        }
-        .serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for MediaRefs {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let list = MediaRefsIn::deserialize(deserializer)?.refs;
-        Ok(MediaRefs(list.into_iter().map(|m| (m.id, m)).collect()))
-    }
-}
+/// A reference to one source file: the media pool item (schema v9) holding its path,
+/// content hash, name, bin, labels and the facts read at import. The name is kept for the
+/// timeline code that only reads `path` and `content_hash`.
+pub type MediaRef = MediaItem;
 
 /// A timeline: tracks on one canvas at one frame rate and audio sample rate. Its format
 /// fields ([`Sequence::format`]) change only through
@@ -300,6 +245,20 @@ impl Sequence {
     pub fn marker(&self, id: MarkerId) -> Option<&Arc<Marker>> {
         self.markers.iter().find(|m| m.id == id)
     }
+
+    /// Whether any audio track of the sequence is soloed.
+    pub fn any_solo(&self) -> bool {
+        self.tracks
+            .iter()
+            .any(|t| t.kind == TrackKind::Audio && t.solo)
+    }
+
+    /// Whether `track` is heard: an audio track of this sequence, not muted, and soloed
+    /// whenever any audio track of the sequence is ([`Track::audible`]).
+    pub fn audible(&self, track: TrackId) -> bool {
+        self.track(track)
+            .is_some_and(|t| t.audible(self.any_solo()))
+    }
 }
 
 /// What a track holds. Each kind accepts one kind of item ([`TrackKind::accepts`]):
@@ -333,6 +292,24 @@ impl TrackKind {
     }
 }
 
+/// A track's height preset in the timeline (schema v9). The UI maps each to its row
+/// height.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackHeight {
+    /// One control row: name and switches.
+    Small,
+    /// Adds a caption line under the name.
+    #[default]
+    Medium,
+    /// Room for thumbnails and waveforms.
+    Large,
+}
+
+impl TrackHeight {
+    pub const ALL: [TrackHeight; 3] = [TrackHeight::Small, TrackHeight::Medium, TrackHeight::Large];
+}
+
 /// A track: items ordered by start time, never overlapping.
 ///
 /// Gaps are implicit: the empty space between items is not stored (no gap items), so no
@@ -343,6 +320,20 @@ pub struct Track {
     pub id: TrackId,
     pub kind: TrackKind,
     pub name: String,
+    /// Audio tracks: silenced (schema v9; see [`crate::switches`]). Never set on the
+    /// other kinds.
+    pub muted: bool,
+    /// Audio tracks: soloed; while any audio track of a sequence is, the audio tracks
+    /// that are not are silent too ([`Sequence::audible`]). Never set on the other kinds.
+    pub solo: bool,
+    /// Picture tracks (video, subtitle, adjustment): shown in the picture. Always true on
+    /// audio tracks.
+    pub visible: bool,
+    /// Edits to the track and everything on it are refused, all but unlocking it and
+    /// changing its height ([`EditError::TrackLocked`]).
+    pub locked: bool,
+    /// The track's height in the timeline (a view setting kept with the project).
+    pub height: TrackHeight,
     pub items: Vector<Arc<Item>>,
     /// Transitions on the cuts of this track's clips, ordered by id (schema v5; see
     /// [`crate::transition`]).
@@ -350,8 +341,38 @@ pub struct Track {
 }
 
 impl Track {
+    /// An empty track of `kind` with its switches at their defaults: heard, shown,
+    /// unlocked, medium height.
+    pub fn new(id: TrackId, kind: TrackKind, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            kind,
+            name: name.into(),
+            muted: false,
+            solo: false,
+            visible: true,
+            locked: false,
+            height: TrackHeight::default(),
+            items: Vector::new(),
+            transitions: Vector::new(),
+        }
+    }
+
     pub fn item(&self, id: ItemId) -> Option<&Arc<Item>> {
         self.items.iter().find(|i| i.id == id)
+    }
+
+    /// Whether the track's items show in the picture: a picture track (not audio) that
+    /// is visible.
+    pub fn shows_picture(&self) -> bool {
+        self.kind != TrackKind::Audio && self.visible
+    }
+
+    /// Whether an audio track is heard: not muted, and soloed whenever `any_solo` (any
+    /// audio track of its sequence is soloed). Mute wins over solo. Other kinds are
+    /// never heard.
+    pub fn audible(&self, any_solo: bool) -> bool {
+        self.kind == TrackKind::Audio && !self.muted && (self.solo || !any_solo)
     }
 
     /// Equal content, comparing shared items by pointer first.
@@ -360,12 +381,22 @@ impl Track {
             id,
             kind,
             name,
+            muted,
+            solo,
+            visible,
+            locked,
+            height,
             items,
             transitions,
         } = self;
         *id == other.id
             && *kind == other.kind
             && *name == other.name
+            && *muted == other.muted
+            && *solo == other.solo
+            && *visible == other.visible
+            && *locked == other.locked
+            && *height == other.height
             && all_eq(items, &other.items, |a, b| a == b)
             && all_eq(transitions, &other.transitions, |a, b| a == b)
     }
@@ -447,8 +478,8 @@ impl Item {
 
 /// What a clip shows: a source file, or another sequence of the project (a nested
 /// sequence; schema v8, see [`crate::nest`]). Serialised flat inside the clip, as
-/// `"media": 3` or `"sequence": 7`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// `"media": 3` or `"sequence": 7`; a clip naming both, or neither, does not load.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClipSource {
     Media(MediaId),
@@ -469,6 +500,47 @@ impl ClipSource {
             ClipSource::Sequence(s) => Some(s),
             ClipSource::Media(_) => None,
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for ClipSource {
+    /// Reads every key the clip left over (it is flattened into the clip), so a clip
+    /// with both `media` and `sequence` is refused instead of taking the first one.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Keys;
+
+        impl<'de> serde::de::Visitor<'de> for Keys {
+            type Value = ClipSource;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a clip source, \"media\" or \"sequence\"")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<ClipSource, A::Error> {
+                let mut found = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    let source = match key.as_str() {
+                        "media" => ClipSource::Media(map.next_value()?),
+                        "sequence" => ClipSource::Sequence(map.next_value()?),
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                            continue;
+                        }
+                    };
+                    if found.replace(source).is_some() {
+                        return Err(serde::de::Error::custom(
+                            "a clip names both a media and a sequence source",
+                        ));
+                    }
+                }
+                found.ok_or_else(|| serde::de::Error::custom("a clip names no media or sequence"))
+            }
+        }
+
+        deserializer.deserialize_map(Keys)
     }
 }
 

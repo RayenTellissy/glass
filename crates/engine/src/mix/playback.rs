@@ -165,7 +165,9 @@ impl AudioPlayback {
         let _ = self.tx.send(Message::Update(Box::new((project, settings))));
     }
 
-    /// Changes one strip setting (a fader move, a mute) at once.
+    /// Changes one strip setting (a fader move, a mute) at once. A track's mute and solo
+    /// are project switches: this applies them to the playing graph only, so make the
+    /// edit too and [`update`](Self::update) with it, or the next graph forgets them.
     pub fn set(&self, strip: StripRef, param: Param) {
         let _ = self.tx.send(Message::Set(strip, param));
     }
@@ -326,38 +328,37 @@ impl Feeder {
 
     /// Keeps a setting change for graphs built later.
     fn remember(&mut self, strip: StripRef, param: Param) {
-        let apply =
-            |fader: &mut f64, pan: &mut f64, mute: &mut bool, sends: &mut Vec<_>| match param {
-                Param::Fader(db) => *fader = db,
-                Param::Pan(p) => *pan = p,
-                Param::Mute(m) => *mute = m,
-                Param::Solo(_) => {}
-                Param::SendLevel { send, level_db } => {
-                    if let Some(s) = sends.get_mut(send) {
-                        let s: &mut audio::mixer::SendSpec = s;
-                        s.level_db = level_db;
-                    }
+        let apply = |fader: &mut f64,
+                     pan: &mut f64,
+                     mute: Option<&mut bool>,
+                     sends: &mut Vec<_>| match param {
+            Param::Fader(db) => *fader = db,
+            Param::Pan(p) => *pan = p,
+            Param::Mute(m) => {
+                if let Some(mute) = mute {
+                    *mute = m;
                 }
-            };
+            }
+            Param::Solo(_) => {}
+            Param::SendLevel { send, level_db } => {
+                if let Some(s) = sends.get_mut(send) {
+                    let s: &mut audio::mixer::SendSpec = s;
+                    s.level_db = level_db;
+                }
+            }
+        };
         match strip {
             StripRef::Track(id) => {
+                // Track mute and solo live in the project (see `set`).
                 let track = self.settings.track_mut(TrackId(id));
-                if let Param::Solo(solo) = param {
-                    track.solo = solo;
-                }
-                apply(
-                    &mut track.fader_db,
-                    &mut track.pan,
-                    &mut track.mute,
-                    &mut track.sends,
-                );
+                apply(&mut track.fader_db, &mut track.pan, None, &mut track.sends);
             }
             StripRef::Bus(id) => {
                 if let Some(bus) = self.settings.buses.iter_mut().find(|b| b.id == id) {
                     apply(
                         &mut bus.fader_db,
                         &mut bus.pan,
-                        &mut bus.mute,
+                        Some(&mut bus.mute),
                         &mut bus.sends,
                     );
                 }

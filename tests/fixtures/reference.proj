@@ -1,6 +1,6 @@
 {
   "format": "glass.project",
-  "schema_version": 8,
+  "schema_version": 9,
   "project": {
     "uid": "glass-reference",
     "name": "Reference",
@@ -25,33 +25,246 @@
       }
     },
     "media": {
-      "refs": [
+      "bins": [
+        {
+          "id": 0,
+          "name": "Reference",
+          "parent": null
+        }
+      ],
+      "items": [
         {
           "id": 1,
+          "bin": 0,
+          "name": "h264_1080p30",
+          "kind": "video",
+          "path": "generated/h264_1080p30.mp4",
+          "spanned": [],
+          "sidecars": [],
           "content_hash": "",
-          "path": "generated/h264_1080p30.mp4"
+          "size_bytes": 0,
+          "card": null,
+          "added_unix": 0,
+          "facts": {
+            "duration_s": null,
+            "width": 0,
+            "height": 0,
+            "frame_rate": null,
+            "video_codec": null,
+            "video_profile": null,
+            "bit_depth": 0,
+            "chroma": null,
+            "primaries": null,
+            "hdr": null,
+            "audio_codec": null,
+            "audio_channels": 0,
+            "sample_rate": 0,
+            "audio_bit_depth": null,
+            "sequence_frames": null,
+            "container": null
+          },
+          "metadata": {
+            "camera_make": null,
+            "camera_model": null,
+            "lens": null,
+            "focal_length_mm": null,
+            "f_number": null,
+            "iso": null,
+            "shutter": null,
+            "timecode": null,
+            "reel": null,
+            "gps": null,
+            "created": null
+          },
+          "label": null,
+          "tags": []
         },
         {
           "id": 2,
+          "bin": 0,
+          "name": "prores422_1080p23976",
+          "kind": "video",
+          "path": "generated/prores422_1080p23976.mov",
+          "spanned": [],
+          "sidecars": [],
           "content_hash": "",
-          "path": "generated/prores422_1080p23976.mov"
+          "size_bytes": 0,
+          "card": null,
+          "added_unix": 0,
+          "facts": {
+            "duration_s": null,
+            "width": 0,
+            "height": 0,
+            "frame_rate": null,
+            "video_codec": null,
+            "video_profile": null,
+            "bit_depth": 0,
+            "chroma": null,
+            "primaries": null,
+            "hdr": null,
+            "audio_codec": null,
+            "audio_channels": 0,
+            "sample_rate": 0,
+            "audio_bit_depth": null,
+            "sequence_frames": null,
+            "container": null
+          },
+          "metadata": {
+            "camera_make": null,
+            "camera_model": null,
+            "lens": null,
+            "focal_length_mm": null,
+            "f_number": null,
+            "iso": null,
+            "shutter": null,
+            "timecode": null,
+            "reel": null,
+            "gps": null,
+            "created": null
+          },
+          "label": null,
+          "tags": []
         },
         {
           "id": 3,
+          "bin": 0,
+          "name": "hevc_10bit_1080p25",
+          "kind": "video",
+          "path": "generated/hevc_10bit_1080p25.mp4",
+          "spanned": [],
+          "sidecars": [],
           "content_hash": "",
-          "path": "generated/hevc_10bit_1080p25.mp4"
+          "size_bytes": 0,
+          "card": null,
+          "added_unix": 0,
+          "facts": {
+            "duration_s": null,
+            "width": 0,
+            "height": 0,
+            "frame_rate": null,
+            "video_codec": null,
+            "video_profile": null,
+            "bit_depth": 0,
+            "chroma": null,
+            "primaries": null,
+            "hdr": null,
+            "audio_codec": null,
+            "audio_channels": 0,
+            "sample_rate": 0,
+            "audio_bit_depth": null,
+            "sequence_frames": null,
+            "container": null
+          },
+          "metadata": {
+            "camera_make": null,
+            "camera_model": null,
+            "lens": null,
+            "focal_length_mm": null,
+            "f_number": null,
+            "iso": null,
+            "shutter": null,
+            "timecode": null,
+            "reel": null,
+            "gps": null,
+            "created": null
+          },
+          "label": null,
+          "tags": []
         },
         {
           "id": 4,
+          "bin": 0,
+          "name": "scenes_cuts_640x360_30",
+          "kind": "video",
+          "path": "generated/scenes_cuts_640x360_30.mp4",
+          "spanned": [],
+          "sidecars": [],
           "content_hash": "",
-          "path": "generated/scenes_cuts_640x360_30.mp4"
+          "size_bytes": 0,
+          "card": null,
+          "added_unix": 0,
+          "facts": {
+            "duration_s": null,
+            "width": 0,
+            "height": 0,
+            "frame_rate": null,
+            "video_codec": null,
+            "video_profile": null,
+            "bit_depth": 0,
+            "chroma": null,
+            "primaries": null,
+            "hdr": null,
+            "audio_codec": null,
+            "audio_channels": 0,
+            "sample_rate": 0,
+            "audio_bit_depth": null,
+            "sequence_frames": null,
+            "container": null
+          },
+          "metadata": {
+            "camera_make": null,
+            "camera_model": null,
+            "lens": null,
+            "focal_length_mm": null,
+            "f_number": null,
+            "iso": null,
+            "shutter": null,
+            "timecode": null,
+            "reel": null,
+            "gps": null,
+            "created": null
+          },
+          "label": null,
+          "tags": []
         },
         {
           "id": 5,
+          "bin": 0,
+          "name": "audio_48k_stereo",
+          "kind": "audio",
+          "path": "generated/audio_48k_stereo.wav",
+          "spanned": [],
+          "sidecars": [],
           "content_hash": "",
-          "path": "generated/audio_48k_stereo.wav"
+          "size_bytes": 0,
+          "card": null,
+          "added_unix": 0,
+          "facts": {
+            "duration_s": null,
+            "width": 0,
+            "height": 0,
+            "frame_rate": null,
+            "video_codec": null,
+            "video_profile": null,
+            "bit_depth": 0,
+            "chroma": null,
+            "primaries": null,
+            "hdr": null,
+            "audio_codec": null,
+            "audio_channels": 0,
+            "sample_rate": 0,
+            "audio_bit_depth": null,
+            "sequence_frames": null,
+            "container": null
+          },
+          "metadata": {
+            "camera_make": null,
+            "camera_model": null,
+            "lens": null,
+            "focal_length_mm": null,
+            "f_number": null,
+            "iso": null,
+            "shutter": null,
+            "timecode": null,
+            "reel": null,
+            "gps": null,
+            "created": null
+          },
+          "label": null,
+          "tags": []
         }
-      ]
+      ],
+      "label_names": {}
     },
     "sequences": [
       {
@@ -116,6 +329,11 @@
             "id": 7,
             "kind": "video",
             "name": "V2",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
             "items": [
               {
                 "id": 28,
@@ -224,6 +442,11 @@
             "id": 8,
             "kind": "video",
             "name": "V1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
             "items": [
               {
                 "id": 10,
@@ -455,6 +678,11 @@
             "id": 9,
             "kind": "audio",
             "name": "A1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
             "items": [
               {
                 "id": 18,
@@ -532,6 +760,11 @@
             "id": 25,
             "kind": "video",
             "name": "V2",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
             "items": [
               {
                 "id": 16,
@@ -620,6 +853,11 @@
             "id": 26,
             "kind": "video",
             "name": "V1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
             "items": [],
             "transitions": []
           },
@@ -627,6 +865,11 @@
             "id": 27,
             "kind": "audio",
             "name": "A1",
+            "muted": false,
+            "solo": false,
+            "visible": true,
+            "locked": false,
+            "height": "medium",
             "items": [],
             "transitions": []
           }

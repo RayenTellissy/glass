@@ -267,10 +267,10 @@ enum Origin {
 }
 
 impl TimelinePlan {
-    /// Compiles the video tracks of `sequence`. Clips that are disabled, whose media the
-    /// project does not list, or that sit on other kinds of tracks are left out; effects
-    /// without a renderer (unknown schemas) are skipped and counted. A clip of a
-    /// sequence compiles that sequence too (each once per build).
+    /// Compiles the visible video tracks of `sequence`. Clips that are disabled, whose
+    /// media the project does not list, or that sit on hidden tracks or other kinds of
+    /// tracks are left out; effects without a renderer (unknown schemas) are skipped and
+    /// counted. A clip of a sequence compiles that sequence too (each once per build).
     pub fn build(project: &Project, sequence: SequenceId) -> Result<Self, PlanError> {
         Self::build_nested(project, sequence, 0, &mut HashMap::new())
     }
@@ -295,10 +295,11 @@ impl TimelinePlan {
         let mut nested_clips = 0;
         let mut skipped_effects = 0;
 
+        // Hidden tracks (schema v9) composite nothing.
         let video: Vec<_> = seq
             .tracks
             .iter()
-            .filter(|t| t.kind == TrackKind::Video)
+            .filter(|t| t.kind == TrackKind::Video && t.visible)
             .collect();
         let ranks = video.len();
         for (rank, track) in video.iter().rev().enumerate() {
