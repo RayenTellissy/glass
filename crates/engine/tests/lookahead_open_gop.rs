@@ -158,6 +158,7 @@ fn play(
         source: SourceRef::new(SourceId(*source), path),
         timeline: timeline.clone(),
         source_start: expected.software[*first].0,
+        speed: Rational::new(1, 1),
         layer: 0,
         hash: SegmentHash::from(timeline.start as u64),
     });
