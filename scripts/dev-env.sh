@@ -2,7 +2,7 @@
 #   source scripts/dev-env.sh
 # Works in zsh and bash, in the main checkout and in linked worktrees.
 
-export CARGO_BUILD_JOBS=4
+export CARGO_BUILD_JOBS=8
 
 if [ -n "${BASH_SOURCE:-}" ]; then
     _glass_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
