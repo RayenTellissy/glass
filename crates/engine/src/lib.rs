@@ -5,6 +5,7 @@
 
 pub mod analysis;
 pub mod autosave;
+pub mod export;
 pub mod frame_queue;
 pub mod logging;
 pub mod lookahead;
