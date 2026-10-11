@@ -1,6 +1,7 @@
 //! Typed errors for edit operations.
 
 use crate::id::{EffectId, ItemId, MarkerId, MediaId, SequenceId, TrackId, TransitionId};
+use crate::keyframe::HandleSide;
 use crate::model::TrackKind;
 use crate::settings::CacheFolder;
 use crate::time::{Rational, Time, TimeError};
@@ -87,6 +88,35 @@ pub enum EditError {
     UnknownParam { schema: String, param: String },
     #[error("effect index {index} out of range (the stack holds {len})")]
     EffectIndex { index: usize, len: usize },
+    #[error("{0} cannot be animated")]
+    NotAnimatable(String),
+    #[error("{0} is already animated")]
+    AlreadyAnimated(String),
+    #[error("{0} is not animated")]
+    NotAnimated(String),
+    #[error("a curve needs at least one key")]
+    EmptyCurve,
+    #[error("no key at {0} s")]
+    NoKeyAt(Time),
+    #[error("another key is already at {0} s")]
+    KeyTimeTaken(Time),
+    #[error("keys must be in time order without two at one time, but one is at {0} s")]
+    KeysOutOfOrder(Time),
+    #[error("keys cannot be before zero, got {0} s")]
+    KeyBeforeZero(Time),
+    #[error("a key value must be a {expected}, not a {found}")]
+    KeyValueKind {
+        expected: &'static str,
+        found: &'static str,
+    },
+    #[error("a handle needs {expected} speeds, one per value component, not {found}")]
+    HandleComponents { expected: usize, found: usize },
+    #[error("the {side:?} handle of the key at {time} s is not part of a bezier")]
+    NotBezier { time: Time, side: HandleSide },
+    #[error("key times scale by a positive factor, not {0}")]
+    TimeScale(Rational),
+    #[error("parameter id {0:?} is not lowercase ASCII, digits, '.', '_' or '-'")]
+    InvalidParamId(String),
     #[error("no transition {0}")]
     UnknownTransition(TransitionId),
     #[error("transition kind {0:?} is not lowercase ASCII letters, digits and '-'")]
