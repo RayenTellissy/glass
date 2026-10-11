@@ -1,0 +1,11 @@
+{
+  "id": "vhs",
+  "name": "transition.name.vhs",
+  "category": "stylised",
+  "directions": [],
+  "thumbnail": 0.5,
+  "params": [
+    {"id": "seed", "label": "transition.param.seed", "kind": {"int": {"default": 1, "range": {"min": 0, "max": 9999}, "soft": null}}, "unit": "none", "keyframeable": false},
+    {"id": "amount", "label": "transition.param.amount", "kind": {"float": {"default": 1.0, "range": {"min": 0.0, "max": 1.0}, "soft": null, "decimals": 0}}, "unit": "percent", "keyframeable": false}
+  ]
+}

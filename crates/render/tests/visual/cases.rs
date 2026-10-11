@@ -204,6 +204,51 @@ pub fn all() -> Vec<Case> {
             frames: &[6, 12, 18],
             scene: roll,
         },
+        Case {
+            name: "glitch",
+            frames: &[6, 12, 18],
+            scene: glitch,
+        },
+        Case {
+            name: "rgb_split",
+            frames: &[6, 12, 18],
+            scene: rgb_split,
+        },
+        Case {
+            name: "pixelate",
+            frames: &[6, 12, 18],
+            scene: pixelate,
+        },
+        Case {
+            name: "vhs",
+            frames: &[6, 12, 18],
+            scene: vhs,
+        },
+        Case {
+            name: "light_leak",
+            frames: &[6, 12, 18],
+            scene: light_leak,
+        },
+        Case {
+            name: "film_burn",
+            frames: &[6, 12, 18],
+            scene: film_burn,
+        },
+        Case {
+            name: "ink_bleed",
+            frames: &[6, 12, 18],
+            scene: ink_bleed,
+        },
+        Case {
+            name: "paper_tear",
+            frames: &[6, 12, 18],
+            scene: paper_tear,
+        },
+        Case {
+            name: "liquid",
+            frames: &[6, 12, 18],
+            scene: liquid,
+        },
     ]
 }
 
@@ -700,4 +745,53 @@ fn swirl(frame: u32) -> Scene {
 /// quarters of the way.
 fn roll(frame: u32) -> Scene {
     transition("roll", frame)
+}
+
+/// Glitch (seed 1, 60%), a quarter, half and three quarters of the way.
+fn glitch(frame: u32) -> Scene {
+    transition("glitch", frame)
+}
+
+/// RGB split (travelling right, 6% of the width at the middle), a quarter, half and
+/// three quarters of the way.
+fn rgb_split(frame: u32) -> Scene {
+    transition("rgb-split", frame)
+}
+
+/// Pixelate (blocks up to 5% of the width), a quarter, half and three quarters of the
+/// way.
+fn pixelate(frame: u32) -> Scene {
+    transition("pixelate", frame)
+}
+
+/// VHS (seed 1, full strength), a quarter, half and three quarters of the way.
+fn vhs(frame: u32) -> Scene {
+    transition("vhs", frame)
+}
+
+/// Light leak (seed 1, sweeping right, warm orange at intensity 1), a quarter, half and
+/// three quarters of the way.
+fn light_leak(frame: u32) -> Scene {
+    transition("light-leak", frame)
+}
+
+/// Film burn (seed 1, orange glow at 2), a quarter, half and three quarters of the way.
+fn film_burn(frame: u32) -> Scene {
+    transition("film-burn", frame)
+}
+
+/// Ink bleed (seed 1, 6% softness), a quarter, half and three quarters of the way.
+fn ink_bleed(frame: u32) -> Scene {
+    transition("ink-bleed", frame)
+}
+
+/// Paper tear (seed 1, travelling right, 4% roughness), a quarter, half and three
+/// quarters of the way.
+fn paper_tear(frame: u32) -> Scene {
+    transition("paper-tear", frame)
+}
+
+/// Liquid (seed 1, 8% push), a quarter, half and three quarters of the way.
+fn liquid(frame: u32) -> Scene {
+    transition("liquid", frame)
 }
