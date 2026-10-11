@@ -1,12 +1,13 @@
 //! Playing and exporting the reference sequence headless, through the same engine paths
 //! the app uses: `TimelinePlayback` for play, the look-ahead and `TimelineRenderer` for
-//! export frames, `media::export` to encode them and `media::export::verify` to read the
-//! file back.
+//! export frames, `engine::mix` for the export's audio, `media::export` to encode them and
+//! `media::export::verify` to read the file back.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use engine::audio::Clock;
+use engine::audio::mixer::Layout;
 use engine::lookahead::{
     GopIndexes, Lookahead, LookaheadConfig, MediaDecoder, MediaDecoderOptions,
 };
@@ -14,6 +15,8 @@ use engine::media::analysis::Unattended;
 use engine::media::export::presets::{Preset, TimelineFormat};
 use engine::media::export::verify::{self, Expected};
 use engine::media::export::{EncoderPreference, ExportSession, Picture};
+use engine::mix::{MixFormat, MixSettings, OfflineMix, mix_range};
+use engine::project::{Project, SequenceId, Time, TimeRange};
 use engine::quality::QualityLevel;
 use engine::render::readback::{ReadbackConfig, ReadbackRing};
 use engine::render::wgpu;
@@ -130,11 +133,49 @@ pub fn play(gpu: &Gpu, plan: &Arc<TimelinePlan>, frames: i64) -> Result<(), Stri
     Ok(())
 }
 
-/// Exports `range` of the timeline with the [`PRESET`] in software H.264 (audio is
-/// silence: the engine has no audio mix yet), then verifies the file.
+/// The level of `samples` (one channel of interleaved frames) in dBFS: peak and RMS.
+fn levels(samples: impl Iterator<Item = f32> + Clone) -> (f64, f64) {
+    let n = samples.clone().count().max(1) as f64;
+    let peak = samples.clone().fold(0.0f32, |m, s| m.max(s.abs()));
+    let rms = (samples.map(|s| f64::from(s) * f64::from(s)).sum::<f64>() / n).sqrt();
+    let dbfs = |v: f64| 20.0 * v.log10();
+    (dbfs(f64::from(peak)), dbfs(rms))
+}
+
+/// Mixes `seconds` of the sequence from its start offline (`engine::mix::mix_range`) and
+/// checks the left channel against the A1 tone: 440 Hz at 0.125 on the left of
+/// `audio_48k_stereo.wav`, at the clip's -6 dB.
+pub fn mix_check(project: &Project, sequence: SequenceId, seconds: i64) -> Result<(), String> {
+    let started = Instant::now();
+    let range = TimeRange::new(Time::ZERO, Time::seconds(seconds));
+    let mixed = mix_range(project, sequence, range).map_err(|e| format!("mix: {e}"))?;
+    let left = mixed.iter().step_by(2).copied();
+    let right = mixed.iter().skip(1).step_by(2).copied();
+    let (left_peak, left_rms) = levels(left);
+    let (right_peak, right_rms) = levels(right);
+    let expected = 20.0 * (0.125f64).log10() - 6.0;
+    println!(
+        "smoke: mixed {seconds} s of the sequence in {:.0} ms: left peak {left_peak:.2} dBFS \
+         (the tone at -6 dB: {expected:.2}), RMS {left_rms:.2} dBFS; right peak \
+         {right_peak:.2} dBFS, RMS {right_rms:.2} dBFS",
+        ms(started.elapsed()),
+    );
+    // The 16-bit fixture rounds the tone's peak by under 0.01 dB.
+    if (left_peak - expected).abs() > 0.05 {
+        return Err(format!(
+            "the mix's left peak is {left_peak:.2} dBFS, expected {expected:.2} dBFS"
+        ));
+    }
+    Ok(())
+}
+
+/// Exports `range` of the timeline with the [`PRESET`] in software H.264, its audio mixed
+/// from the sequence by `engine::mix`, then verifies the file.
 pub fn export(
     gpu: &Gpu,
     plan: &Arc<TimelinePlan>,
+    project: &Project,
+    sequence: SequenceId,
     range: std::ops::Range<i64>,
 ) -> Result<(), String> {
     let started = Instant::now();
@@ -161,75 +202,75 @@ pub fn export(
         std::process::id(),
         settings.container.extension()
     ));
-    let result = encode(
-        gpu,
-        plan,
-        range.clone(),
-        &settings,
-        &path,
+    let format = MixFormat {
         sample_rate,
-        channels,
-    )
-    .and_then(|(summary, timings)| {
-        let encoded = started.elapsed();
-        let frames = (range.end - range.start) as u64;
-        let duration = frames as f64 / fps(plan);
-        let report = verify::verify(
-            &path,
-            &Expected::new(&settings, frames, duration).with_preset(preset),
-            &Unattended,
-        )
-        .map_err(|e| format!("verify: {e}"))?;
-        println!(
-            "smoke: exported frames {}..{} ({duration:.2} s) with {PRESET} through {} \
+        layout: Layout::for_channels(channels),
+    };
+    let start = (range.start as f64 * f64::from(sample_rate) / fps(plan)).round() as i64;
+    let mut mix = OfflineMix::new(project, sequence, &MixSettings::default(), format, start)
+        .map_err(|e| format!("mix: {e}"))?;
+    let result = encode(gpu, plan, range.clone(), &settings, &path, &mut mix).and_then(
+        |(summary, timings, audio_peak)| {
+            let encoded = started.elapsed();
+            let frames = (range.end - range.start) as u64;
+            let duration = frames as f64 / fps(plan);
+            let report = verify::verify(
+                &path,
+                &Expected::new(&settings, frames, duration).with_preset(preset),
+                &Unattended,
+            )
+            .map_err(|e| format!("verify: {e}"))?;
+            println!(
+                "smoke: exported frames {}..{} ({duration:.2} s) with {PRESET} through {} \
                  and {} in {:.0} ms (decode wait {:.0} ms, render {:.0} ms, readback {:.0} ms, \
-                 encode {:.0} ms), {} bytes; audio is silence (no audio mix in the engine yet)",
-            range.start,
-            range.end,
-            summary.video_encoder.as_deref().unwrap_or("?"),
-            summary.audio_encoder.as_deref().unwrap_or("?"),
-            ms(encoded),
-            ms(timings.decode),
-            ms(timings.render),
-            ms(timings.readback),
-            ms(timings.encode),
-            summary.bytes,
-        );
-        println!(
-            "smoke: verified in {:.0} ms: {} frames, video {:.3} s, audio {:.3} s, \
+                 encode {:.0} ms), {} bytes; audio mixed by engine::mix, peak {audio_peak:.1} dBFS",
+                range.start,
+                range.end,
+                summary.video_encoder.as_deref().unwrap_or("?"),
+                summary.audio_encoder.as_deref().unwrap_or("?"),
+                ms(encoded),
+                ms(timings.decode),
+                ms(timings.render),
+                ms(timings.readback),
+                ms(timings.encode),
+                summary.bytes,
+            );
+            println!(
+                "smoke: verified in {:.0} ms: {} frames, video {:.3} s, audio {:.3} s, \
                  {} checks, {} failures, {} warnings{}",
-            ms(started.elapsed() - encoded),
-            report.measured.frames.unwrap_or(0),
-            report.measured.video_duration.unwrap_or(0.0),
-            report.measured.audio_duration.unwrap_or(0.0),
-            report.checked.len(),
-            report.failures().count(),
-            report.warnings().count(),
-            if report.warnings().count() > 0 {
-                format!(
-                    " ({})",
-                    report
-                        .warnings()
-                        .map(|w| w.key)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            } else {
-                String::new()
-            },
-        );
-        if !report.passed() {
-            let failures: Vec<String> = report
-                .failures()
-                .map(|f| format!("{} {:?}", f.key, f.args))
-                .collect();
-            return Err(format!(
-                "the export failed verification: {}",
-                failures.join("; ")
-            ));
-        }
-        Ok(())
-    });
+                ms(started.elapsed() - encoded),
+                report.measured.frames.unwrap_or(0),
+                report.measured.video_duration.unwrap_or(0.0),
+                report.measured.audio_duration.unwrap_or(0.0),
+                report.checked.len(),
+                report.failures().count(),
+                report.warnings().count(),
+                if report.warnings().count() > 0 {
+                    format!(
+                        " ({})",
+                        report
+                            .warnings()
+                            .map(|w| w.key)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                } else {
+                    String::new()
+                },
+            );
+            if !report.passed() {
+                let failures: Vec<String> = report
+                    .failures()
+                    .map(|f| format!("{} {:?}", f.key, f.args))
+                    .collect();
+                return Err(format!(
+                    "the export failed verification: {}",
+                    failures.join("; ")
+                ));
+            }
+            Ok(())
+        },
+    );
     let _ = std::fs::remove_file(&path);
     result
 }
@@ -248,9 +289,8 @@ fn encode(
     range: std::ops::Range<i64>,
     settings: &engine::media::export::ExportSettings,
     path: &std::path::Path,
-    sample_rate: u32,
-    channels: usize,
-) -> Result<(engine::media::export::ExportSummary, Timings), String> {
+    mix: &mut OfflineMix,
+) -> Result<(engine::media::export::ExportSummary, Timings, f64), String> {
     let mut session = ExportSession::create(path, settings).map_err(|e| e.to_string())?;
     let rate = plan.rate();
     let options = MediaDecoderOptions {
@@ -273,9 +313,10 @@ fn encode(
     let mut ring = ReadbackRing::new(ReadbackConfig::EXPORT);
     let mut layers = Vec::new();
     let mut timings = Timings::default();
-    let per_frame = (f64::from(sample_rate) / fps(plan)).round() as usize;
-    let silence = vec![0.0f32; per_frame];
-    let planes: Vec<&[f32]> = (0..channels).map(|_| silence.as_slice()).collect();
+    let sample_rate = f64::from(mix.format().sample_rate);
+    let samples_at = |frame: i64| (frame as f64 * sample_rate / fps(plan)).round() as i64;
+    let mut planes = vec![Vec::new(); mix.channels()];
+    let mut audio_peak = 0.0f32;
     let mut t = range.start;
     let mut waited = Instant::now();
     while t < range.end {
@@ -306,7 +347,14 @@ fn encode(
                 frame.width as usize * 4,
             ))
             .map_err(|e| e.to_string())?;
-        session.push_audio(&planes).map_err(|e| e.to_string())?;
+        let samples = (samples_at(t + 1) - samples_at(t)) as usize;
+        mix.render_planar(samples, &mut planes);
+        audio_peak = planes
+            .iter()
+            .flatten()
+            .fold(audio_peak, |m, s| m.max(s.abs()));
+        let refs: Vec<&[f32]> = planes.iter().map(Vec::as_slice).collect();
+        session.push_audio(&refs).map_err(|e| e.to_string())?;
         timings.encode += encoding.elapsed();
         ring.recycle(frame);
         t += 1;
@@ -324,5 +372,9 @@ fn encode(
     let encoding = Instant::now();
     let summary = session.finish().map_err(|e| e.to_string())?;
     timings.encode += encoding.elapsed();
-    Ok((summary, timings))
+    let mix_stats = mix.stats();
+    if mix_stats.failed_opens + mix_stats.decode_errors + mix_stats.missing_media > 0 {
+        return Err(format!("the audio mix left clips out: {mix_stats:?}"));
+    }
+    Ok((summary, timings, 20.0 * f64::from(audio_peak).log10()))
 }
