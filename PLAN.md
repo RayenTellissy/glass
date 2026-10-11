@@ -184,7 +184,7 @@ Done when: the stress project (Phase 16) plays at full rate on both platforms, s
   - [ ] Listening check on real hardware: run `GLASS_AUDIO_DEVICE_TEST=1 cargo test -p audio --test device` on built-in speakers, USB and Bluetooth outputs, and confirm lip sync by eye and ear once the engine plays through the clock (needs-human: judging audible sync and other output devices needs a person at the machine)
 - [x] Look-ahead decode across cuts and transitions, configurable depth
 - [x] Rendered-frame cache keyed by (segment hash, frame index), LRU in VRAM with RAM spill and a configurable ceiling
-- [ ] Dirty-range invalidation: any edit invalidates only affected segments, verified by a test that counts re-renders
+- [~] Dirty-range invalidation: any edit invalidates only affected segments, verified by a test that counts re-renders
 - [x] Adaptive quality: drop preview resolution before dropping frames, restore when idle
 - [x] Scrub mode: nearest cached frame immediately, exact frame when the pointer pauses for 40 ms
 - [ ] JKL shuttle, reverse playback, audio scrubbing
