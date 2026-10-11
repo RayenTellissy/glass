@@ -1,8 +1,9 @@
 //! Typed errors for edit operations.
 
-use crate::id::{EffectId, ItemId, MarkerId, MediaId, SequenceId, TrackId};
+use crate::id::{EffectId, ItemId, MarkerId, MediaId, SequenceId, TrackId, TransitionId};
 use crate::model::TrackKind;
 use crate::time::{Rational, Time, TimeError};
+use crate::transition::CutSide;
 
 /// Why an edit was rejected. A rejected edit leaves the project unchanged (edits return a
 /// new root and never modify the old one).
@@ -79,6 +80,42 @@ pub enum EditError {
     UnknownParam { schema: String, param: String },
     #[error("effect index {index} out of range (the stack holds {len})")]
     EffectIndex { index: usize, len: usize },
+    #[error("no transition {0}")]
+    UnknownTransition(TransitionId),
+    #[error("transition kind {0:?} is not lowercase ASCII letters, digits and '-'")]
+    InvalidTransitionKind(String),
+    #[error("direction {0:?} is not lowercase ASCII letters, digits, '_' and '-'")]
+    InvalidDirection(String),
+    #[error("easing {0:?} is not lowercase ASCII letters, digits and '-'")]
+    InvalidEasing(String),
+    #[error("a transition needs an outgoing clip, an incoming clip or both")]
+    TransitionNeedsClip,
+    #[error("clips {outgoing} and {incoming} do not meet at a cut on one track")]
+    NotAdjacent { outgoing: ItemId, incoming: ItemId },
+    #[error("item {item} meets item {other}: a transition from or to nothing needs a gap")]
+    CutNotFree { item: ItemId, other: ItemId },
+    #[error("the cut already has transition {0}")]
+    TransitionExists(TransitionId),
+    #[error("the transition needs {needed} s {side} the cut, but there is room for {available} s")]
+    TransitionRoom {
+        side: CutSide,
+        needed: Time,
+        available: Time,
+    },
+    #[error(
+        "clip {item} has {available} s of media past its edge, but the transition needs {needed} s"
+    )]
+    TransitionHandle {
+        item: ItemId,
+        needed: Time,
+        available: Time,
+    },
+    #[error("transition {transition} is a {expected:?}, not a {found:?}")]
+    TransitionSchemaMismatch {
+        transition: TransitionId,
+        expected: String,
+        found: String,
+    },
     #[error("media {0} is relinked twice in one batch")]
     RelinkTwice(MediaId),
     #[error("media {0} cannot be relinked to an empty path")]
