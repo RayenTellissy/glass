@@ -35,12 +35,28 @@
 //! hands that frame out. After each hand-out the scheduler sends the start of the next
 //! segment it has not handed out yet: every segment starting before it is already a lane.
 //!
-//! **Seek and stop.** As in [`playback`](crate::playback), [`Lookahead::seek`] advances
-//! the shared [`Generation`] and then tells the scheduler, which restarts the plan at the
-//! new frame and sends the consumer a reset. Workers blocked on a full queue wake with
-//! `Stale` and drop their job; the consumer drops its old lanes when it sees the new
-//! generation. Dropping the handle stops the scheduler, which drops the job channels, and
-//! every worker exits after its current job; the handle joins them all.
+//! **Seek and stop.** [`Lookahead::seek`] advances the shared [`Generation`] and then
+//! tells the scheduler, which restarts the plan at the new frame and sends the consumer a
+//! reset. Workers blocked on a full queue wake with `Stale` and drop their job; the
+//! consumer drops its old lanes when it sees the new generation. Dropping the handle (or
+//! the consumer) stops the scheduler, which drops the job channels, and every worker
+//! exits after its current job; the handle joins them all.
+//!
+//! **Cached frames.** Started with the frame cache's index of full-quality frames
+//! ([`Lookahead::start_skipping`]), a worker does not decode a run of timeline frames the cache
+//! holds when the run reaches the segment's end or lasts at least [`SKIP_MIN_SECONDS`]
+//! (a seek after it costs at most a GOP of decoding, shorter than the run): it queues
+//! [`Layer::skipped`] frames without pictures, and seeks again at the first frame the
+//! cache lacks. A segment the cache holds whole is never opened. Render answers skipped
+//! frames from the cache; when the cache let go of one in the meantime it calls
+//! [`LookaheadFrames::refill`], which hands that frame's segments out again from it.
+//!
+//! **Replanning.** [`LookaheadFrames::replan`] swaps in another plan between two frames
+//! without a new generation: the scheduler keeps every lane whose segment hash the new
+//! plan still has (its worker and decoder carry on), unless the lane skipped frames the
+//! edit made stale, drops the others, and hands out the new plan's segments from the
+//! consumer's position. The consumer holds every frame back until the scheduler's answer
+//! (an epoch number) arrives, so no frame mixes the two plans.
 //!
 //! **Source frames.** Timeline frame `t` of a segment shows the last source frame
 //! presented at or before `source_start + (t - start) * frame_duration * speed`, compared
@@ -57,9 +73,10 @@
 mod media_decoder;
 mod plan;
 
+use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -68,13 +85,38 @@ use media::{MediaError, Rational, Timestamp};
 use render::frame_cache::SegmentHash;
 
 use crate::frame_queue::{
-    FrameStamp, Generation, PopError, PushError, SpscConsumer, SpscProducer, Stamped, spsc,
+    FrameStamp, Generation, PopError, SpscConsumer, SpscProducer, Stamped, spsc,
 };
-use crate::playback::default_decode_workers;
+use crate::scrub::CachedFrames;
 use crate::threads::{self, Role, ThreadRegistry};
 
 pub use media_decoder::{GopIndexes, MediaDecoder, MediaDecoderOptions, PreRoll};
 pub use plan::{DecodePlan, PlanSegment, SegmentList, SegmentListIter, SourceId, SourceRef};
+
+/// Threads the rest of the app keeps busy during playback: UI, render, and audio decode
+/// with the audio callback (a core's worth of work between them). The scheduler only
+/// hands out segments and the analysis pool pauses during playback.
+const RESERVED_THREADS: usize = 3;
+/// At least two decoders, so a cut or transition can decode two streams at once.
+const MIN_DECODERS: usize = 2;
+/// Upper bound for this machine class (8 GB): a worker can hold a 4K software decoder
+/// (about 100 to 150 MB of frames and references), so four stay near 0.6 GB.
+const MAX_DECODERS: usize = 4;
+
+/// Decode workers for this machine: logical cores minus [`RESERVED_THREADS`], from 2 to
+/// 4 (4 on an 8-core M1 or M2).
+pub fn default_decode_workers() -> usize {
+    let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+    cores
+        .saturating_sub(RESERVED_THREADS)
+        .clamp(MIN_DECODERS, MAX_DECODERS)
+}
+
+/// The shortest run of cached frames inside a segment a worker skips, in seconds of
+/// timeline: the seek after it costs at most a GOP of decoding, and most camera and phone
+/// files have a keyframe at least every 2 s. A run reaching the segment's end is skipped
+/// at any length.
+pub const SKIP_MIN_SECONDS: f64 = 2.0;
 
 /// The fewest frames a lane holds: the frame being shown and the next.
 pub const MIN_DEPTH: usize = 2;
@@ -143,8 +185,10 @@ pub struct Layer<F> {
     pub source: SourceId,
     /// The source frame's presentation time; `None` when the source failed.
     pub source_pts: Option<Timestamp>,
-    /// `None` when the source failed to open or decode.
+    /// `None` when the source failed to open or decode, or the frame was skipped.
     pub frame: Option<Arc<F>>,
+    /// Not decoded because the frame cache held the timeline frame (see the module docs).
+    pub skipped: bool,
 }
 
 /// Why [`LookaheadFrames::next_into`] returned no frame.
@@ -167,8 +211,10 @@ pub struct LookaheadStats {
     pub seek_max: Duration,
     /// Source frames decoded.
     pub frames_decoded: u64,
-    /// Frames pushed into lanes (repeats included).
+    /// Frames pushed into lanes (repeats and skipped frames included).
     pub frames_queued: u64,
+    /// Timeline frames queued without decoding because the frame cache held them.
+    pub frames_skipped: u64,
     /// Segments whose source failed to open, seek or decode.
     pub decode_errors: u64,
     /// Segments dropped because more than `decode_workers` would overlap.
@@ -184,6 +230,7 @@ struct Counters {
     seek_max_nanos: AtomicU64,
     frames_decoded: AtomicU64,
     frames_queued: AtomicU64,
+    frames_skipped: AtomicU64,
     decode_errors: AtomicU64,
     segments_dropped: AtomicU64,
     max_lane_queued: AtomicU64,
@@ -198,6 +245,7 @@ impl Counters {
             seek_max: Duration::from_nanos(load(&self.seek_max_nanos)),
             frames_decoded: load(&self.frames_decoded),
             frames_queued: load(&self.frames_queued),
+            frames_skipped: load(&self.frames_skipped),
             decode_errors: load(&self.decode_errors),
             segments_dropped: load(&self.segments_dropped),
             max_lane_queued: load(&self.max_lane_queued) as usize,
@@ -216,6 +264,7 @@ impl Counters {
 struct LaneFrame<F> {
     source_pts: Option<Timestamp>,
     frame: Option<Arc<F>>,
+    skipped: bool,
 }
 
 /// A segment handed to a worker.
@@ -226,6 +275,35 @@ struct Job<F> {
     first: i64,
     generation: u64,
     output: SpscProducer<LaneFrame<F>>,
+    /// Set before the worker skips its first frame.
+    skipped: Arc<AtomicBool>,
+}
+
+/// A [`DecodePlan`] behind a pointer, so a replan can bring a plan of another type.
+trait AnyPlan: Send {
+    fn segments_boxed(&self, frame: i64) -> Box<dyn Iterator<Item = PlanSegment> + Send>;
+}
+
+impl<P: DecodePlan> AnyPlan for P {
+    fn segments_boxed(&self, frame: i64) -> Box<dyn Iterator<Item = PlanSegment> + Send> {
+        Box::new(self.segments_from(frame))
+    }
+}
+
+/// The consumer asks the scheduler to go on with a plan (another one, or the same) from
+/// a frame.
+struct Replan {
+    /// `None`: the current plan.
+    plan: Option<Box<dyn AnyPlan>>,
+    /// The consumer's generation when it asked.
+    generation: u64,
+    from: i64,
+    /// Lanes the consumer let go of.
+    dropped: Vec<u64>,
+    /// Frames whose skipping may be wrong now: a lane that skipped frames and covers
+    /// any of them from `from` on is not kept.
+    stale: Vec<Range<i64>>,
+    epoch: u64,
 }
 
 /// Messages to the scheduler.
@@ -234,7 +312,10 @@ enum ToScheduler {
         frame: i64,
         generation: u64,
     },
+    Replan(Replan),
     Stop,
+    /// The consumer was dropped: nobody takes frames any more.
+    ConsumerGone,
     /// Worker `n` finished its job.
     Idle(usize),
     /// The consumer is done with a lane.
@@ -252,11 +333,27 @@ enum ToConsumer<F> {
         frame: i64,
     },
     Lane(Lane<F>),
-    /// Every segment starting before `frame` is already a lane (`i64::MAX`: all are).
+    /// Every segment starting before `frame` is already a lane (`i64::MAX`: all are),
+    /// in the plan of replan `epoch`.
     Horizon {
         generation: u64,
+        epoch: u64,
         frame: i64,
     },
+    /// The last replan asked for is in place: of the lanes sent so far, only `keep`
+    /// stay.
+    Replanned {
+        generation: u64,
+        keep: Vec<u64>,
+    },
+}
+
+/// A lane the consumer has not closed, as the scheduler tracks it.
+struct OpenLane {
+    id: u64,
+    frames: Range<i64>,
+    hash: SegmentHash,
+    skipped: Arc<AtomicBool>,
 }
 
 struct Lane<F> {
@@ -288,6 +385,21 @@ impl Lookahead {
     pub fn start<P, D>(
         plan: P,
         config: LookaheadConfig,
+        make_decoder: impl FnMut(usize) -> D,
+    ) -> std::io::Result<(Self, LookaheadFrames<D::Frame>)>
+    where
+        P: DecodePlan,
+        D: SegmentDecoder,
+    {
+        Self::start_skipping(plan, config, None, make_decoder)
+    }
+
+    /// [`start`](Self::start) with `skip`, the timeline frames the frame cache holds,
+    /// whose decoding workers may skip (see the module docs); `None` decodes every frame.
+    pub fn start_skipping<P, D>(
+        plan: P,
+        config: LookaheadConfig,
+        skip: Option<CachedFrames>,
         mut make_decoder: impl FnMut(usize) -> D,
     ) -> std::io::Result<(Self, LookaheadFrames<D::Frame>)>
     where
@@ -318,6 +430,8 @@ impl Lookahead {
                 jobs: job_rx,
                 events: control.clone(),
                 frame_duration: config.frame_duration,
+                skip: skip.clone(),
+                skip_min: skip_min_frames(config.frame_duration),
                 counters: counters.clone(),
             };
             lookahead
@@ -326,8 +440,10 @@ impl Lookahead {
         }
 
         let scheduler = Scheduler {
-            segments: plan.segments_from(0),
-            plan,
+            segments: plan.segments_boxed(0),
+            plan: Box::new(plan),
+            kept: HashSet::new(),
+            epoch: 0,
             peeked: None,
             generation: 0,
             from: 0,
@@ -356,6 +472,7 @@ impl Lookahead {
             generation: None,
             next: 0,
             horizon: i64::MIN,
+            epoch: 0,
             lanes: Vec::with_capacity(workers + 2),
             max_total_queued: 0,
         };
@@ -403,17 +520,21 @@ impl Drop for Lookahead {
     }
 }
 
-struct Scheduler<P: DecodePlan, F> {
-    plan: P,
-    segments: P::Segments,
+struct Scheduler<F> {
+    plan: Box<dyn AnyPlan>,
+    segments: Box<dyn Iterator<Item = PlanSegment> + Send>,
+    /// Hashes of the lanes a replan kept, whose segments are not handed out again.
+    kept: HashSet<SegmentHash>,
+    /// The last replan applied.
+    epoch: u64,
     peeked: Option<PlanSegment>,
     generation: u64,
     from: i64,
     control: Receiver<ToScheduler>,
     jobs: Vec<Sender<Job<F>>>,
     idle: Vec<usize>,
-    /// Lanes the consumer has not closed: id and timeline range.
-    open: Vec<(u64, Range<i64>)>,
+    /// Lanes the consumer has not closed.
+    open: Vec<OpenLane>,
     max_lanes: usize,
     next_lane: u64,
     /// The last horizon sent for this generation.
@@ -424,7 +545,7 @@ struct Scheduler<P: DecodePlan, F> {
     counters: Arc<Counters>,
 }
 
-impl<P: DecodePlan, F: Send + Sync + 'static> Scheduler<P, F> {
+impl<F: Send + Sync + 'static> Scheduler<F> {
     fn run(mut self) {
         let _ = self.to_consumer.send(ToConsumer::Reset {
             generation: 0,
@@ -450,24 +571,77 @@ impl<P: DecodePlan, F: Send + Sync + 'static> Scheduler<P, F> {
             ToScheduler::Seek { frame, generation } if generation > self.generation => {
                 self.generation = generation;
                 self.from = frame;
-                self.segments = self.plan.segments_from(frame);
+                self.segments = self.plan.segments_boxed(frame);
                 self.peeked = None;
                 self.open.clear();
+                self.kept.clear();
                 self.horizon = i64::MIN;
-                let _ = self
+                if self
                     .to_consumer
-                    .send(ToConsumer::Reset { generation, frame });
+                    .send(ToConsumer::Reset { generation, frame })
+                    .is_err()
+                {
+                    return false;
+                }
             }
             ToScheduler::Seek { .. } => {}
-            ToScheduler::Stop => return false,
+            ToScheduler::Replan(replan) => return self.replan(replan),
+            ToScheduler::Stop | ToScheduler::ConsumerGone => return false,
             ToScheduler::Idle(worker) => self.idle.push(worker),
             ToScheduler::Closed { generation, lane } => {
                 if generation == self.generation {
-                    self.open.retain(|(id, _)| *id != lane);
+                    self.open.retain(|open| open.id != lane);
                 }
             }
         }
         true
+    }
+
+    /// Goes on with `replan`'s plan from its frame, keeping the lanes it can (see the
+    /// module docs). A replan the consumer sent before a seek it had not seen yet applies
+    /// to the seek's generation from the seek's frame. False means stop.
+    fn replan(&mut self, replan: Replan) -> bool {
+        let Replan {
+            plan,
+            generation,
+            from,
+            dropped,
+            stale,
+            epoch,
+        } = replan;
+        if let Some(plan) = plan {
+            self.plan = plan;
+        }
+        self.epoch = epoch;
+        if generation == self.generation {
+            self.from = from;
+        }
+        let from = self.from;
+        let hashes: HashSet<SegmentHash> =
+            self.plan.segments_boxed(i64::MIN).map(|s| s.hash).collect();
+        let mut keep = Vec::with_capacity(self.open.len());
+        self.open.retain(|lane| {
+            let ahead = lane.frames.start.max(from)..lane.frames.end;
+            let skipped_stale = lane.skipped.load(Ordering::Acquire)
+                && stale
+                    .iter()
+                    .any(|s| s.start < ahead.end && ahead.start < s.end);
+            let kept = hashes.contains(&lane.hash) && !dropped.contains(&lane.id) && !skipped_stale;
+            if kept {
+                keep.push(lane.id);
+            }
+            kept
+        });
+        self.kept = self.open.iter().map(|lane| lane.hash).collect();
+        self.segments = self.plan.segments_boxed(from);
+        self.peeked = None;
+        self.horizon = i64::MIN;
+        self.to_consumer
+            .send(ToConsumer::Replanned {
+                generation: self.generation,
+                keep,
+            })
+            .is_ok()
     }
 
     /// Hands segments to idle workers while lanes are free, then tells the consumer how
@@ -481,8 +655,16 @@ impl<P: DecodePlan, F: Send + Sync + 'static> Scheduler<P, F> {
                 self.send_horizon(i64::MAX);
                 return;
             };
+            if self.kept.contains(&segment.hash) {
+                self.peeked = None;
+                continue;
+            }
             let start = segment.timeline.start;
-            let overlapping = self.open.iter().filter(|(_, r)| r.end > start).count();
+            let overlapping = self
+                .open
+                .iter()
+                .filter(|lane| lane.frames.end > start)
+                .count();
             if overlapping >= self.jobs.len() {
                 tracing::warn!(
                     "look-ahead: dropped the segment at frame {start}: more than {} segments overlap",
@@ -517,12 +699,19 @@ impl<P: DecodePlan, F: Send + Sync + 'static> Scheduler<P, F> {
                 ready: None,
                 gone: false,
             };
-            self.open.push((id, segment.timeline.clone()));
+            let skipped = Arc::new(AtomicBool::new(false));
+            self.open.push(OpenLane {
+                id,
+                frames: segment.timeline.clone(),
+                hash: segment.hash,
+                skipped: skipped.clone(),
+            });
             let job = Job {
                 segment,
                 first,
                 generation: self.generation,
                 output,
+                skipped,
             };
             if self.jobs[worker].send(job).is_err() {
                 return;
@@ -536,6 +725,7 @@ impl<P: DecodePlan, F: Send + Sync + 'static> Scheduler<P, F> {
             self.horizon = frame;
             let _ = self.to_consumer.send(ToConsumer::Horizon {
                 generation: self.generation,
+                epoch: self.epoch,
                 frame,
             });
         }
@@ -548,7 +738,20 @@ struct Worker<D: SegmentDecoder> {
     jobs: Receiver<Job<D::Frame>>,
     events: Sender<ToScheduler>,
     frame_duration: Rational,
+    skip: Option<CachedFrames>,
+    /// [`SKIP_MIN_SECONDS`] in timeline frames.
+    skip_min: i64,
     counters: Arc<Counters>,
+}
+
+/// [`SKIP_MIN_SECONDS`] in frames of `frame_duration`, at least 1.
+fn skip_min_frames(frame_duration: Rational) -> i64 {
+    let seconds = frame_duration.to_f64().unwrap_or(0.0);
+    if seconds > 0.0 {
+        ((SKIP_MIN_SECONDS / seconds).ceil() as i64).max(1)
+    } else {
+        1
+    }
 }
 
 impl<D: SegmentDecoder> Worker<D> {
@@ -562,33 +765,61 @@ impl<D: SegmentDecoder> Worker<D> {
     }
 
     /// Pre-rolls the segment and fills its lane, one frame per timeline frame, until the
-    /// segment ends or the lane goes stale or away.
+    /// segment ends or the lane goes stale or away. Runs of frames the cache holds are
+    /// queued as skipped; the first frame after one (or the first of the segment) seeks.
     fn decode(&mut self, job: Job<D::Frame>) {
         let Job {
             segment,
             first,
             generation,
             mut output,
+            skipped,
         } = job;
         if output.is_stale(generation) || output.is_disconnected() {
             return;
         }
-        let started = Instant::now();
-        let target = segment.source_time_at(first, self.frame_duration);
-        let mut failed = match self.decoder.seek(&segment.source, target) {
-            Ok(()) => false,
-            Err(error) => {
-                self.fail(&segment, &error);
-                true
-            }
-        };
-        self.counters.add_seek(started.elapsed());
-
+        let end = segment.timeline.end;
         let step = segment.source_step(self.frame_duration);
+        let mut positioned = false;
+        let mut failed = false;
+        let mut skipping = false;
         let mut current: Option<(Timestamp, Arc<D::Frame>)> = None;
         let mut upcoming: Option<(Timestamp, Arc<D::Frame>)> = None;
         let mut ended = false;
-        for t in first..segment.timeline.end {
+        for t in first..end {
+            if self.skips(t, end, skipping) {
+                if !skipping {
+                    skipping = true;
+                    skipped.store(true, Ordering::Release);
+                }
+                let item = LaneFrame {
+                    source_pts: None,
+                    frame: None,
+                    skipped: true,
+                };
+                if !self.push(&mut output, generation, t, item) {
+                    return;
+                }
+                self.counters.frames_skipped.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+            if skipping || !positioned {
+                skipping = false;
+                positioned = true;
+                current = None;
+                upcoming = None;
+                ended = false;
+                let started = Instant::now();
+                let target = segment.source_time_at(t, self.frame_duration);
+                failed = match self.decoder.seek(&segment.source, target) {
+                    Ok(()) => false,
+                    Err(error) => {
+                        self.fail(&segment, &error);
+                        true
+                    }
+                };
+                self.counters.add_seek(started.elapsed());
+            }
             let offset = t - segment.timeline.start;
             while !failed {
                 if upcoming.is_none() && !ended {
@@ -616,23 +847,52 @@ impl<D: SegmentDecoder> Worker<D> {
             let item = LaneFrame {
                 source_pts: current.as_ref().map(|(pts, _)| *pts),
                 frame: current.as_ref().map(|(_, frame)| frame.clone()),
+                skipped: false,
             };
-            let stamp = FrameStamp {
-                generation,
-                index: t,
-                pts: Timestamp::new(t, self.frame_duration),
-            };
-            match threads::blocked(|| output.push(Stamped::new(stamp, item))) {
-                Ok(()) => {
-                    self.counters.frames_queued.fetch_add(1, Ordering::Relaxed);
-                    let queued = output.capacity() - output.slots();
-                    self.counters
-                        .max_lane_queued
-                        .fetch_max(queued as u64, Ordering::Relaxed);
-                }
-                Err(PushError::Stale(_) | PushError::Disconnected(_)) => return,
-                Err(PushError::Full(_) | PushError::Timeout(_)) => return,
+            if !self.push(&mut output, generation, t, item) {
+                return;
             }
+        }
+    }
+
+    /// Whether timeline frame `t` of a segment ending at `end` is skipped: while
+    /// skipping, as long as the cache holds it; otherwise when the cached run from `t`
+    /// reaches `end` or lasts at least `skip_min` frames.
+    fn skips(&self, t: i64, end: i64, skipping: bool) -> bool {
+        let Some(cached) = &self.skip else {
+            return false;
+        };
+        if skipping {
+            return cached.contains(t);
+        }
+        let run = cached.run_end(t, end);
+        run > t && (run == end || run - t >= self.skip_min)
+    }
+
+    /// Queues timeline frame `t`'s item, waiting while the lane is full. False when the
+    /// lane went stale or away.
+    fn push(
+        &self,
+        output: &mut SpscProducer<LaneFrame<D::Frame>>,
+        generation: u64,
+        t: i64,
+        item: LaneFrame<D::Frame>,
+    ) -> bool {
+        let stamp = FrameStamp {
+            generation,
+            index: t,
+            pts: Timestamp::new(t, self.frame_duration),
+        };
+        match threads::blocked(|| output.push(Stamped::new(stamp, item))) {
+            Ok(()) => {
+                self.counters.frames_queued.fetch_add(1, Ordering::Relaxed);
+                let queued = output.capacity() - output.slots();
+                self.counters
+                    .max_lane_queued
+                    .fetch_max(queued as u64, Ordering::Relaxed);
+                true
+            }
+            Err(_) => false,
         }
     }
 
@@ -658,6 +918,8 @@ pub struct LookaheadFrames<F> {
     generation: Option<u64>,
     next: i64,
     horizon: i64,
+    /// The last replan asked for; horizons of earlier plans are ignored.
+    epoch: u64,
     lanes: Vec<Lane<F>>,
     max_total_queued: usize,
 }
@@ -697,6 +959,49 @@ impl<F> LookaheadFrames<F> {
     /// Lanes open now.
     pub fn open_lanes(&self) -> usize {
         self.lanes.len()
+    }
+
+    /// Goes on with `plan` from timeline frame `from` (normally [`position`](Self::position),
+    /// between two frames), keeping the lanes of segments `plan` still has (see the module
+    /// docs). `stale` lists the frames whose cached pictures the new plan may not share:
+    /// lanes that skipped any of them are decoded again. No frame is handed out until the
+    /// scheduler has the new plan in place.
+    pub fn replan(&mut self, plan: impl DecodePlan, from: i64, stale: Vec<Range<i64>>) {
+        self.restart(Some(Box::new(plan)), from, stale);
+    }
+
+    /// Hands out timeline frame `frame` again, decoded: for render when it took a skipped
+    /// frame the cache no longer holds. Lanes that already handed out frames from
+    /// `frame` on are dropped and their segments decoded again from it; frames after it
+    /// follow in order as before.
+    pub fn refill(&mut self, frame: i64) {
+        self.restart(None, frame, Vec::new());
+    }
+
+    fn restart(&mut self, plan: Option<Box<dyn AnyPlan>>, from: i64, stale: Vec<Range<i64>>) {
+        self.epoch += 1;
+        let next = self.next;
+        let mut dropped = Vec::new();
+        self.lanes.retain(|lane| {
+            // A lane that handed out frames in from..next cannot hand them out again.
+            let spent = from < next && lane.frames.start < next && lane.frames.end > from;
+            if spent {
+                dropped.push(lane.id);
+            }
+            !spent
+        });
+        if self.generation.is_some() {
+            self.next = from;
+        }
+        self.horizon = i64::MIN;
+        let _ = self.control.send(ToScheduler::Replan(Replan {
+            plan,
+            generation: self.generation.unwrap_or(0),
+            from,
+            dropped,
+            stale,
+            epoch: self.epoch,
+        }));
     }
 
     fn next_with(
@@ -769,6 +1074,7 @@ impl<F> LookaheadFrames<F> {
                         source: lane.source,
                         source_pts: frame.source_pts,
                         frame: frame.frame,
+                        skipped: frame.skipped,
                     });
                 }
             }
@@ -797,9 +1103,18 @@ impl<F> LookaheadFrames<F> {
                     self.lanes.push(lane);
                 }
             }
-            ToConsumer::Horizon { generation, frame } => {
-                if Some(generation) == self.generation {
+            ToConsumer::Horizon {
+                generation,
+                epoch,
+                frame,
+            } => {
+                if Some(generation) == self.generation && epoch == self.epoch {
                     self.horizon = self.horizon.max(frame);
+                }
+            }
+            ToConsumer::Replanned { generation, keep } => {
+                if Some(generation) == self.generation {
+                    self.lanes.retain(|lane| keep.contains(&lane.id));
                 }
             }
         }
@@ -837,6 +1152,12 @@ impl<F> LookaheadFrames<F> {
 
     fn drop_lanes(&mut self) {
         self.lanes.clear();
+    }
+}
+
+impl<F> Drop for LookaheadFrames<F> {
+    fn drop(&mut self) {
+        let _ = self.control.send(ToScheduler::ConsumerGone);
     }
 }
 
