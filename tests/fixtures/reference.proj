@@ -1,0 +1,519 @@
+{
+  "format": "glass.project",
+  "schema_version": 6,
+  "project": {
+    "uid": "glass-reference",
+    "name": "Reference",
+    "next_id": 24,
+    "settings": {
+      "sequence": {
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 30,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo"
+      },
+      "colour_space": "rec709",
+      "cache_folder": {
+        "relative": ".glass-cache"
+      }
+    },
+    "media": {
+      "refs": [
+        {
+          "id": 1,
+          "content_hash": "",
+          "path": "generated/h264_1080p30.mp4"
+        },
+        {
+          "id": 2,
+          "content_hash": "",
+          "path": "generated/prores422_1080p23976.mov"
+        },
+        {
+          "id": 3,
+          "content_hash": "",
+          "path": "generated/hevc_10bit_1080p25.mp4"
+        },
+        {
+          "id": 4,
+          "content_hash": "",
+          "path": "generated/scenes_cuts_640x360_30.mp4"
+        },
+        {
+          "id": 5,
+          "content_hash": "",
+          "path": "generated/audio_48k_stereo.wav"
+        }
+      ]
+    },
+    "sequences": [
+      {
+        "id": 6,
+        "name": "Reference",
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 30,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo",
+        "markers": [
+          {
+            "id": 19,
+            "start": "0",
+            "duration": "0",
+            "name": "Opening",
+            "note": "",
+            "colour": "blue",
+            "chapter": true,
+            "todo": "off"
+          },
+          {
+            "id": 20,
+            "start": "4/3",
+            "duration": "1/3",
+            "name": "Cross dissolve",
+            "note": "",
+            "colour": "amber",
+            "chapter": false,
+            "todo": "off"
+          },
+          {
+            "id": 21,
+            "start": "43/10",
+            "duration": "2/5",
+            "name": "Dip to black",
+            "note": "Check the black frame",
+            "colour": "red",
+            "chapter": false,
+            "todo": "open"
+          },
+          {
+            "id": 22,
+            "start": "9/2",
+            "duration": "0",
+            "name": "Slow motion",
+            "note": "",
+            "colour": "green",
+            "chapter": true,
+            "todo": "off"
+          }
+        ],
+        "tracks": [
+          {
+            "id": 7,
+            "kind": "video",
+            "name": "V2",
+            "items": [
+              {
+                "id": 16,
+                "range": {
+                  "start": "1/2",
+                  "duration": "3"
+                },
+                "type": "clip",
+                "media": 4,
+                "source_start": "0",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    560.0,
+                    -290.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 4.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 0.8,
+                "blend": "normal",
+                "effects": [],
+                "markers": [
+                  {
+                    "id": 23,
+                    "start": "1",
+                    "duration": "0",
+                    "name": "Scene cut",
+                    "note": "",
+                    "colour": "violet",
+                    "chapter": false,
+                    "todo": "off"
+                  }
+                ]
+              },
+              {
+                "id": 17,
+                "range": {
+                  "start": "20/3",
+                  "duration": "10/3"
+                },
+                "type": "clip",
+                "media": 4,
+                "source_start": "6",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    -400.0,
+                    220.0
+                  ],
+                  "scale": [
+                    1.5,
+                    1.5
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 0.6,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              }
+            ],
+            "transitions": []
+          },
+          {
+            "id": 8,
+            "kind": "video",
+            "name": "V1",
+            "items": [
+              {
+                "id": 10,
+                "range": {
+                  "start": "0",
+                  "duration": "3/2"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "0",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              },
+              {
+                "id": 11,
+                "range": {
+                  "start": "3/2",
+                  "duration": "3/2"
+                },
+                "type": "clip",
+                "media": 2,
+                "source_start": "4/15",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              },
+              {
+                "id": 12,
+                "range": {
+                  "start": "3",
+                  "duration": "3/2"
+                },
+                "type": "clip",
+                "media": 3,
+                "source_start": "0",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              },
+              {
+                "id": 13,
+                "range": {
+                  "start": "9/2",
+                  "duration": "5"
+                },
+                "type": "clip",
+                "media": 1,
+                "source_start": "3/10",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 2
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              }
+            ],
+            "transitions": [
+              {
+                "id": 14,
+                "outgoing": 10,
+                "incoming": 11,
+                "kind": "cross-dissolve",
+                "duration": "1/3",
+                "alignment": "centre",
+                "direction": null,
+                "easing": "linear",
+                "params": {}
+              },
+              {
+                "id": 15,
+                "outgoing": 12,
+                "incoming": 13,
+                "kind": "dip-to-black",
+                "duration": "2/5",
+                "alignment": "centre",
+                "direction": null,
+                "easing": "linear",
+                "params": {}
+              }
+            ]
+          },
+          {
+            "id": 9,
+            "kind": "audio",
+            "name": "A1",
+            "items": [
+              {
+                "id": 18,
+                "range": {
+                  "start": "0",
+                  "duration": "3"
+                },
+                "type": "clip",
+                "media": 5,
+                "source_start": "0",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": -6.0,
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 0.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 1.0,
+                "blend": "normal",
+                "effects": [],
+                "markers": []
+              }
+            ],
+            "transitions": []
+          }
+        ]
+      }
+    ]
+  }
+}
