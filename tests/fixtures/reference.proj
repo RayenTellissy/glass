@@ -4,7 +4,7 @@
   "project": {
     "uid": "glass-reference",
     "name": "Reference",
-    "next_id": 24,
+    "next_id": 29,
     "settings": {
       "sequence": {
         "resolution": {
@@ -118,13 +118,13 @@
             "name": "V2",
             "items": [
               {
-                "id": 16,
+                "id": 28,
                 "range": {
                   "start": "1/2",
                   "duration": "3"
                 },
                 "type": "clip",
-                "media": 4,
+                "sequence": 24,
                 "source_start": "0",
                 "speed": {
                   "keys": [
@@ -141,14 +141,14 @@
                 "gain_db": 0.0,
                 "transform": {
                   "position": [
-                    560.0,
-                    -290.0
+                    0.0,
+                    0.0
                   ],
                   "scale": [
                     1.0,
                     1.0
                   ],
-                  "rotation": 4.0,
+                  "rotation": 0.0,
                   "anchor": [
                     0.0,
                     0.0
@@ -161,22 +161,11 @@
                   "bottom": 0.0,
                   "feather": 0.0
                 },
-                "opacity": 0.8,
+                "opacity": 1.0,
                 "blend": "normal",
                 "effects": [],
                 "keyframes": {},
-                "markers": [
-                  {
-                    "id": 23,
-                    "start": "1",
-                    "duration": "0",
-                    "name": "Scene cut",
-                    "note": "",
-                    "colour": "violet",
-                    "chapter": false,
-                    "todo": "off"
-                  }
-                ]
+                "markers": []
               },
               {
                 "id": 17,
@@ -518,6 +507,127 @@
                 "markers": []
               }
             ],
+            "transitions": []
+          }
+        ]
+      },
+      {
+        "id": 24,
+        "name": "Picture in picture",
+        "compound": true,
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_rate": {
+          "num": 30,
+          "den": 1
+        },
+        "drop_frame": false,
+        "sample_rate": 48000,
+        "channel_layout": "stereo",
+        "markers": [],
+        "tracks": [
+          {
+            "id": 25,
+            "kind": "video",
+            "name": "V2",
+            "items": [
+              {
+                "id": 16,
+                "range": {
+                  "start": "0",
+                  "duration": "3"
+                },
+                "type": "clip",
+                "media": 4,
+                "source_start": "0",
+                "speed": {
+                  "keys": [
+                    {
+                      "source_time": "0",
+                      "speed": {
+                        "num": 1,
+                        "den": 1
+                      }
+                    }
+                  ]
+                },
+                "enabled": true,
+                "gain_db": 0.0,
+                "transform": {
+                  "position": [
+                    560.0,
+                    -290.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0
+                  ],
+                  "rotation": 4.0,
+                  "anchor": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "crop": {
+                  "left": 0.0,
+                  "top": 0.0,
+                  "right": 0.0,
+                  "bottom": 0.0,
+                  "feather": 0.0
+                },
+                "opacity": 0.8,
+                "blend": "normal",
+                "effects": [],
+                "keyframes": {
+                  "opacity": {
+                    "keys": [
+                      {
+                        "time": "0",
+                        "value": {
+                          "float": 0.0
+                        },
+                        "interpolation": "linear"
+                      },
+                      {
+                        "time": "1",
+                        "value": {
+                          "float": 0.8
+                        },
+                        "interpolation": "linear"
+                      }
+                    ]
+                  }
+                },
+                "markers": [
+                  {
+                    "id": 23,
+                    "start": "1",
+                    "duration": "0",
+                    "name": "Scene cut",
+                    "note": "",
+                    "colour": "violet",
+                    "chapter": false,
+                    "todo": "off"
+                  }
+                ]
+              }
+            ],
+            "transitions": []
+          },
+          {
+            "id": 26,
+            "kind": "video",
+            "name": "V1",
+            "items": [],
+            "transitions": []
+          },
+          {
+            "id": 27,
+            "kind": "audio",
+            "name": "A1",
+            "items": [],
             "transitions": []
           }
         ]
