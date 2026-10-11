@@ -329,7 +329,7 @@ fn the_reference_project_opens_and_plays_a_second() {
     let stats = state.preview().expect("preview").stats();
     eprintln!(
         "reference project: {second} frames in {:.2} s, {} presented, {} late, {} dropped \
-         (debug test build, M5 standing in for the M1, machine shared with other agents)",
+         (debug test build, M5 standing in for the M1, machine shared with other builds)",
         played.as_secs_f64(),
         stats.presented,
         stats.late,
