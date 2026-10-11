@@ -7,11 +7,14 @@
 //! and the third-party list one level in ("View list"). Escape goes back a level, then
 //! closes; Enter closes the main view. Links are returned to the caller to open.
 
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use assets::licences::{self, Component, Kind};
+use egui::epaint::text::{LayoutJob, TextFormat, TextWrapping};
+use egui::mutex::Mutex;
 use egui::{
-    Align2, CornerRadius, Galley, Id, Key, Order, Painter, Pos2, Rect, Sense, Stroke, Ui,
+    Align2, Color32, CornerRadius, Galley, Id, Key, Order, Painter, Pos2, Rect, Sense, Stroke, Ui,
     UiBuilder, Vec2, pos2, vec2,
 };
 
@@ -357,7 +360,7 @@ impl AboutDialog {
     ) -> bool {
         let painter = ui.painter().clone();
         let s8 = paint.s().s8;
-        let w = paint.width(&painter, label, Type::LabelMedium) + 2.0 * s8;
+        let w = paint.kept_width(&painter, label, Type::LabelMedium) + 2.0 * s8;
         let r = Rect::from_min_size(
             pos2(right - w, mid - size::SMALL_CONTROL / 2.0),
             vec2(w, size::SMALL_CONTROL),
@@ -367,7 +370,7 @@ impl AboutDialog {
         if hovered {
             painter.rect_filled(r, paint.control_radius(), paint.c(Role::Bg3));
         }
-        paint.text(
+        paint.kept_text(
             &painter,
             r.center(),
             Align2::CENTER_CENTER,
@@ -397,7 +400,7 @@ impl AboutDialog {
 
         // Header.
         let header = Rect::from_min_size(rect.min, vec2(WIDTH, size::DIALOG_HEADER));
-        paint.text(
+        paint.kept_text(
             &painter,
             pos2(header.min.x + s.s16, header.center().y),
             Align2::LEFT_CENTER,
@@ -420,7 +423,7 @@ impl AboutDialog {
         let title_h = paint.line_height(Type::Title);
         let col_h = title_h + s.s2 + paint.line_height(Type::MonoCaption);
         let col_y = tile.center().y - col_h / 2.0;
-        paint.text(
+        paint.kept_text(
             &painter,
             pos2(col_x, col_y + title_h / 2.0),
             Align2::LEFT_CENTER,
@@ -429,7 +432,7 @@ impl AboutDialog {
             Role::TextPrimary,
             rect.max.x - s.s16 - col_x,
         );
-        paint.text(
+        paint.kept_text(
             &painter,
             pos2(col_x, col_y + title_h + s.s2),
             Align2::LEFT_TOP,
@@ -461,7 +464,7 @@ impl AboutDialog {
                 let mid = row_y + size::ROW / 2.0;
                 row_label(paint, &painter, card.min.x + s.s12, mid, label);
                 let x = card.min.x + s.s12 + LABEL_W + s.s8;
-                paint.text(
+                paint.kept_text(
                     &painter,
                     pos2(x, mid),
                     Align2::LEFT_CENTER,
@@ -480,7 +483,7 @@ impl AboutDialog {
         }
 
         // Licences.
-        paint.text(
+        paint.kept_text(
             &painter,
             pos2(left, y + s.s16 / 2.0),
             Align2::LEFT_CENTER,
@@ -503,7 +506,7 @@ impl AboutDialog {
             mid,
             &t!("about.licence.source"),
         );
-        paint.text(
+        paint.kept_text(
             &painter,
             pos2(value_x, mid),
             Align2::LEFT_CENTER,
@@ -531,7 +534,7 @@ impl AboutDialog {
             mid,
             &t!("about.licence.build"),
         );
-        let gpl = paint.text(
+        let gpl = paint.kept_text(
             &painter,
             pos2(value_x, mid),
             Align2::LEFT_CENTER,
@@ -541,8 +544,8 @@ impl AboutDialog {
             120.0,
         );
         let read = t!("about.read");
-        let read_w = paint.width(&painter, &read, Type::LabelMedium) + 2.0 * s.s8;
-        paint.text(
+        let read_w = paint.kept_width(&painter, &read, Type::LabelMedium) + 2.0 * s.s8;
+        paint.kept_text(
             &painter,
             pos2(gpl.max.x + s.s8, mid),
             Align2::LEFT_CENTER,
@@ -571,7 +574,7 @@ impl AboutDialog {
             &t!("about.licence.third_party"),
         );
         let count = self.list.len().to_string();
-        let n = paint.text(
+        let n = paint.kept_text(
             &painter,
             pos2(value_x, mid),
             Align2::LEFT_CENTER,
@@ -580,7 +583,7 @@ impl AboutDialog {
             Role::TextPrimary,
             60.0,
         );
-        paint.text(
+        paint.kept_text(
             &painter,
             pos2(n.max.x + s.s4, mid),
             Align2::LEFT_CENTER,
@@ -604,7 +607,7 @@ impl AboutDialog {
         // The release's source archives.
         let link_mid = y + s.s4 + paint.line_height(Type::Label) / 2.0;
         let label = t!("about.source_archives", version = info.version);
-        let label_w = paint.width(&painter, &label, Type::LabelMedium);
+        let label_w = paint.kept_width(&painter, &label, Type::LabelMedium);
         let link = Rect::from_min_max(
             pos2(left, y),
             pos2(
@@ -625,7 +628,7 @@ impl AboutDialog {
             paint.c(role),
             ICON_STROKE,
         );
-        paint.text(
+        paint.kept_text(
             &painter,
             pos2(left + ICON + s.s4, link_mid),
             Align2::LEFT_CENTER,
@@ -647,7 +650,7 @@ impl AboutDialog {
             paint.c(role),
             LINK_STROKE,
         );
-        paint.text(
+        paint.kept_text(
             &painter,
             pos2(link.max.x + s.s4, link_mid),
             Align2::LEFT_CENTER,
@@ -665,7 +668,7 @@ impl AboutDialog {
             Rect::from_min_max(pos2(rect.min.x, rect.max.y - size::DIALOG_FOOTER), rect.max);
         footer_rule(paint, &painter, footer);
         let fmid = footer.center().y;
-        paint.text(
+        paint.kept_text(
             &painter,
             pos2(footer.min.x + s.s16, fmid),
             Align2::LEFT_CENTER,
@@ -675,7 +678,7 @@ impl AboutDialog {
             200.0,
         );
         let done = t!("about.done");
-        let done_w = paint.width(&painter, &done, Type::LabelMedium) + 2.0 * s.s12;
+        let done_w = paint.kept_width(&painter, &done, Type::LabelMedium) + 2.0 * s.s12;
         let done_r = Rect::from_min_size(
             pos2(
                 footer.max.x - s.s16 - done_w,
@@ -694,7 +697,7 @@ impl AboutDialog {
         } else {
             t!("about.copy_details")
         };
-        let copy_w = paint.width(&painter, &copy, Type::LabelMedium)
+        let copy_w = paint.kept_width(&painter, &copy, Type::LabelMedium)
             + 2.0 * s.s12
             + if copied { ICON + s.s8 } else { 0.0 };
         let copy_r = Rect::from_min_size(
@@ -727,7 +730,7 @@ impl AboutDialog {
             }
             paint.glass_outline(&painter, copy_r, corner);
         }
-        paint.text(
+        paint.kept_text(
             &painter,
             pos2(copy_r.max.x - s.s12, fmid),
             Align2::RIGHT_CENTER,
@@ -752,7 +755,7 @@ impl AboutDialog {
             Vec2::splat(HEADER_BUTTON),
         );
         let back = self.icon_button(ui, paint, Control::Back, back_r, Icon::ChevronLeft);
-        paint.text(
+        paint.kept_text(
             ui.painter(),
             pos2(back_r.max.x + s.s4, header.center().y),
             Align2::LEFT_CENTER,
@@ -787,14 +790,7 @@ impl AboutDialog {
             vec2(WIDTH, NOTICE_H),
         );
         let painter = ui.painter().clone();
-        let galley = paint.wrapped(
-            &painter,
-            &text,
-            Type::Label,
-            paint.c(Role::TextSecondary),
-            WIDTH - 2.0 * s.s16,
-            false,
-        );
+        let galley = paint.kept_wrapped(&painter, &text, Type::Label, WIDTH - 2.0 * s.s16);
         ui.scope_builder(UiBuilder::new().max_rect(body), |ui| {
             egui::ScrollArea::vertical()
                 .id_salt(("glass.about.licence", licence))
@@ -812,7 +808,7 @@ impl AboutDialog {
         let footer = Rect::from_min_max(pos2(rect.min.x, rect.max.y - SUB_FOOTER), rect.max);
         footer_rule(paint, &painter, footer);
         let mid = footer.center().y;
-        paint.text(
+        paint.kept_text(
             &painter,
             pos2(footer.min.x + s.s16, mid),
             Align2::LEFT_CENTER,
@@ -823,7 +819,7 @@ impl AboutDialog {
         );
         if licence == Licence::Gpl {
             let label = t!("about.licence.full_text");
-            let label_w = paint.width(&painter, &label, Type::LabelMedium);
+            let label_w = paint.kept_width(&painter, &label, Type::LabelMedium);
             let w = label_w + s.s4 + LINK_ICON + 2.0 * s.s8;
             let r = Rect::from_min_size(
                 pos2(footer.max.x - s.s8 - w, mid - size::SMALL_CONTROL / 2.0),
@@ -959,7 +955,7 @@ impl AboutDialog {
 
         let footer = Rect::from_min_max(pos2(rect.min.x, rect.max.y - SUB_FOOTER), rect.max);
         footer_rule(paint, &painter, footer);
-        paint.text(
+        paint.kept_text(
             &painter,
             pos2(footer.min.x + s.s16, footer.center().y),
             Align2::LEFT_CENTER,
@@ -999,7 +995,7 @@ fn draw_component(
     }
     let lit = selected || hovered;
     let mid = row.min.y + size::ROW / 2.0;
-    let licence = paint.text(
+    let licence = paint.kept_text(
         painter,
         pos2(row.max.x - s.s8, mid),
         Align2::RIGHT_CENTER,
@@ -1021,7 +1017,7 @@ fn draw_component(
     } else {
         c.name.to_owned()
     };
-    paint.text(
+    paint.kept_text(
         painter,
         pos2(row.min.x + s.s8, mid),
         Align2::LEFT_CENTER,
@@ -1043,7 +1039,7 @@ fn draw_component(
     }
     let mid = row.min.y + size::ROW + size::SMALL_CONTROL / 2.0;
     let label = t!("about.third_party.source");
-    let label_w = paint.width(painter, &label, Type::LabelMedium);
+    let label_w = paint.kept_width(painter, &label, Type::LabelMedium);
     let link_w = label_w + s.s4 + LINK_ICON;
     let link = Rect::from_min_size(
         pos2(row.max.x - s.s8 - link_w, mid - size::SMALL_CONTROL / 2.0),
@@ -1059,7 +1055,7 @@ fn draw_component(
     } else {
         Role::TextSecondary
     };
-    paint.text(
+    paint.kept_text(
         painter,
         pos2(link.min.x, mid),
         Align2::LEFT_CENTER,
@@ -1078,7 +1074,7 @@ fn draw_component(
         paint.c(role),
         LINK_STROKE,
     );
-    paint.text(
+    paint.kept_text(
         painter,
         pos2(row.min.x + s.s8, mid),
         Align2::LEFT_CENTER,
@@ -1117,8 +1113,8 @@ fn external_link(paint: &Paint, painter: &Painter, r: Rect, label: &str, hovered
     } else {
         Role::TextSecondary
     };
-    let label_w = paint.width(painter, label, Type::LabelMedium);
-    paint.text(
+    let label_w = paint.kept_width(painter, label, Type::LabelMedium);
+    paint.kept_text(
         painter,
         pos2(r.min.x + s.s8, r.center().y),
         Align2::LEFT_CENTER,
@@ -1155,7 +1151,7 @@ fn card_frame(paint: &Paint, painter: &Painter, rect: Rect) {
 }
 
 fn row_label(paint: &Paint, painter: &Painter, x: f32, mid: f32, label: &str) {
-    paint.text(
+    paint.kept_text(
         painter,
         pos2(x, mid),
         Align2::LEFT_CENTER,
@@ -1172,6 +1168,134 @@ fn footer_rule(paint: &Paint, painter: &Painter, footer: Rect) {
         footer.min.y + 0.5,
         Stroke::new(1.0, paint.c(Role::BorderSubtle)),
     );
+}
+
+/// The dialog's text layouts, kept between frames. egui keeps only the layouts used in
+/// the previous frame, so without this every switch between views laid out all of the
+/// new view's text again (the licence notices alone took over 3 ms in a debug build).
+///
+/// Layouts are keyed by their job (text, font, wrap width) and the scale, and laid out
+/// in the placeholder colour so one layout serves every colour the text is painted in.
+/// They are dropped when egui recreates its fonts (new definitions, text options or a
+/// full glyph atlas), which a marker layout that egui must keep alive reveals.
+#[derive(Default)]
+struct KeptLayouts {
+    pass: Option<u64>,
+    marker: Option<Arc<Galley>>,
+    galleys: HashMap<u64, Arc<Galley>>,
+}
+
+/// Enough for every view's text and the third-party rows a scroll through the list shows.
+const KEPT_LAYOUTS_MAX: usize = 2048;
+
+impl KeptLayouts {
+    fn layout(&mut self, painter: &Painter, job: LayoutJob) -> Arc<Galley> {
+        let pass = painter.ctx().cumulative_pass_nr();
+        if self.pass != Some(pass) {
+            self.pass = Some(pass);
+            let marker = painter.layout_no_wrap(
+                "glass.about".to_owned(),
+                egui::FontId::default(),
+                Color32::PLACEHOLDER,
+            );
+            if !self
+                .marker
+                .as_ref()
+                .is_some_and(|m| Arc::ptr_eq(m, &marker))
+            {
+                self.galleys.clear();
+            }
+            self.marker = Some(marker);
+        }
+        if self.galleys.len() >= KEPT_LAYOUTS_MAX {
+            self.galleys.clear();
+        }
+        let key = egui::util::hash((&job, painter.pixels_per_point().to_bits()));
+        self.galleys
+            .entry(key)
+            .or_insert_with(|| painter.layout_job(job))
+            .clone()
+    }
+}
+
+fn kept_layout(painter: &Painter, job: LayoutJob) -> Arc<Galley> {
+    let kept = painter.ctx().data_mut(|d| {
+        d.get_temp_mut_or_default::<Arc<Mutex<KeptLayouts>>>(Id::new("glass.about.layouts"))
+            .clone()
+    });
+    kept.lock().layout(painter, job)
+}
+
+/// [`Paint`]'s text helpers with the dialog's kept layouts; the jobs match `Paint`'s.
+trait KeptText {
+    #[allow(clippy::too_many_arguments)]
+    fn kept_text(
+        &self,
+        painter: &Painter,
+        pos: Pos2,
+        align: Align2,
+        text: &str,
+        ty: Type,
+        role: Role,
+        max_width: f32,
+    ) -> Rect;
+    fn kept_width(&self, painter: &Painter, text: &str, ty: Type) -> f32;
+    /// Wrapped text, to be painted with a colour of its own.
+    fn kept_wrapped(&self, painter: &Painter, text: &str, ty: Type, max_width: f32) -> Arc<Galley>;
+}
+
+impl KeptText for Paint {
+    fn kept_text(
+        &self,
+        painter: &Painter,
+        pos: Pos2,
+        align: Align2,
+        text: &str,
+        ty: Type,
+        role: Role,
+        max_width: f32,
+    ) -> Rect {
+        let galley = kept_line(self, painter, text, ty, max_width);
+        let rect = align.anchor_size(pos, galley.size());
+        painter.galley(rect.min, galley, self.c(role));
+        rect
+    }
+
+    fn kept_width(&self, painter: &Painter, text: &str, ty: Type) -> f32 {
+        kept_line(self, painter, text, ty, f32::INFINITY).size().x
+    }
+
+    fn kept_wrapped(&self, painter: &Painter, text: &str, ty: Type, max_width: f32) -> Arc<Galley> {
+        let mut job = LayoutJob::single_section(
+            text.to_owned(),
+            TextFormat::simple(self.font(ty), Color32::PLACEHOLDER),
+        );
+        job.wrap = TextWrapping::wrap_at_width(max_width.max(1.0));
+        kept_layout(painter, job)
+    }
+}
+
+/// One line cut with an ellipsis at `max_width`, as [`Paint::galley`] lays it out.
+fn kept_line(
+    paint: &Paint,
+    painter: &Painter,
+    text: &str,
+    ty: Type,
+    max_width: f32,
+) -> Arc<Galley> {
+    let (text, spacing) = if ty == Type::Caps {
+        let ts = &paint.theme.tokens().type_scale.caption;
+        let em = ts.caps_letter_spacing_em.unwrap_or(0.06);
+        (text.to_uppercase(), em * ts.size_px)
+    } else {
+        (text.to_owned(), 0.0)
+    };
+    let mut format = TextFormat::simple(paint.font(ty), Color32::PLACEHOLDER);
+    format.extra_letter_spacing = spacing;
+    let mut job = LayoutJob::single_section(text, format);
+    job.wrap = TextWrapping::truncate_at_width(max_width.max(1.0));
+    job.break_on_newline = false;
+    kept_layout(painter, job)
 }
 
 /// The "This copy" rows that are known: label, value, whether the value is a path.
@@ -1200,14 +1324,7 @@ impl MainLayout {
     fn measure(paint: &Paint, painter: &Painter, info: &AboutInfo) -> Self {
         let s = paint.s();
         let inner_w = WIDTH - 2.0 * s.s16;
-        let body = paint.wrapped(
-            painter,
-            &t!("about.promise"),
-            Type::Body,
-            paint.c(Role::TextSecondary),
-            inner_w,
-            false,
-        );
+        let body = paint.kept_wrapped(painter, &t!("about.promise"), Type::Body, inner_w);
         let rows = copy_rows(info).len();
         let copy_card = if rows == 0 {
             0.0
