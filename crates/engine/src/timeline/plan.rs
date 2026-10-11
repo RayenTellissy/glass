@@ -134,6 +134,7 @@ struct TrackPlan {
 /// new plan, and every segment and span the edit did not touch keeps its hash.
 #[derive(Clone, Debug)]
 pub struct TimelinePlan {
+    canvas: (u32, u32),
     rate: project::Rational,
     frame_duration: MediaRational,
     end: i64,
@@ -350,6 +351,7 @@ impl TimelinePlan {
             .max()
             .unwrap_or(0);
         let mut plan = Self {
+            canvas: (seq.resolution.width, seq.resolution.height),
             rate,
             frame_duration,
             end,
@@ -366,6 +368,13 @@ impl TimelinePlan {
         };
         plan.spans = plan.compute_spans();
         Ok(plan)
+    }
+
+    /// The sequence's canvas in pixels: what [`TimelineConfig::new`] takes.
+    ///
+    /// [`TimelineConfig::new`]: super::TimelineConfig::new
+    pub fn canvas(&self) -> (u32, u32) {
+        self.canvas
     }
 
     /// The sequence's frame rate.

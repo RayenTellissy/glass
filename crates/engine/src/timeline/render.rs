@@ -13,7 +13,7 @@
 //!   dithered with the frame number as seed) → the cached and presented texture
 //! ```
 //!
-//! The canvas is the project canvas from the renderer's config, scaled by the
+//! The canvas is the sequence's (from the renderer's config), scaled by the
 //! [`QualityLevel`]: layer transforms are mapped into the preview canvas, so a half
 //! preview composites at half size. Frames are cached under [`TimelinePlan::span_hash`]
 //! and the timeline frame, with the preview size and quality in the variant;
@@ -57,8 +57,7 @@ const FALLBACK_TRANSITION: &str = "cross-dissolve";
 /// Canvas, working space and cache ceilings of a [`TimelineRenderer`].
 #[derive(Clone, Copy, Debug)]
 pub struct RendererConfig {
-    /// The project canvas in pixels. Until project settings carry a resolution the
-    /// caller passes it.
+    /// The sequence canvas in pixels ([`TimelinePlan::canvas`]).
     pub canvas: (u32, u32),
     pub working: WorkingSpace,
     /// `None`: ceilings from the device's and the machine's memory.

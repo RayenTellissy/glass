@@ -27,8 +27,8 @@ use engine::timeline::{
 };
 use media::{DecoderOptions, HwPreference, VideoFrame};
 use project::{
-    ClipSpec, Project, Rational, SequenceId, SpeedKeep, Time, TimeRange, TrackKind, Transform,
-    TransitionSpec,
+    ClipSpec, Project, Rational, Resolution, SequenceFormat, SequenceId, SpeedKeep, Time,
+    TimeRange, TrackKind, Transform, TransitionSpec,
 };
 use render::frame_cache::{FrameCacheConfig, SpillFormat};
 use render::wgpu;
@@ -89,7 +89,14 @@ fn timeline(
         .add_media("other", other.to_string_lossy())
         .expect("media");
     let (p, seq) = p
-        .add_sequence("main", Rational::new(FPS as i32, 1), 48_000)
+        .add_sequence_with(
+            "main",
+            SequenceFormat {
+                resolution: Resolution::new(canvas.0, canvas.1),
+                frame_rate: Rational::new(FPS as i32, 1),
+                ..SequenceFormat::default()
+            },
+        )
         .expect("sequence");
     let (p, v2) = p.add_track(seq, TrackKind::Video, "V2", None).expect("V2");
     let (p, v1) = p.add_track(seq, TrackKind::Video, "V1", None).expect("V1");
@@ -279,6 +286,7 @@ fn three_seconds_at_1080p30_play_on_time_and_match_single_frame_renders() {
     let canvas = (1920, 1080);
     let (project, seq) = timeline(&f.main, &f.other, canvas, &LAYOUT_3S);
     let plan = Arc::new(TimelinePlan::build(&project, seq).expect("plan"));
+    assert_eq!(plan.canvas(), canvas);
     assert_eq!(plan.end(), LAYOUT_3S.length);
     assert_eq!(plan.segments().segments().len(), 4);
     let clock = Clock::system(48_000);

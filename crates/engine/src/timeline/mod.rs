@@ -22,7 +22,7 @@
 //! same things with the same looks: an edit changes only the runs it touches.
 //!
 //! **Render.** [`TimelineRenderer`] builds one graph per frame (see its module docs) at
-//! the canvas the caller gives (project settings will carry it), scaled by the preview
+//! the sequence's canvas ([`TimelinePlan::canvas`], schema v6), scaled by the preview
 //! quality, and caches the 8-bit preview picture.
 //!
 //! **Playback.** [`TimelinePlayback`] replaces the playback skeleton's per-frame round
