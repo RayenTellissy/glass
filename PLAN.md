@@ -300,7 +300,7 @@ Done when: the transition browser has 150+ items, the title browser 60+, the LUT
 - [x] Transition framework: a transition is a shader plus a param schema plus a thumbnail, discovered from `assets/transitions/`
 - [x] Dissolve family: cross, dip to black, dip to white, dip to colour, film, additive, non-additive
 - [x] Wipes: linear in 8 directions, radial, clock, iris shapes, barn door, venetian, checker
-- [ ] Motion: push, slide, whip pan with blur, zoom in and out, spin, swirl, roll
+- [~] Motion: push, slide, whip pan with blur, zoom in and out, spin, swirl, roll
 - [ ] Stylised: glitch, RGB split, pixelate, VHS, light leak, film burn, ink bleed, paper tear, liquid
 - [ ] Shape and mask: circle, heart, star, custom SVG, text-shaped
 - [ ] 3D: cube, flip, page turn, door
